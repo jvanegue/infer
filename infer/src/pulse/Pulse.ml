@@ -1440,7 +1440,7 @@ module PulseTransferFunctions = struct
           let results = SatUnsat.to_list result in
           (PulseReport.report_results tenv proc_desc err_log loc results, path, astate_n)
       | Call (ret, call_exp, actuals, loc, call_flags) ->
-         L.debug Analysis Quiet "exec_instr: Call \n";
+         (* L.debug Analysis Quiet "exec_instr: Call \n"; *)
 
           let astate_n = check_modified_before_destructor actuals call_exp astate astate_n in
           let astates, astate_n =
@@ -1530,31 +1530,31 @@ module PulseTransferFunctions = struct
           , astate_n )
           
       | Metadata (Abstract _) ->
-         L.debug Analysis Quiet "exec_instr: Metadata Abstract \n";
+         (* L.debug Analysis Quiet "exec_instr: Metadata Abstract \n"; *)
          ([ContinueProgram astate], path, astate_n)
 
       | Metadata (CatchEntry _) ->
-         L.debug Analysis Quiet "exec_instr: Metadata CatchEntry \n";
+         (* L.debug Analysis Quiet "exec_instr: Metadata CatchEntry \n"; *)
          ([ContinueProgram astate], path, astate_n)
 
       | Metadata (Nullify _) ->
-         L.debug Analysis Quiet "exec_instr: Metadata Nullify \n";
+         (* L.debug Analysis Quiet "exec_instr: Metadata Nullify \n"; *)
          ([ContinueProgram astate], path, astate_n)
           
        | Metadata (Skip) ->
-         L.debug Analysis Quiet "exec_instr: Skip \n";
+          (* L.debug Analysis Quiet "exec_instr: Skip \n"; *)
          ([ContinueProgram astate], path, astate_n)
 
        | Metadata (TryEntry _) ->
-         L.debug Analysis Quiet "exec_instr: TryEntry \n";
+          (* L.debug Analysis Quiet "exec_instr: TryEntry \n"; *)
          ([ContinueProgram astate], path, astate_n)
 
        | Metadata (TryExit _) ->
-         L.debug Analysis Quiet "exec_instr: Metadata TryExit \n";
+          (* L.debug Analysis Quiet "exec_instr: Metadata TryExit \n"; *)
          ([ContinueProgram astate], path, astate_n)
 
        | Metadata (VariableLifetimeBegins _) ->
-         L.debug Analysis Quiet "exec_instr: Metadata VariableLifetimeBegins 2 \n";
+          (* L.debug Analysis Quiet "exec_instr: Metadata VariableLifetimeBegins 2 \n"; *)
           ([ContinueProgram astate], path, astate_n)
     ) 
 
