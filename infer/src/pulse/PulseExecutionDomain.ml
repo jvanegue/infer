@@ -87,7 +87,8 @@ let widenstate = ref None;;
 let () = AnalysisGlobalState.register_ref ~init:(fun () -> Some (Caml.Hashtbl.create 16)) widenstate;; 
 (* widenstate := Some (Caml.Hashtbl.create 16) *)
 
-let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
+(* let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int = *)
+let back_edge (prev: t list) (next: t list) _ : t list * int =
 
   (* Instead of this, we want to stop reporting at current and next widening iteration 
      if we already have had an alert at a previous widening iteration *)
@@ -106,16 +107,18 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
          | hd::tl -> if (substate hd e) then true else (find_equiv_elem e tl)
      in
    *)
-  
+
+ let print_warning _ _ _ = () in
+  (*
   let print_warning s cnt state =
     (* let _ = state in *)
     L.debug Analysis Quiet "JV: BACK-EDGE FOUND infinite state from %s at iter %i with cnt %i) \n" s num_iters cnt; 
     (* To prints the whole state where the bug was found. This is useful but verbose *)
     L.debug Analysis Quiet "JV: Begin Infinite State numiter %d \n" num_iters;
     pp_ AbductiveDomain.pp Format.std_formatter state; 
-    L.debug Analysis Quiet "JV: End infinite state numiter %d \n" num_iters;
-     
+    L.debug Analysis Quiet "JV: End infinite state numiter %d \n" num_iters; 
   in
+   *)
   
   let rec detect_elem e lst curi : bool * int =
     match lst with
@@ -128,7 +131,7 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
     | [] -> newset
     | hd::tl ->
        let res,idx = detect_elem hd prev 0 in
-       L.debug Analysis Quiet "JV: compute_workset find res = %b idx %u \n" res idx;
+       (* L.debug Analysis Quiet "JV: compute_workset find res = %b idx %u \n" res idx; *)
 
        (* record the idx of the new state in postcond (next) *)
        let recidx = (match idx with | -1 -> nextit | _ -> idx)
@@ -142,12 +145,13 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
   let nextlen = List.length(next) in
   let worklen = List.length(workset) in
 
-  L.debug Analysis Quiet "JV PULSE_EXEC BACKEDGE prevlen %d nextlen %d diff %d worklen %d \n" prevlen nextlen (nextlen - prevlen) worklen;
+  (* L.debug Analysis Quiet "PULSEINF: BACKEDGE prevlen %d nextlen %d diff %d worklen %d \n" prevlen nextlen (nextlen - prevlen) worklen; *)
 
   (* Do-nothing version to avoid debug output *)
-  (* let print_workset _ = true in *)
+  let print_workset _ = true in 
   
   (* Pulse-inf debug output: useful but verbose *)
+(*
   let rec print_workset ws =
     match ws with
     | [] -> true
@@ -158,7 +162,8 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
        L.debug Analysis Quiet "JV: End Workset State numiter %d \n" num_iters;
        print_workset tl
   in
-
+ *)
+  
   let extract_pathcond hd : Formula.t =
    match hd with
     | AbortProgram summary -> AbductiveDomain.Summary.get_path_condition summary
@@ -175,7 +180,7 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
     | [] -> -1
     | (hd,idx)::tl ->
        match !widenstate with
-       | None -> L.debug Analysis Quiet "JV: widenstate htable NONE - should never happen! \n"; -1
+       | None -> L.debug Analysis Quiet "PULSEINF: widenstate htable NONE - should never happen! \n"; -1
        | Some wstate ->
           let cond = extract_pathcond hd in
           (* Print rcond for pulseinf logging *)
@@ -184,14 +189,14 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
           match prevcond with
           | None ->
              Caml.Hashtbl.add wstate rcond (); (* record pathcond of hd *)
-             L.debug Analysis Quiet "JV: Recorded pathcond in htable at idx %d (NO BUG) \n" idx;
+             L.debug Analysis Quiet "PULSEINF: Recorded pathcond in htable at idx %d (NO BUG) \n" idx;
              record_pathcond tl
           | Some _ ->
              match (Formula.set_is_empty rcond) with
              | true ->
-                L.debug Analysis Quiet "JV: Recorded pathcond ALREADY in htable! (EMPTY) idx %d \n" idx; -1
+                L.debug Analysis Quiet "PULSEINF: Recorded pathcond ALREADY in htable! (EMPTY) idx %d \n" idx; -1
              | false -> 
-             L.debug Analysis Quiet "JV: Recorded pathcond ALREADY in htable! (NON-TERM BUG) idx %d \n" idx; idx
+             L.debug Analysis Quiet "PULSEINF: Recorded pathcond ALREADY in htable! (NON-TERM BUG) idx %d \n" idx; idx
            
   in
                 
@@ -212,12 +217,12 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
 
   let create_infinite_state_and_print (state_set: t list) (idx:int) (case:int) = 
 
-    L.debug Analysis Quiet "JV: BUG FOUND - DETECTED REPEATED STATE IDX %d CASE %d numiter %d \n" idx case num_iters;
+    (* L.debug Analysis Quiet "JV: BUG FOUND - DETECTED REPEATED STATE IDX %d CASE %d numiter %d \n" idx case num_iters; *)
        
     let nth = (List.nth state_set idx) in 
     match nth with
     | None       ->
-       L.debug Analysis Quiet "JV: create_infinite_state Nth NONE (idx %d case %d) -- should never happen! \n" idx case;
+       L.debug Analysis Quiet "PULSEINF: create_infinite_state Nth NONE (idx %d case %d) -- should never happen! \n" idx case;
        [],-1
     | Some state ->
        [(create_infinite_state state idx)],idx
@@ -235,12 +240,12 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
   let rec find_duplicate_state (lst: t list) (curi: int) (maxi: int) : int =
     match lst with
     | hd::tl -> let isrep = (is_repeated hd tl) in
-                L.debug Analysis Quiet "JV: Found duplicate state in POST with index = %d \n" curi;
+                (* L.debug Analysis Quiet "JV: Found duplicate state in POST with index = %d \n" curi; *)
                 if (isrep && curi > maxi) then
                   (find_duplicate_state tl (curi+1) curi)
                 else
                   (find_duplicate_state tl (curi+1) maxi)
-    | _ -> L.debug Analysis Quiet "JV: Chosen duplicate in POST has index = %d \n" maxi; maxi
+    | _ -> (* L.debug Analysis Quiet "JV: Chosen duplicate in POST has index = %d \n" maxi; *) maxi 
   in  
   
   (* we have a trivial lasso because prev = next - this should trigger an alert *)

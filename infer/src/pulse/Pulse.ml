@@ -151,8 +151,8 @@ module PulseTransferFunctions = struct
   (* Call on back_edge from widen in AbstractInterpreter.ml *)
   let back_edge (prev:DisjDomain.t list) (next:DisjDomain.t list) (num_iters:int)  : DisjDomain.t list * int =
     
-    let plen,nlen = List.length(prev), List.length(next) in
-    L.debug Analysis Quiet "JV PULSE:BACKEDGE NUMITER %d Number of Prev state = %d Number of Post states = %d \n" num_iters plen nlen;
+    (* let plen,nlen = List.length(prev), List.length(next) in *)
+    (* L.debug Analysis Quiet "JV PULSE:BACKEDGE NUMITER %d Number of Prev state = %d Number of Post states = %d \n" num_iters plen nlen; *)
     
     let rec listpair_split (l:DisjDomain.t list) (o1:ExecDom.t list) (o2:PathContext.t list) =
       match l with
@@ -162,7 +162,7 @@ module PulseTransferFunctions = struct
     let listpair_combine (l1:ExecDom.t list) (l2: PathContext.t list) : (ExecDom.t * PathContext.t) list =
       
       let l1len,l2len = (List.length l1),(List.length l2) in
-      L.debug Analysis Quiet "JV: listpair_combine L1 len = %u L2 len = %u \n" l1len l2len;
+      (* L.debug Analysis Quiet "JV: listpair_combine L1 len = %u L2 len = %u \n" l1len l2len; *)
       if (l1len <> l2len) then [] else
         
         let rec listpair_combine_int (l1:ExecDom.t list) (l2: PathContext.t list) (out: (ExecDom.t * PathContext.t) list)
@@ -170,7 +170,7 @@ module PulseTransferFunctions = struct
           match (l1,l2) with
           | hd::tl, hd2::tl2  -> let p = (hd,hd2) in listpair_combine_int tl tl2 (out @ [p])
           | [],[]             -> out
-          | _                 -> L.debug Analysis Quiet "JV PULSE:BACKEDGE MISMATCH in list size to recombine \n"; out
+          | _                 -> L.debug Analysis Quiet "JV PULSE:BACKEDGE MISMATCH in list size to recombine. Should never happen! \n"; out
         in listpair_combine_int l1 l2 []
     in
     let plist,rplist = listpair_split prev [] [] in
@@ -1334,7 +1334,7 @@ module PulseTransferFunctions = struct
     | ContinueProgram astate -> (
       match instr with
       | Load {id= lhs_id; e= rhs_exp; loc; typ} ->
-         L.debug Analysis Quiet "exec_instr: Load \n";
+         (* L.debug Analysis Quiet "exec_instr: Load \n"; *)
 
           (* [lhs_id := *rhs_exp] *)
           let model_opt = PulseLoadInstrModels.dispatch ~load:rhs_exp in
@@ -1390,7 +1390,7 @@ module PulseTransferFunctions = struct
           in
           (astates, path, non_disj)
       | Store {e1= lhs_exp; e2= rhs_exp; loc; typ} ->
-         L.debug Analysis Quiet "exec_instr: Store \n";
+         (* L.debug Analysis Quiet "exec_instr: Store \n"; *)
 
           (* [*lhs_exp := rhs_exp] *)
           let event =
@@ -1482,7 +1482,7 @@ module PulseTransferFunctions = struct
           in
           (astates, path, astate_n)
       | Prune (condition, loc, is_then_branch, if_kind) ->
-         L.debug Analysis Quiet "exec_instr: Prune \n";
+         (* L.debug Analysis Quiet "exec_instr: Prune \n"; *)
          
           let prune_result =
             let=* astate = check_config_usage analysis_data loc condition astate in
@@ -1508,7 +1508,7 @@ module PulseTransferFunctions = struct
           in
           (PulseReport.report_exec_results tenv proc_desc err_log loc results, path, astate_n)
       | Metadata EndBranches ->
-         L.debug Analysis Quiet "exec_instr: Metadata EndBranches \n";
+         (* L.debug Analysis Quiet "exec_instr: Metadata EndBranches \n"; *)
 
           (* We assume that terminated conditions are well-parenthesised, hence an [EndBranches]
              instruction terminates the most recently seen terminated conditional. The empty case
@@ -1516,12 +1516,12 @@ module PulseTransferFunctions = struct
           let path = {path with conditions= List.tl path.conditions |> Option.value ~default:[]} in
           ([ContinueProgram astate], path, astate_n)
       | Metadata (ExitScope (vars, location)) ->
-         L.debug Analysis Quiet "exec_instr: Metadata ExitScope \n";
+         (* L.debug Analysis Quiet "exec_instr: Metadata ExitScope \n"; *)
           exit_scope vars location path astate astate_n analysis_data
       | Metadata (VariableLifetimeBegins {pvar; typ; loc; is_cpp_structured_binding})
            when not (Pvar.is_global pvar) ->
 
-         L.debug Analysis Quiet "exec_instr: Metadata VariableLifetimeBegins \n";
+         (* L.debug Analysis Quiet "exec_instr: Metadata VariableLifetimeBegins \n"; *)
 
           let set_uninitialized = (not is_cpp_structured_binding) && not (Typ.is_folly_coro typ) in
           ( [ PulseOperations.realloc_pvar tenv path ~set_uninitialized pvar typ loc astate
