@@ -2,9 +2,10 @@
 
 # This is for Julien's setup - you can do like me and store your build tree somewhere with a lot of space.
 # Change this to point to your infer build tree
+# You can disable this if you build infer from your real home folder
 HOME=/huge/jvanegue/PUBLIC_GITHUB/infer
 
-rm -fr infer-out/ infinite.o *~ infer-run.log
+rm -fr infer-out/ infinite.o infer-run.log
 
 # Individual test suite as expected by Infer
 # In the process of moving all tests to their own files, commented for now.
