@@ -103,18 +103,18 @@ let pp f {resolve; reverse} =
 
 let leq ~lhs ~rhs = IdAccessPathMapDomain.leq ~lhs:lhs.resolve ~rhs:rhs.resolve
 
-let join bindings1 bindings2 =
+let join node bindings1 bindings2 =
   if phys_equal bindings1 bindings2 then bindings1
   else
     let {resolve= resolve1; reverse= reverse1} = bindings1 in
     let {resolve= resolve2; reverse= reverse2} = bindings2 in
-    {resolve= IdAccessPathMapDomain.join resolve1 resolve2; reverse= Reverse.join reverse1 reverse2}
+    {resolve= IdAccessPathMapDomain.join node resolve1 resolve2; reverse= Reverse.join node reverse1 reverse2}
 
 
-let widen ~prev ~next ~num_iters =
+let widen ~node ~prev ~next ~num_iters =
   if phys_equal prev next then prev
   else
     let {resolve= resolve1; reverse= reverse1} = prev in
     let {resolve= resolve2; reverse= reverse2} = next in
-    { resolve= IdAccessPathMapDomain.widen ~prev:resolve1 ~next:resolve2 ~num_iters
-    ; reverse= Reverse.widen ~prev:reverse1 ~next:reverse2 ~num_iters }
+    { resolve= IdAccessPathMapDomain.widen ~node:node ~prev:resolve1 ~next:resolve2 ~num_iters
+    ; reverse= Reverse.widen ~node:node ~prev:reverse1 ~next:reverse2 ~num_iters }

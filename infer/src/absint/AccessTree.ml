@@ -7,7 +7,9 @@
 
 open! IStd
 module F = Format
-
+module CFG = ProcCfg.Normal
+module CFGNode = CFG.Node
+            
 module type S = sig
   module TraceDomain : AbstractDomain.WithBottom
 
@@ -15,6 +17,8 @@ module type S = sig
 
   module BaseMap = AccessPath.BaseMap
 
+  module Node = 
+                 
   type node = TraceDomain.t * tree
 
   and tree = Subtree of node AccessMap.t | Star
@@ -39,7 +43,7 @@ module type S = sig
 
   val add_trace : AccessPath.Abs.t -> TraceDomain.t -> t -> t
 
-  val node_join : node -> node -> node
+  val node_join : CFGNode.t -> node -> node -> node
 
   val fold : ('a -> AccessPath.Abs.t -> node -> 'a) -> t -> 'a -> 'a
 
@@ -122,7 +126,6 @@ module Make (TraceDomain : AbstractDomain.WithBottom) (Config : Config) = struct
     | Subtree node_map ->
         AccessMap.fold (fun _ node acc -> max_depth node acc) node_map 0
 
-
   and max_depth node max_depth_acc = Int.max (node_depth node) max_depth_acc
 
   let depth access_tree = BaseMap.fold (fun _ node acc -> max_depth node acc) access_tree 0
@@ -130,17 +133,16 @@ module Make (TraceDomain : AbstractDomain.WithBottom) (Config : Config) = struct
   let make_access_node base_trace access trace =
     make_node base_trace (AccessMap.singleton access (make_normal_leaf trace))
 
-
   (** find all of the traces in the subtree and join them with [orig_trace] *)
-  let rec join_all_traces ?(join_traces = TraceDomain.join) orig_trace = function
+  let rec join_all_traces (n:CFGNode.t) ?(join_traces = TraceDomain.join) orig_trace = function
     | Subtree subtree ->
-        let join_all_traces_ orig_trace tree =
-          let node_join_traces _ (trace, node) trace_acc =
-            join_all_traces (join_traces trace_acc trace) node
+        let join_all_traces_ n orig_trace tree =
+          let node_join_traces n (trace, node) trace_acc =
+            join_all_traces (join_traces n trace_acc trace) node
           in
-          AccessMap.fold node_join_traces tree orig_trace
+          AccessMap.fold node_join_traces n tree orig_trace
         in
-        join_all_traces_ orig_trace subtree
+        join_all_traces_ n orig_trace subtree
     | Star ->
         orig_trace
 
@@ -161,7 +163,8 @@ module Make (TraceDomain : AbstractDomain.WithBottom) (Config : Config) = struct
       accesses_get_node accesses base_trace base_tree
     in
     let base, accesses = AccessPath.Abs.extract ap in
-    match get_node_ base accesses tree with
+    let node = get_node_ base accesses tree in
+    match node with
     | trace, subtree ->
         if AccessPath.Abs.is_exact ap then Some (trace, subtree)
         else
@@ -206,7 +209,7 @@ module Make (TraceDomain : AbstractDomain.WithBottom) (Config : Config) = struct
         lhs
 
 
-  let node_join_ f_node_merge f_trace_merge ((trace1, tree1) as node1) ((trace2, tree2) as node2) =
+  let node_join_ (n:CFGNode.t) f_node_merge f_trace_merge ((trace1, tree1) as node1) ((trace2, tree2) as node2) =
     if phys_equal node1 node2 then node1
     else
       let trace' = f_trace_merge trace1 trace2 in
@@ -232,7 +235,7 @@ module Make (TraceDomain : AbstractDomain.WithBottom) (Config : Config) = struct
           if phys_equal trace'' trace2 then node2 else (trace'', Star)
 
 
-  let rec node_join node1 node2 = node_join_ node_merge TraceDomain.join node1 node2
+  let rec node_join (n:CFGNode.t) node1 node2 = node_join_ n node_merge TraceDomain.join n node1 node2
 
   and node_merge node1_opt node2_opt =
     match (node1_opt, node2_opt) with
@@ -282,7 +285,7 @@ module Make (TraceDomain : AbstractDomain.WithBottom) (Config : Config) = struct
         | _ ->
             (* adding x.f* or x[_]*, join with traces of subtree and replace it with * *)
             let node_trace, node_tree = node_to_add in
-            let trace' = join_all_traces (TraceDomain.join trace node_trace) tree in
+            let trace' = join_all_traces (TraceDomain.join node trace node_trace) tree in
             make_starred_leaf (join_all_traces trace' node_tree) )
       | _, (_, Star) ->
           node_join node_to_add node
@@ -335,9 +338,9 @@ module Make (TraceDomain : AbstractDomain.WithBottom) (Config : Config) = struct
 
   let add_trace ap trace tree = add_node ap (make_normal_leaf trace) tree
 
-  let join tree1 tree2 =
+  let join node tree1 tree2 =
     if phys_equal tree1 tree2 then tree1
-    else BaseMap.merge (fun _ n1 n2 -> node_merge n1 n2) tree1 tree2
+    else BaseMap.merge (fun _ n1 n2 -> node_merge node n1 n2) tree1 tree2
 
 
   let rec access_map_fold_ f base accesses m acc =
@@ -384,24 +387,24 @@ module Make (TraceDomain : AbstractDomain.WithBottom) (Config : Config) = struct
 
   let max_iter = 10
 
-  let widen ~prev ~next ~num_iters =
+  let widen ~node ~prev ~next ~num_iters =
     if phys_equal prev next || num_iters >= max_iter then prev
-    else if Int.( <= ) num_iters joins_before_widen then join prev next
+    else if Int.( <= ) num_iters joins_before_widen then join node prev next
     else
-      let trace_widen prev next = TraceDomain.widen ~prev ~next ~num_iters in
+      let trace_widen node prev next = TraceDomain.widen ~node ~prev ~next ~num_iters in
       (* turn [node] into a starred node by vacuuming up its sub-traces *)
-      let node_add_stars ((trace, tree) as node) =
+      let node_add_stars ((trace, tree) as n) =
         match tree with
         | Subtree _ ->
-            let trace' = join_all_traces ~join_traces:trace_widen trace tree in
+            let trace' = join_all_traces node ~join_traces:trace_widen trace tree in
             make_starred_leaf trace'
         | Star ->
-            node
+            n
       in
-      let rec node_widen prev_node_opt next_node_opt =
+      let rec node_widen node prev_node_opt next_node_opt =
         match (prev_node_opt, next_node_opt) with
         | Some prev_node, Some next_node ->
-            let widened_node = node_join_ node_widen trace_widen prev_node next_node in
+            let widened_node = node_join_ node node_widen trace_widen prev_node next_node in
             if phys_equal widened_node prev_node then prev_node_opt
             else if phys_equal widened_node next_node then next_node_opt
             else Some widened_node
@@ -411,7 +414,7 @@ module Make (TraceDomain : AbstractDomain.WithBottom) (Config : Config) = struct
         | Some _, None | None, None ->
             prev_node_opt
       in
-      BaseMap.merge (fun _ prev_node next_node -> node_widen prev_node next_node) prev next
+      BaseMap.merge (fun _ prev_node next_node -> node_widen node prev_node next_node) prev next
 
 
   let rec pp_node fmt (trace, subtree) =

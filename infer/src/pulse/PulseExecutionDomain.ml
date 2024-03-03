@@ -15,8 +15,7 @@ module LatentIssue = PulseLatentIssue
 module Formula = PulseFormula
 module L = Logging
          
-(* The type variable is needed to distinguish summaries from plain states.
-
+(* The type variable is needed to distinguish summaries from plain states
    Some of the variants have summary-typed states instead of plain states, to ensure we have
    normalized them and don't need to normalize them again. *)
 type 'abductive_domain_t base_t =
@@ -82,12 +81,11 @@ let pp fmt exec_state = pp_ AbductiveDomain.pp fmt exec_state
 (* Pulse infinite *)
 (* We record the global widening state *)
 (* Note: this will record the widen state once per analyzed object, which may not be enough *)
-(* TODO: Find out how to have one widen state key per loop *)                      
+(* TODO: Find out how to have one widen state per loop to avoid false positives *)                      
 let widenstate = ref None;; 
 let () = AnalysisGlobalState.register_ref ~init:(fun () -> Some (Caml.Hashtbl.create 16)) widenstate;; 
 (* widenstate := Some (Caml.Hashtbl.create 16) *)
 
-(* let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int = *)
 let back_edge (prev: t list) (next: t list) _ : t list * int =
 
   (* Instead of this, we want to stop reporting at current and next widening iteration 
@@ -194,7 +192,7 @@ let back_edge (prev: t list) (next: t list) _ : t list * int =
           | Some _ ->
              match (Formula.set_is_empty rcond) with
              | true ->
-                L.debug Analysis Quiet "PULSEINF: Recorded pathcond ALREADY in htable! (EMPTY) idx %d \n" idx; -1
+                L.debug Analysis Quiet "PULSEINF: Recorded pathcond ALREADY in htable! (EMPTY) idx %d \n" idx; -2
              | false -> 
              L.debug Analysis Quiet "PULSEINF: Recorded pathcond ALREADY in htable! (NON-TERM BUG) idx %d \n" idx; idx
            
@@ -246,7 +244,7 @@ let back_edge (prev: t list) (next: t list) _ : t list * int =
                 else
                   (find_duplicate_state tl (curi+1) maxi)
     | _ -> (* L.debug Analysis Quiet "JV: Chosen duplicate in POST has index = %d \n" maxi; *) maxi 
-  in  
+  in
   
   (* we have a trivial lasso because prev = next - this should trigger an alert *)
   if same && (phys_equal isempty false) then
@@ -257,9 +255,13 @@ let back_edge (prev: t list) (next: t list) _ : t list * int =
   (* We have a new state in the post whose condition is equivalent to an existing state - trigger an alert *)
   else if repeated_wsidx >= 0 then
     create_infinite_state_and_print next repeated_wsidx 3
-  (* No recurring state detected, return empty *)
+ (* Else we have a repeated empty precond with a non-empty triple 
+    Do not trigger an alert on this as both terminating and non-terminating example haves empty pathcond right now 
+    else if (phys_equal repeated_wsidx (-2)) && (phys_equal isempty false) then
+    create_infinite_state_and_print next (nextlen - 1) 4    
+  *)  
+  (* No recurring state detected, return empty (no alert) *)
   else [],-1
-
                       
 type summary = AbductiveDomain.Summary.t base_t [@@deriving compare, equal, yojson_of]
              

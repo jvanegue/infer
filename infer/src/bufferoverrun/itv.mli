@@ -11,7 +11,9 @@ module F = Format
 module Bound = Bounds.Bound
 module SymbolPath = Symb.SymbolPath
 module SymbolSet = Symb.SymbolSet
-
+module CFG = ProcCfg.Normal
+module Node = CFG.Node
+            
 module ItvRange : sig
   type t
 
@@ -67,13 +69,13 @@ module ItvPure : sig
 
   val make_non_negative : t -> t
 
-  val join : t -> t -> t
+  val join : Node.t -> t -> t -> t
 
   val le_sem : t -> t -> Boolean.t
 
   val lt_sem : t -> t -> Boolean.t
 
-  val widen : prev:t -> next:t -> num_iters:int -> t
+  val widen : node:Node.t -> prev:t -> next:t -> num_iters:int -> t
 
   val xcompare :
        lhs:t

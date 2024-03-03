@@ -5,8 +5,10 @@
  * LICENSE file in the root directory of this source tree.
  *)
 
-open! IStd
-
+open! IStd  
+module CFG = ProcCfg.Normal
+module Node = CFG.Node
+  
 (** {1 Abstract domains and domain combinators} *)
 
 module Types : sig
@@ -49,13 +51,13 @@ end
 
 module type S = sig
   include Comparable
-
-  val join : t -> t -> t
-  (* val join : Node.t -> t -> t -> t *)
-
-  val widen : prev:t -> next:t -> num_iters:int -> t
-  (* val widen : Node.t -> prev:t -> next:t -> num_iters:int -> t *)
+        
+  val join : Node.t -> t -> t -> t
+  val widen : node:Node.t -> prev:t -> next:t -> num_iters:int -> t 
     
+  (* val join : TransferFunctions.CFG.Node.t -> t -> t -> t 
+   val widen : TransferFunctions.CFG.Node.t -> prev:t -> next:t -> num_iters:int -> t *)
+  
 end
 
 include (* ocaml ignores the warning suppression at toplevel, hence the [include struct ... end] trick *)
@@ -189,12 +191,13 @@ module StackedUtils : sig
     -> unit
 
   val combine :
-       dir:[`Increasing | `Decreasing]
+    node:Node.t
+    -> dir:[`Increasing | `Decreasing]
     -> ('b, 'v, 'a) below_above
     -> ('b, 'v, 'a) below_above
-    -> f_below:('b -> 'b -> 'b)
-    -> f:('v -> 'v -> 'v)
-    -> f_above:('a -> 'a -> 'a)
+    -> f_below:(Node.t -> 'b -> 'b -> 'b)
+    -> f:(Node.t -> 'v -> 'v -> 'v)
+    -> f_above:(Node.t -> 'a -> 'a -> 'a)
     -> ('b, 'v, 'a) below_above
 
   val map :

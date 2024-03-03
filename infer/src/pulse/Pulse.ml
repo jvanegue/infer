@@ -159,12 +159,10 @@ module PulseTransferFunctions = struct
       | [] -> (o1,o2)
       | (ed,pc)::tail -> listpair_split tail (ed::o1) (pc::o2)
     in
-    let listpair_combine (l1:ExecDom.t list) (l2: PathContext.t list) : (ExecDom.t * PathContext.t) list =
-      
+    let listpair_combine (l1:ExecDom.t list) (l2: PathContext.t list) : (ExecDom.t * PathContext.t) list  =
       let l1len,l2len = (List.length l1),(List.length l2) in
       (* L.debug Analysis Quiet "JV: listpair_combine L1 len = %u L2 len = %u \n" l1len l2len; *)
       if (l1len <> l2len) then [] else
-        
         let rec listpair_combine_int (l1:ExecDom.t list) (l2: PathContext.t list) (out: (ExecDom.t * PathContext.t) list)
                 : (ExecDom.t * PathContext.t) list =
           match (l1,l2) with
@@ -176,10 +174,8 @@ module PulseTransferFunctions = struct
     let plist,rplist = listpair_split prev [] [] in
     let nlist,rnlist = listpair_split next [] [] in
     let dbe,cnt      = (ExecDom.back_edge plist nlist num_iters) in
-    
     let _,_       = (PathContext.back_edge rplist rnlist num_iters) in    
     let (pathctx: PathContext.t option) = (List.nth rnlist cnt) in
-
     let used,pts =
       match (pathctx) with
       | Some p -> 1, p
@@ -192,8 +188,7 @@ module PulseTransferFunctions = struct
     let res = if (used > 0 && cnt >= 0) then
                 listpair_combine (plist @ dbe) (rplist @ [pts])
               else listpair_combine plist rplist
-    in
-    (res,-1)
+    in (res,-1)
   (* END OF BACK-EDGE CODE *)
                      
   let get_pvar_formals pname =

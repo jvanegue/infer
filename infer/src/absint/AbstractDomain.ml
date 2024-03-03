@@ -6,7 +6,9 @@
  *)
 
 open! IStd
-module F = Format
+module F = Format          
+module CFG = ProcCfg.Normal
+module Node = CFG.Node
 
 module Types = struct
   type 'astate bottom_lifted = Bottom | NonBottom of 'astate
@@ -40,16 +42,15 @@ end
 
 module type S = sig
   include PrettyPrintable.PrintableType
-
+            
   val leq : lhs:t -> rhs:t -> bool
 
-  (*
   val join : Node.t -> t -> t -> t
-  val widen : Node.t -> prev:t -> next:t -> num_iters:int -> t
-   *)
+    
+  val widen : node:Node.t -> prev:t -> next:t -> num_iters:int -> t 
 
-  val join : t -> t -> t
-  val widen : prev:t -> next:t -> num_iters:int -> t
+  (* val join : t -> t -> t
+  val widen : prev:t -> next:t -> num_iters:int -> t *)   
     
 end
 
@@ -62,9 +63,9 @@ module Empty : S with type t = empty = struct
 
   let pp _fmt (x : t) = match x with _ -> .
 
-  let join (x : t) _ = match x with _ -> .
+  let join _ (x : t) _ = match x with _ -> .
 
-  let widen ~(prev : t) ~next:_ = match prev with _ -> .
+  let widen ~(node:_) ~(prev:t) ~(next:_) ~(num_iters:_) = match prev with _ -> .
 end
 
 module Unit : S with type t = unit = struct
@@ -72,9 +73,9 @@ module Unit : S with type t = unit = struct
 
   let leq ~lhs:() ~rhs:() = true
 
-  let join () () = ()
+  let join (x:Node.t) () () = match x with _ -> ()
 
-  let widen ~prev:() ~next:() ~num_iters:_ = ()
+  let widen ~(node:Node.t) ~(prev:t) ~(next:t) ~(num_iters:int) = () 
 
   let pp f () = F.pp_print_string f "()"
 end
@@ -143,7 +144,7 @@ module BottomLifted (Domain : S) = struct
 
   let leq = BottomLiftedUtils.leq ~leq:Domain.leq
 
-  let join astate1 astate2 =
+  let join node astate1 astate2 =
     if phys_equal astate1 astate2 then astate1
     else
       match (astate1, astate2) with
@@ -152,10 +153,10 @@ module BottomLifted (Domain : S) = struct
       | _, Bottom ->
           astate1
       | NonBottom a1, NonBottom a2 ->
-          PhysEqual.optim2 ~res:(NonBottom (Domain.join a1 a2)) astate1 astate2
+          PhysEqual.optim2 ~res:(NonBottom (Domain.join node a1 a2)) astate1 astate2
 
 
-  let widen ~prev:prev0 ~next:next0 ~num_iters =
+  let widen ~node ~prev:prev0 ~next:next0 ~num_iters =
     if phys_equal prev0 next0 then prev0
     else
       match (prev0, next0) with
@@ -164,8 +165,7 @@ module BottomLifted (Domain : S) = struct
       | _, Bottom ->
           prev0
       | NonBottom prev, NonBottom next ->
-          PhysEqual.optim2 ~res:(NonBottom (Domain.widen ~prev ~next ~num_iters)) prev0 next0
-
+          PhysEqual.optim2 ~res:(NonBottom (Domain.widen ~node ~prev ~next ~num_iters)) prev0 next0
 
   let map = BottomLiftedUtils.map
 
@@ -203,24 +203,24 @@ module TopLifted (Domain : S) = struct
 
   let leq = TopLiftedUtils.leq ~leq:Domain.leq
 
-  let join astate1 astate2 =
+  let join node astate1 astate2 =
     if phys_equal astate1 astate2 then astate1
     else
       match (astate1, astate2) with
       | Top, _ | _, Top ->
           Top
       | NonTop a1, NonTop a2 ->
-          PhysEqual.optim2 ~res:(NonTop (Domain.join a1 a2)) astate1 astate2
+          PhysEqual.optim2 ~res:(NonTop (Domain.join node a1 a2)) astate1 astate2
 
 
-  let widen ~prev:prev0 ~next:next0 ~num_iters =
+  let widen ~node ~prev:prev0 ~next:next0 ~num_iters =
     if phys_equal prev0 next0 then prev0
     else
       match (prev0, next0) with
       | Top, _ | _, Top ->
           Top
       | NonTop prev, NonTop next ->
-          PhysEqual.optim2 ~res:(NonTop (Domain.widen ~prev ~next ~num_iters)) prev0 next0
+          PhysEqual.optim2 ~res:(NonTop (Domain.widen ~node ~prev ~next ~num_iters)) prev0 next0
 
 
   let map = TopLiftedUtils.map
@@ -259,7 +259,7 @@ module BottomTopLifted (Domain : S) = struct
           Domain.leq ~lhs ~rhs
 
 
-  let join astate1 astate2 =
+  let join node astate1 astate2 =
     if phys_equal astate1 astate2 then astate1
     else
       match (astate1, astate2) with
@@ -268,10 +268,10 @@ module BottomTopLifted (Domain : S) = struct
       | Bottom, astate | astate, Bottom ->
           astate
       | V a1, V a2 ->
-          PhysEqual.optim2 ~res:(V (Domain.join a1 a2)) astate1 astate2
+          PhysEqual.optim2 ~res:(V (Domain.join node a1 a2)) astate1 astate2
 
 
-  let widen ~prev:prev0 ~next:next0 ~num_iters =
+  let widen ~node ~prev:prev0 ~next:next0 ~num_iters =
     if phys_equal prev0 next0 then prev0
     else
       match (prev0, next0) with
@@ -280,7 +280,7 @@ module BottomTopLifted (Domain : S) = struct
       | Bottom, astate | astate, Bottom ->
           astate
       | V prev, V next ->
-          PhysEqual.optim2 ~res:(V (Domain.widen ~prev ~next ~num_iters)) prev0 next0
+          PhysEqual.optim2 ~res:(V (Domain.widen ~node ~prev ~next ~num_iters)) prev0 next0
 
 
   let pp f = function
@@ -321,21 +321,21 @@ end
 module Pair (Domain1 : S) (Domain2 : S) = struct
   include PairBase (Domain1) (Domain2)
 
-  let join astate1 astate2 =
+  let join node astate1 astate2 =
     if phys_equal astate1 astate2 then astate1
     else
       PhysEqual.optim2
-        ~res:(Domain1.join (fst astate1) (fst astate2), Domain2.join (snd astate1) (snd astate2))
+        ~res:(Domain1.join node (fst astate1) (fst astate2), Domain2.join node (snd astate1) (snd astate2))
         astate1 astate2
 
 
-  let widen ~prev ~next ~num_iters =
+  let widen ~node ~prev ~next ~num_iters =
     if phys_equal prev next then prev
     else
       PhysEqual.optim2
         ~res:
-          ( Domain1.widen ~prev:(fst prev) ~next:(fst next) ~num_iters
-          , Domain2.widen ~prev:(snd prev) ~next:(snd next) ~num_iters )
+          ( Domain1.widen ~node ~prev:(fst prev) ~next:(fst next) ~num_iters
+          , Domain2.widen ~node ~prev:(snd prev) ~next:(snd next) ~num_iters )
         prev next
 end
 
@@ -445,14 +445,14 @@ module StackedUtils = struct
         leq ~lhs ~rhs
 
 
-  let combine ~dir x1 x2 ~f_below ~f ~f_above =
+  let combine ~node ~dir x1 x2 ~f_below ~f ~f_above =
     match (x1, x2) with
     | Below b1, Below b2 ->
-        Below (f_below b1 b2)
+        Below (f_below node b1 b2)
     | Val v1, Val v2 ->
-        Val (f v1 v2)
+        Val (f node v1 v2)
     | Above a1, Above a2 ->
-        Above (f_above a1 a2)
+        Above (f_above node a1 a2)
     | (Below _ as below), x | x, (Below _ as below) -> (
       match dir with `Increasing -> x | `Decreasing -> below )
     | x, (Above _ as above) | (Above _ as above), x -> (
@@ -480,12 +480,11 @@ module Stacked (Below : S) (Val : S) (Above : S) = struct
   let join =
     StackedUtils.combine ~dir:`Increasing ~f_below:Below.join ~f:Val.join ~f_above:Above.join
 
-
-  let widen ~prev ~next ~num_iters =
-    StackedUtils.combine ~dir:`Increasing prev next
-      ~f_below:(fun prev next -> Below.widen ~prev ~next ~num_iters)
-      ~f:(fun prev next -> Val.widen ~prev ~next ~num_iters)
-      ~f_above:(fun prev next -> Above.widen ~prev ~next ~num_iters)
+  let widen ~node ~prev ~next ~num_iters =
+    StackedUtils.combine ~node ~dir:`Increasing prev next
+      ~f_below:(fun (node:Node.t) prev next -> Below.widen ~node ~prev ~next ~num_iters)
+      ~f:(fun (node:Node.t) prev next -> Val.widen ~node ~prev ~next ~num_iters)
+      ~f_above:(fun (node:Node.t) prev next -> Above.widen ~node ~prev ~next ~num_iters)
 
 
   let pp = StackedUtils.pp ~pp_below:Below.pp ~pp:Val.pp ~pp_above:Above.pp
@@ -509,16 +508,14 @@ module MinReprSet (Element : PrettyPrintable.PrintableOrderedType) = struct
     | Some lhs, Some rhs ->
         Int.(Element.compare rhs lhs <= 0)
 
-
-  let join x1 x2 =
+  let join _ x1 x2 =
     match (x1, x2) with
     | None, x | x, None ->
         x
     | Some e1, Some e2 ->
         if Int.(Element.compare e1 e2 <= 0) then x1 else x2
 
-
-  let widen ~prev ~next ~num_iters:_ = join prev next
+  let widen ~node ~prev ~next ~num_iters:_ = join node prev next
 
   let pp f = function None -> () | Some x -> Element.pp f x
 
@@ -557,9 +554,9 @@ module FiniteSetOfPPSet (S : PrettyPrintable.PPSet) = struct
 
   let leq ~lhs ~rhs = if phys_equal lhs rhs then true else subset lhs rhs
 
-  let join astate1 astate2 = if phys_equal astate1 astate2 then astate1 else union astate1 astate2
+  let join _ astate1 astate2 = if phys_equal astate1 astate2 then astate1 else union astate1 astate2
 
-  let widen ~prev ~next ~num_iters:_ = join prev next
+  let widen ~node ~prev ~next ~num_iters:_ = join node prev next
 end
 
 module FiniteSet (Element : PrettyPrintable.PrintableOrderedType) =
@@ -580,9 +577,9 @@ module InvertedSet (Element : PrettyPrintable.PrintableOrderedType) = struct
 
   let leq ~lhs ~rhs = if phys_equal lhs rhs then true else subset rhs lhs
 
-  let join astate1 astate2 = if phys_equal astate1 astate2 then astate1 else inter astate1 astate2
+  let join _ astate1 astate2 = if phys_equal astate1 astate2 then astate1 else inter astate1 astate2
 
-  let widen ~prev ~next ~num_iters:_ = join prev next
+  let widen ~node ~prev ~next ~num_iters:_ = join node prev next
 end
 
 module type MapS = sig
@@ -612,7 +609,7 @@ module MapOfPPMap (M : PrettyPrintable.PPMap) (ValueDomain : S) = struct
         lhs
 
 
-  let increasing_union ~f astate1 astate2 =
+  let increasing_union ~f _ astate1 astate2 =
     if phys_equal astate1 astate2 then astate1
     else
       let equals1 = ref true in
@@ -638,11 +635,10 @@ module MapOfPPMap (M : PrettyPrintable.PPMap) (ValueDomain : S) = struct
       in
       if !equals1 then astate1 else if !equals2 then astate2 else res
 
+  let join node astate1 astate2 = increasing_union ~f:ValueDomain.join node astate1 astate2
 
-  let join astate1 astate2 = increasing_union ~f:ValueDomain.join astate1 astate2
-
-  let widen ~prev ~next ~num_iters =
-    increasing_union prev next ~f:(fun prev next -> ValueDomain.widen ~prev ~next ~num_iters)
+  let widen ~node ~prev ~next ~num_iters =
+    increasing_union prev next ~f:(fun node prev next -> ValueDomain.widen ~node ~prev ~next ~num_iters)
 
 
   let pp fmt astate = M.pp ~pp_value:ValueDomain.pp fmt astate
@@ -702,8 +698,8 @@ module InvertedMap (Key : PrettyPrintable.PrintableOrderedType) (ValueDomain : S
 
   let join = inter ~f:ValueDomain.join
 
-  let widen ~prev ~next ~num_iters =
-    inter prev next ~f:(fun prev next -> ValueDomain.widen ~prev ~next ~num_iters)
+  let widen ~node ~prev ~next ~num_iters =
+    inter prev next ~f:(fun node prev next -> ValueDomain.widen ~node ~prev ~next ~num_iters)
 end
 
 module SafeInvertedMap (Key : PrettyPrintable.PrintableOrderedType) (ValueDomain : WithTop) = struct
@@ -855,8 +851,8 @@ module SafeInvertedMap (Key : PrettyPrintable.PrintableOrderedType) (ValueDomain
 
   let join = inter ~f:ValueDomain.join
 
-  let widen ~prev ~next ~num_iters =
-    inter prev next ~f:(fun prev next -> ValueDomain.widen ~prev ~next ~num_iters)
+  let widen ~node ~prev ~next ~num_iters =
+    inter prev next ~f:(fun node prev next -> ValueDomain.widen ~node ~prev ~next ~num_iters)
 
 
   let top = M.top
@@ -934,7 +930,7 @@ module BooleanAnd = struct
 
   let join = ( && )
 
-  let widen ~prev ~next ~num_iters:_ = join prev next
+  let widen ~node ~prev ~next ~num_iters:_ = join node prev next
 
   let pp fmt astate = F.pp_print_bool fmt astate
 end
@@ -950,7 +946,7 @@ module BooleanOr = struct
 
   let join = ( || )
 
-  let widen ~prev ~next ~num_iters:_ = join prev next
+  let widen ~node ~prev ~next ~num_iters:_ = join node prev next
 
   let pp fmt astate = F.pp_print_bool fmt astate
 end
@@ -975,9 +971,9 @@ module CountDomain (MaxCount : MaxCount) = struct
 
   let leq ~lhs ~rhs = lhs <= rhs
 
-  let join astate1 astate2 = Int.min top (Int.max astate1 astate2)
+  let join _ astate1 astate2 = Int.min top (Int.max astate1 astate2)
 
-  let widen ~prev ~next ~num_iters:_ = join prev next
+  let widen ~node ~prev ~next ~num_iters:_ = join node prev next
 
   let add astate1 astate2 = Int.min top (astate1 + astate2)
 
@@ -1004,9 +1000,9 @@ module DownwardIntDomain (MaxCount : MaxCount) = struct
 
   let leq ~lhs ~rhs = lhs >= rhs
 
-  let join astate1 astate2 = Int.min astate1 astate2
+  let join _ astate1 astate2 = Int.min astate1 astate2
 
-  let widen ~prev ~next ~num_iters:_ = join prev next
+  let widen ~node ~prev ~next ~num_iters:_ = join node prev next
 
   let increment astate = if is_bottom astate then astate else astate + 1
 

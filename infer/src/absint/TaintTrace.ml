@@ -165,21 +165,21 @@ module Make (Spec : Spec) = struct
         && Sanitizers.leq ~lhs:lhs.sanitizers ~rhs:rhs.sanitizers
 
 
-    let join astate1 astate2 =
+    let join node astate1 astate2 =
       if phys_equal astate1 astate2 then astate1
       else
-        let known = Known.join astate1.known astate2.known in
-        let footprint = Footprint.join astate1.footprint astate2.footprint in
-        let sanitizers = Sanitizers.join astate1.sanitizers astate2.sanitizers in
+        let known = Known.join node astate1.known astate2.known in
+        let footprint = Footprint.join node astate1.footprint astate2.footprint in
+        let sanitizers = Sanitizers.join node astate1.sanitizers astate2.sanitizers in
         {known; footprint; sanitizers}
 
 
-    let widen ~prev ~next ~num_iters =
+    let widen ~node ~prev ~next ~num_iters =
       if phys_equal prev next then prev
       else
-        let known = Known.widen ~prev:prev.known ~next:next.known ~num_iters in
-        let footprint = Footprint.widen ~prev:prev.footprint ~next:next.footprint ~num_iters in
-        let sanitizers = Sanitizers.widen ~prev:prev.sanitizers ~next:next.sanitizers ~num_iters in
+        let known = Known.widen ~node:node ~prev:prev.known ~next:next.known ~num_iters in
+        let footprint = Footprint.widen ~node:node ~prev:prev.footprint ~next:next.footprint ~num_iters in
+        let sanitizers = Sanitizers.widen ~node:node ~prev:prev.sanitizers ~next:next.sanitizers ~num_iters in
         {known; footprint; sanitizers}
 
 

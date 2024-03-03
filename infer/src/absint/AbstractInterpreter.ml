@@ -8,7 +8,9 @@
 open! IStd
 module F = Format
 module L = Logging
-
+module CFG = ProcCfg.Normal
+module Node = CFG.Node
+            
 type exec_node_schedule_result = ReachedFixPoint | DidNotReachFixPoint
 
 module VisitCount : sig
@@ -110,7 +112,8 @@ module type NodeTransferFunctions = sig
   include TransferFunctions
 
   val exec_node_instrs :
-       Domain.t State.t option
+    Node.t
+    -> Domain.t State.t option
     -> exec_instr:(ProcCfg.InstrNode.instr_index -> Domain.t -> Sil.instr -> Domain.t)
     -> Domain.t
     -> _ Instrs.t
@@ -123,10 +126,9 @@ end
 module SimpleNodeTransferFunctions (T : TransferFunctions.SIL) = struct
   include T
 
-  let join_all x ~into =
+  let join_all node x ~into =
     List.fold x ~init:into ~f:(fun acc astate ->
-        Some (Option.value_map acc ~default:astate ~f:(fun acc -> Domain.join acc astate)) )
-
+        Some (Option.value_map acc ~default:astate ~f:(fun acc -> Domain.join node acc astate)) )
 
   (* Warning: we provide a very simple default implementation for the three next functions. If
      you really wish to take into account exceptions, you may need to seriously add an exceptional
@@ -137,7 +139,7 @@ module SimpleNodeTransferFunctions (T : TransferFunctions.SIL) = struct
 
   let transform_on_exceptional_edge x = x
 
-  let exec_node_instrs _old_state_opt ~exec_instr pre instrs =
+  let exec_node_instrs _ _old_state_opt ~exec_instr pre instrs =
     Instrs.foldi ~init:pre instrs ~f:exec_instr
 end
 
@@ -155,9 +157,9 @@ module BackwardNodeTransferFunction (T : TransferFunctions) = struct
 
      We assume the backward post does not have an exceptional state.
   *)
-  let exec_node_instrs _old_state_opt ~exec_instr pre instrs =
+  let exec_node_instrs node _old_state_opt ~exec_instr pre instrs =
     let pre_exn = filter_exceptional pre in
-    let f idx astate instr = exec_instr idx (Domain.join astate pre_exn) instr in
+    let f idx astate instr = exec_instr idx (Domain.join node astate pre_exn) instr in
     Instrs.foldi ~init:pre instrs ~f
 end
 
@@ -278,7 +280,7 @@ struct
 
 
     (* [join_all] is used instead of [join] but the API requires this function to be present *)
-    let join _ _ = assert false
+    let join _ _ _ = assert false
 
     (** check if elements of [disj] appear in [of_] in the same order, using pointer equality on
         abstract states to compare elements quickly *)
@@ -293,14 +295,12 @@ struct
       | _, [] ->
           false
 
-
     let leq ~lhs ~rhs =
       phys_equal lhs rhs
       || is_trivial_subset (fst lhs) ~of_:(fst rhs)
          && T.NonDisjDomain.leq ~lhs:(snd lhs) ~rhs:(snd rhs)
 
-
-    let widen ~prev ~next ~num_iters =
+    let widen ~node ~prev ~next ~num_iters =
       let max_iter =
         match DConfig.widen_policy with UnderApproximateAfterNumIterations max_iter -> max_iter
       in
@@ -426,7 +426,7 @@ struct
       else List.fold ~init:T.NonDisjDomain.bottom ~f:T.NonDisjDomain.join non_disj_astates )
 
 
-  let exec_node_instrs old_state_opt ~exec_instr (pre, pre_non_disj) instrs =
+  let exec_node_instrs node old_state_opt ~exec_instr (pre, pre_non_disj) instrs =
     let is_new_pre disjunct =
       match old_state_opt with
       | None ->
@@ -465,7 +465,7 @@ struct
             in
             let non_disj' = T.remember_dropped_disjuncts dropped non_disj' in
             DisjunctiveMetadata.add_dropped_disjuncts dropped_length ;
-            (((disj', T.NonDisjDomain.join non_disj_astate non_disj'), n), need_join_non_disj) )
+            (((disj', T.NonDisjDomain.join node non_disj_astate non_disj'), n), need_join_non_disj) )
           else (
             L.d_printfln "@[Skipping already-visited disjunct #%d@]@;" i ;
             (* HACK: [pre_non_disj] may have a new information, e.g. when the predecessor node
@@ -484,7 +484,7 @@ struct
              positives.  To mitigate the issue, join [pre_non_disj] when dropping disjuncts even
              though joining without running [exec_instr] is, strictly speaking,
              incorrect/unsound. *)
-          T.NonDisjDomain.join non_disj_astates pre_non_disj
+          T.NonDisjDomain.join node non_disj_astates pre_non_disj
         else non_disj_astates
       else
         (* When there is no executable disjunct, we did not actually execute the instructions.
@@ -587,7 +587,7 @@ module AbstractInterpreterCommon (TransferFunctions : NodeTransferFunctions) = s
       else incr n
 
 
-  let exec_node_instrs old_state_opt ~pp_instr proc_data node pre =
+  let exec_node_instrs node old_state_opt ~pp_instr proc_data node pre =
     let instrs = CFG.instrs node in
     if Config.write_html then L.d_printfln "PRE STATE:@\n@[%a@]@\n" pp_domain_html pre ;
     let exec_instr idx pre instr =
@@ -635,7 +635,7 @@ module AbstractInterpreterCommon (TransferFunctions : NodeTransferFunctions) = s
     in
     (* hack to ensure that we call [exec_instr] on a node even if it has no instructions *)
     let instrs = if Instrs.is_empty instrs then Instrs.singleton Sil.skip_instr else instrs in
-    TransferFunctions.exec_node_instrs old_state_opt ~exec_instr pre instrs
+    TransferFunctions.exec_node_instrs node old_state_opt ~exec_instr pre instrs
 
 
   (* Note on narrowing operations: we defines the narrowing operations simply to take a smaller one.
@@ -643,7 +643,7 @@ module AbstractInterpreterCommon (TransferFunctions : NodeTransferFunctions) = s
   let exec_node ~pp_instr analysis_data node ~is_loop_head ~is_narrowing astate_pre inv_map =
     let node_id = Node.id node in
     let update_inv_map inv_map new_pre old_state_opt =
-      let new_post = exec_node_instrs old_state_opt ~pp_instr analysis_data node new_pre in
+      let new_post = exec_node_instrs node old_state_opt ~pp_instr analysis_data node new_pre in
       let new_visit_count =
         match old_state_opt with
         | None ->

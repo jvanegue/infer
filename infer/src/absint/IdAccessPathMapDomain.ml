@@ -43,7 +43,7 @@ let leq ~lhs ~rhs =
       lhs
 
 
-let join astate1 astate2 =
+let join _ astate1 astate2 =
   if phys_equal astate1 astate2 then astate1
   else
     IdMap.merge
@@ -61,4 +61,4 @@ let join astate1 astate2 =
       astate1 astate2
 
 
-let widen ~prev ~next ~num_iters:_ = join prev next
+let widen ~node ~prev ~next ~num_iters:_ = join node prev next
