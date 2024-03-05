@@ -74,6 +74,11 @@ let add_var_source v var decompiler =
   else decompiler
 
 
+let add_block_source v block decompiler =
+  let+ decompiler in
+  Map.add v (DecompilerExpr.Block block, [Dereference]) decompiler
+
+
 let access_of_field_access field =
   if Fieldname.is_capture_field_in_closure field then
     DecompilerExpr.CaptureFieldAccess (Fieldname.get_field_name field)
@@ -98,8 +103,12 @@ let access_of_memory_access decompiler (access : Access.t) : DecompilerExpr.acce
 let add_access_source v (access : Access.t) ~src decompiler =
   let+ decompiler in
   match Map.find src decompiler with
-  | Unknown _ ->
-      decompiler
+  | Unknown _ -> (
+    match (Map.find v decompiler, access) with
+    | SourceExpr ((base, [Dereference]), _), Dereference ->
+        Map.add src (base, [TakeAddress]) decompiler
+    | _ ->
+        decompiler )
   | SourceExpr ((base, accesses), _) ->
       Map.add v (base, access_of_memory_access decompiler access :: accesses) decompiler
 

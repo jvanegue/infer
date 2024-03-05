@@ -176,9 +176,9 @@ module AnnotationSpec = struct
 
   type t =
     { description: string  (** for debugging *)
-    ; sink_predicate: predicate
+    ; sink_predicate: predicate  (** decide if something is a sink *)
     ; sanitizer_predicate: predicate
-    ; sink_annotation: Annot.t
+    ; sink_annotation: Annot.t  (** used as key in the domain (sink -> procedure -> callsite) *)
     ; report: Domain.t InterproceduralAnalysis.t -> Domain.t -> unit }
 
   (* The default sanitizer does not sanitize anything *)
@@ -428,7 +428,7 @@ let parse_user_defined_specs = function
       let parse_user_spec json =
         let open Yojson.Basic in
         let sources = Util.member "sources" json |> Util.to_list |> List.map ~f:Util.to_string in
-        let sinks = Util.member "sink" json |> Util.to_string in
+        let sinks = Util.member "sinks" json |> Util.to_list |> List.map ~f:Util.to_string in
         (sources, sinks)
       in
       List.map ~f:parse_user_spec user_specs
@@ -437,23 +437,21 @@ let parse_user_defined_specs = function
 
 
 let annot_specs =
+  let parse_one_spec (str_src_annots, str_snk_annots) =
+    List.map
+      ~f:(fun str_snk_annot -> StandardAnnotationSpec.from_annotations str_src_annots str_snk_annot)
+      str_snk_annots
+  in
   let user_defined_specs =
     parse_user_defined_specs Config.annotation_reachability_custom_pairs
-    |> List.map ~f:(fun (str_src_annots, str_snk_annot) ->
-           StandardAnnotationSpec.from_annotations str_src_annots str_snk_annot )
+    |> List.map ~f:parse_one_spec
   in
-  let open Annotations in
-  let cannot_call_ui_annots = [any_thread; worker_thread] in
-  let cannot_call_non_ui_annots = [any_thread; mainthread; ui_thread] in
+  let user_defined_specs = List.concat user_defined_specs in
   [ (Language.Clang, CxxAnnotationSpecs.from_config ())
   ; ( Language.Java
-    , ( if Config.annotation_reachability_builtin_pairs then
-          [ ExpensiveAnnotationSpec.spec
-          ; NoAllocationAnnotationSpec.spec
-          ; StandardAnnotationSpec.from_annotations cannot_call_ui_annots ui_thread
-          ; StandardAnnotationSpec.from_annotations cannot_call_ui_annots mainthread
-          ; StandardAnnotationSpec.from_annotations cannot_call_non_ui_annots worker_thread ]
-        else [] )
+    , (if Config.annotation_reachability_expensive then [ExpensiveAnnotationSpec.spec] else [])
+      @ ( if Config.annotation_reachability_no_allocation then [NoAllocationAnnotationSpec.spec]
+          else [] )
       @ user_defined_specs ) ]
 
 
