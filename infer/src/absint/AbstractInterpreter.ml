@@ -162,6 +162,7 @@ module BackwardNodeTransferFunction (T : TransferFunctions) = struct
 end
 
 module DisjunctiveMetadata = struct
+  
   (** information about the analysis of a single procedure with [MakeDisjunctiveTransferFunctions] *)
   type t =
     { dropped_disjuncts: int
@@ -175,7 +176,6 @@ module DisjunctiveMetadata = struct
     F.fprintf fmt "dropped_disjuncts= %d;@ interrupted_loops= %d" dropped_disjuncts
       interrupted_loops
 
-
   (* The metadata for a procedure is kept in a reference to make it easier to keep an accurate track
      of metadata since otherwise we would need to carry the metadata around the analysis while being
      careful to avoid double-counting. With a reference this is simpler to achieve as we can simply
@@ -184,14 +184,23 @@ module DisjunctiveMetadata = struct
 
   let () = AnalysisGlobalState.register_ref ~init:(fun () -> empty) proc_metadata
 
+  (* This is used to remember the CFG node otherwise we would need to carry the node around in widen
+     and join as well as other places that may need to access the current CFG node during the analysis *)
+  let (cfg_node: Procdesc.Node.t ref) = ref (Procdesc.Node.dummy Procname.empty_block)
+                                         
+  let record_cfg_node (cfgnode: Procdesc.Node.t) : unit =
+    cfg_node := cfgnode; ()
+
+  let get_cfg_node () : Procdesc.Node.t = !cfg_node
+
+  let () = AnalysisGlobalState.register_ref ~init:(fun () -> (Procdesc.Node.dummy Procname.empty_block)) cfg_node
+                   
   let add_dropped_disjuncts dropped_disjuncts =
     proc_metadata :=
       {!proc_metadata with dropped_disjuncts= !proc_metadata.dropped_disjuncts + dropped_disjuncts}
 
-
   let incr_interrupted_loops () =
     proc_metadata := {!proc_metadata with interrupted_loops= !proc_metadata.interrupted_loops + 1}
-
 
   let record_cfg_stats {dropped_disjuncts; interrupted_loops} =
     Stats.add_pulse_disjuncts_dropped dropped_disjuncts ;
@@ -394,6 +403,10 @@ struct
     (* [remaining_disjuncts] is the number of remaining disjuncts taking into account disjuncts
        already recorded in the post of a node (and therefore that will stay there).  It is always
        set from [exec_node_instrs], so [remaining_disjuncts] should always be [Some _]. *)
+
+    let unode = (CFG.Node.underlying_node node) in
+    let _ = DisjunctiveMetadata.record_cfg_node unode in
+    
     let limit = Option.value_exn (AnalysisState.get_remaining_disjuncts ()) in
     let (disjuncts, non_disj_astates), _ =
       List.foldi (List.rev pre_disjuncts)
@@ -591,7 +604,7 @@ module AbstractInterpreterCommon (TransferFunctions : NodeTransferFunctions) = s
     let instrs = CFG.instrs node in
     if Config.write_html then L.d_printfln "PRE STATE:@\n@[%a@]@\n" pp_domain_html pre ;
     let exec_instr idx pre instr =
-      call_once_in_ten ~f:!ProcessPoolState.update_heap_words () ;
+      call_once_in_ten ~f:!ProcessPoolState.update_heap_words () ;                        
       AnalysisState.set_instr instr ;
       let pp_result f result = dump_html f pre result in
       let result =
@@ -636,8 +649,7 @@ module AbstractInterpreterCommon (TransferFunctions : NodeTransferFunctions) = s
     (* hack to ensure that we call [exec_instr] on a node even if it has no instructions *)
     let instrs = if Instrs.is_empty instrs then Instrs.singleton Sil.skip_instr else instrs in
     TransferFunctions.exec_node_instrs old_state_opt ~exec_instr pre instrs
-
-
+    
   (* Note on narrowing operations: we defines the narrowing operations simply to take a smaller one.
      So, as of now, the termination of narrowing is not guaranteed in general. *)
   let exec_node ~pp_instr analysis_data node ~is_loop_head ~is_narrowing astate_pre inv_map =
@@ -895,7 +907,8 @@ module MakeWTONode (TransferFunctions : NodeTransferFunctions) = struct
       | Empty ->
           inv_map (* empty cfg *)
       | Node {node= start_node; next} as wto ->
-          if Config.write_html then debug_wto wto start_node ;
+         if Config.write_html then debug_wto wto start_node ;
+         
           let inv_map, _did_not_reach_fix_point =
             exec_node ~pp_instr proc_data start_node ~is_loop_head:false
               ~is_narrowing:(is_narrowing_of mode) initial inv_map

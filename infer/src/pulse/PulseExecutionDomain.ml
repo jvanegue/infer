@@ -8,12 +8,15 @@
 open! IStd
 module F = Format
 open PulseBasicInterface
+
 module AbductiveDomain = PulseAbductiveDomain
 module DecompilerExpr = PulseDecompilerExpr
 module Diagnostic = PulseDiagnostic
 module LatentIssue = PulseLatentIssue
 module Formula = PulseFormula
 module L = Logging
+
+module Metadata = AbstractInterpreter.DisjunctiveMetadata
          
 (* The type variable is needed to distinguish summaries from plain states.
 
@@ -84,8 +87,7 @@ let pp fmt exec_state = pp_ AbductiveDomain.pp fmt exec_state
 (* Note: this will record the widen state once per analyzed object, which may not be enough *)
 (* TODO: Find out how to have one widen state key per loop *)                      
 let widenstate = ref None;; 
-let () = AnalysisGlobalState.register_ref ~init:(fun () -> Some (Caml.Hashtbl.create 16)) widenstate;; 
-(* widenstate := Some (Caml.Hashtbl.create 16) *)
+let () = AnalysisGlobalState.register_ref ~init:(fun () -> Some (Caml.Hashtbl.create 16)) widenstate;;
 
 (* let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int = *)
 let back_edge (prev: t list) (next: t list) _ : t list * int =
@@ -145,6 +147,8 @@ let back_edge (prev: t list) (next: t list) _ : t list * int =
   let nextlen = List.length(next) in
   let worklen = List.length(workset) in
 
+  let curnode = Metadata.get_cfg_node in  
+  
   (* L.debug Analysis Quiet "PULSEINF: BACKEDGE prevlen %d nextlen %d diff %d worklen %d \n" prevlen nextlen (nextlen - prevlen) worklen; *)
 
   (* Do-nothing version to avoid debug output *)
@@ -185,16 +189,16 @@ let back_edge (prev: t list) (next: t list) _ : t list * int =
           let cond = extract_pathcond hd in
           (* Print rcond for pulseinf logging *)
           let rcond = Formula.extract_cond cond in 
-          let prevcond = Caml.Hashtbl.find_opt wstate rcond in
+          let prevcond = Caml.Hashtbl.find_opt wstate (curnode,rcond) in
           match prevcond with
           | None ->
-             Caml.Hashtbl.add wstate rcond (); (* record pathcond of hd *)
+             Caml.Hashtbl.add wstate (curnode,rcond) (); (* record pathcond of hd *)
              L.debug Analysis Quiet "PULSEINF: Recorded pathcond in htable at idx %d (NO BUG) \n" idx;
              record_pathcond tl
           | Some _ ->
              match (Formula.set_is_empty rcond) with
              | true ->
-                L.debug Analysis Quiet "PULSEINF: Recorded pathcond ALREADY in htable! (EMPTY) idx %d \n" idx; -1
+                L.debug Analysis Quiet "PULSEINF: Recorded pathcond ALREADY in htable! (EMPTY) idx %d \n" idx; -2
              | false -> 
              L.debug Analysis Quiet "PULSEINF: Recorded pathcond ALREADY in htable! (NON-TERM BUG) idx %d \n" idx; idx
            
@@ -251,10 +255,10 @@ let back_edge (prev: t list) (next: t list) _ : t list * int =
   (* we have a trivial lasso because prev = next - this should trigger an alert *)
   if same && (phys_equal isempty false) then
     create_infinite_state_and_print next lastelm 1
-  (* We have duplication of (at least two) equivalent states in the post - trigger an alert *)
+  (* We have one or more newly created equivalent states in the post, trigger an alert *)
   else if (phys_equal worklen 0) && (nextlen - prevlen) > 0 then
     create_infinite_state_and_print next (find_duplicate_state next 0 (-1)) 2
-  (* We have a new state in the post whose condition is equivalent to an existing state - trigger an alert *)
+  (* We have a new post state whose path condition is equivalent to an existing state, trigger an alert *)
   else if repeated_wsidx >= 0 then
     create_infinite_state_and_print next repeated_wsidx 3
   (* No recurring state detected, return empty *)

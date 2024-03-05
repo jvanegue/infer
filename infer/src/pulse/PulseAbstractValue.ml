@@ -28,7 +28,6 @@ let mk_fresh_restricted () =
   decr next_fresh_restricted ;
   v
 
-
 let is_restricted v = v < 0
 
 let is_unrestricted v = v > 0
