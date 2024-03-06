@@ -75,9 +75,6 @@ module MakeWTO : Make
 (** used internally to compute various metrics related to [MakeDisjunctive] analyses; this can be
     queried with [get_cfg_metadata] below at the end of the analysis of each procedure *)
 module DisjunctiveMetadata : sig
-
-  (* module TransferFunctions : TransferFunctions.SIL *)
-  (* module CFGNode = TransferFunctions.CFG.Node *)
   
   type t
 
@@ -86,6 +83,10 @@ module DisjunctiveMetadata : sig
   val record_cfg_node : Procdesc.Node.t -> unit
     
   val get_cfg_node : unit -> Procdesc.Node.t
+
+  val record_alert_node : Procdesc.Node.t -> unit
+    
+  val get_alert_node : unit -> Procdesc.Node.t
     
 end
 

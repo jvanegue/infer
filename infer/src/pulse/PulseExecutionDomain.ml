@@ -15,7 +15,6 @@ module Diagnostic = PulseDiagnostic
 module LatentIssue = PulseLatentIssue
 module Formula = PulseFormula
 module L = Logging
-
 module Metadata = AbstractInterpreter.DisjunctiveMetadata
          
 (* The type variable is needed to distinguish summaries from plain states.
@@ -37,7 +36,7 @@ type 'abductive_domain_t base_t =
 [@@deriving equal, compare, yojson_of, variants]
 
 type t = AbductiveDomain.t base_t
-
+       
 let continue astate = ContinueProgram astate
 
 let leq ~lhs ~rhs =
@@ -89,7 +88,6 @@ let pp fmt exec_state = pp_ AbductiveDomain.pp fmt exec_state
 let widenstate = ref None;; 
 let () = AnalysisGlobalState.register_ref ~init:(fun () -> Some (Caml.Hashtbl.create 16)) widenstate;;
 
-(* let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int = *)
 let back_edge (prev: t list) (next: t list) _ : t list * int =
 
   (* Instead of this, we want to stop reporting at current and next widening iteration 
@@ -97,6 +95,7 @@ let back_edge (prev: t list) (next: t list) _ : t list * int =
   (* if (num_iters <= 0) then next,-1 else *)
   (* It looks like infer reporting will filter issues by location to avoid duplicate already *)
 
+  let cfgnode = (Metadata.get_cfg_node ()) in  
   let same = phys_equal prev next in
 
   (* Future work: implement a more generic way to check for recurring sets than filtering on the path condition *)
@@ -110,8 +109,10 @@ let back_edge (prev: t list) (next: t list) _ : t list * int =
      in
    *)
 
+  (* Use this when disabling debug output *)
  let print_warning _ _ _ = () in
-  (*
+
+ (*
   let print_warning s cnt state =
     (* let _ = state in *)
     L.debug Analysis Quiet "JV: BACK-EDGE FOUND infinite state from %s at iter %i with cnt %i) \n" s num_iters cnt; 
@@ -147,8 +148,6 @@ let back_edge (prev: t list) (next: t list) _ : t list * int =
   let nextlen = List.length(next) in
   let worklen = List.length(workset) in
 
-  let curnode = Metadata.get_cfg_node in  
-  
   (* L.debug Analysis Quiet "PULSEINF: BACKEDGE prevlen %d nextlen %d diff %d worklen %d \n" prevlen nextlen (nextlen - prevlen) worklen; *)
 
   (* Do-nothing version to avoid debug output *)
@@ -187,20 +186,19 @@ let back_edge (prev: t list) (next: t list) _ : t list * int =
        | None -> L.debug Analysis Quiet "PULSEINF: widenstate htable NONE - should never happen! \n"; -1
        | Some wstate ->
           let cond = extract_pathcond hd in
-          (* Print rcond for pulseinf logging *)
           let rcond = Formula.extract_cond cond in 
-          let prevcond = Caml.Hashtbl.find_opt wstate (curnode,rcond) in
+          let prevcond = Caml.Hashtbl.find_opt wstate (cfgnode,rcond) in
           match prevcond with
           | None ->
-             Caml.Hashtbl.add wstate (curnode,rcond) (); (* record pathcond of hd *)
+             Caml.Hashtbl.add wstate (cfgnode,rcond) (); (* record pathcond of hd *)
              L.debug Analysis Quiet "PULSEINF: Recorded pathcond in htable at idx %d (NO BUG) \n" idx;
              record_pathcond tl
           | Some _ ->
              match (Formula.set_is_empty rcond) with
              | true ->
                 L.debug Analysis Quiet "PULSEINF: Recorded pathcond ALREADY in htable! (EMPTY) idx %d \n" idx; -2
-             | false -> 
-             L.debug Analysis Quiet "PULSEINF: Recorded pathcond ALREADY in htable! (NON-TERM BUG) idx %d \n" idx; idx
+             | false ->
+                L.debug Analysis Quiet "PULSEINF: Recorded pathcond ALREADY in htable! (NON-TERM BUG) idx %d \n" idx; idx
            
   in
                 
@@ -210,8 +208,8 @@ let back_edge (prev: t list) (next: t list) _ : t list * int =
   let create_infinite_state (hd:t) (cnt:int) : t =
     (* Only create infinite state from a non-error state that is not already an infinite state *)
     match hd with
-    | ExceptionRaised astate -> print_warning "Exception" cnt hd; InfiniteProgram astate  
-    | ContinueProgram astate -> print_warning "Continue" cnt hd; InfiniteProgram astate 
+    | ExceptionRaised astate -> print_warning "Exception" cnt hd; InfiniteProgram astate
+    | ContinueProgram astate -> print_warning "Continue" cnt hd; InfiniteProgram astate
     | AbortProgram astate -> AbortProgram astate
     | ExitProgram astate -> ExitProgram astate
     | LatentAbortProgram a -> LatentAbortProgram a
@@ -222,7 +220,9 @@ let back_edge (prev: t list) (next: t list) _ : t list * int =
   let create_infinite_state_and_print (state_set: t list) (idx:int) (case:int) = 
 
     (* L.debug Analysis Quiet "JV: BUG FOUND - DETECTED REPEATED STATE IDX %d CASE %d numiter %d \n" idx case num_iters; *)
-       
+
+    Metadata.record_alert_node cfgnode;
+    
     let nth = (List.nth state_set idx) in 
     match nth with
     | None       ->

@@ -185,7 +185,7 @@ module DisjunctiveMetadata = struct
   let () = AnalysisGlobalState.register_ref ~init:(fun () -> empty) proc_metadata
 
   (* This is used to remember the CFG node otherwise we would need to carry the node around in widen
-     and join as well as other places that may need to access the current CFG node during the analysis *)
+     and join as well as other places that may need to access the current CFG node during analysis *)
   let (cfg_node: Procdesc.Node.t ref) = ref (Procdesc.Node.dummy Procname.empty_block)
                                          
   let record_cfg_node (cfgnode: Procdesc.Node.t) : unit =
@@ -194,6 +194,17 @@ module DisjunctiveMetadata = struct
   let get_cfg_node () : Procdesc.Node.t = !cfg_node
 
   let () = AnalysisGlobalState.register_ref ~init:(fun () -> (Procdesc.Node.dummy Procname.empty_block)) cfg_node
+
+  let (alert_node: Procdesc.Node.t ref) = ref (Procdesc.Node.dummy Procname.empty_block)
+                                         
+  let record_alert_node (alertnode: Procdesc.Node.t) : unit =
+    alert_node := alertnode; ()
+
+  let get_alert_node () : Procdesc.Node.t = !alert_node
+
+  let () = AnalysisGlobalState.register_ref ~init:(fun () -> (Procdesc.Node.dummy Procname.empty_block)) alert_node
+  (* End CFG node tracking for alerts *)
+         
                    
   let add_dropped_disjuncts dropped_disjuncts =
     proc_metadata :=

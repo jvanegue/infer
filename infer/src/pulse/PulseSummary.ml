@@ -11,7 +11,8 @@ module L = Logging
 open PulseBasicInterface
 open PulseDomainInterface
 open PulseOperationResult.Import
-
+module Metadata = AbstractInterpreter.DisjunctiveMetadata
+                
 type pre_post_list = ExecutionDomain.summary list [@@deriving yojson_of]
 
 type summary = {pre_post_list: pre_post_list; non_disj: (NonDisjDomain.Summary.t[@yojson.opaque])}
@@ -79,8 +80,10 @@ let exec_summary_of_post_common tenv ~continue_program ~exception_raised ~infini
     | Ok summary ->
        let r = exec_domain_of_summary summary in
        (match r with
-        | InfiniteProgram _ -> 
-           let error = ReportableError {astate=astate; diagnostic=(InfiniteError {location})} in
+        | InfiniteProgram _ ->
+           let curnode = Metadata.get_alert_node in
+           let curloc = (Procdesc.Node.get_loc(curnode())) in 
+           let error = ReportableError {astate=astate; diagnostic=(InfiniteError {location=curloc})} in
            PulseReport.report_summary_error tenv proc_desc err_log (error, summary) |> Option.value ~default:r
         | _ -> r)
     | Error (`RetainCycle (summary, astate, assignment_traces, value, path, location)) ->
