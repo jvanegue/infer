@@ -578,35 +578,10 @@ void loop_non_terminating_harris10(int x, int d, int z)
   }
 }
 
-
-/* Berdine et al. "Automatic termination proofs for programs with shape-shifting heaps" (CAV'06) */
-/* Need to find the termination bug */
-/* Does not compile */
-/*
-void non_terminate_berdine06() {
-  for (entry = DeviceExtension->ReadQueue.Flink;
-       entry != &DeviceExtension->ReadQueue;
-       entry = entry->Flink) {
-    irp = (IRP *)((CHAR *)(entry)-(ULONG *)(&((IRP *)0)->Tail.Overlay.ListEntry));
-    stack = IoGetCurrentIrpStackLocation (irp);
-    if (stack->FileObject == FileObject) {
-      RemoveEntryList(entry);
-      if (IoSetCancelRoutine (irp, NULL)) {
-	return irp;
-      } else {
-	InitializeListHead (&irp->Tail.Overlay.ListEntry);
-      }
-    }
-  }
-}
-*/
-
-
-
   
 /*** Chen et al. TACAS 2014 */
 // TNT proves non-termination with non determinism
-/* Pulse-inf: works good (also flag the bug)
+/* Pulse-inf: works good (also flag the bug) */
 /* TO me: there is no bug here! problem in chen14 paper - the nondet() should eventually make it break */
 //#include <stdlib.h>
 //int	nondet() { return (rand()); }
@@ -634,7 +609,6 @@ void nestedloop_nonterminate_chen14(int i) {
 }
 
 
-
 // TNT fails to prove non-termination
 /* pulse-inf says there is no bug */
 /* To me: this will terminate because k >= 0 will eventually be false due to integer wrap */
@@ -648,146 +622,138 @@ void nestedloop2_nonterminate_chen14(int k, int j) {
 }
 
 
-
-/*
-Utility function with a termination bug
-From "Termination Proofs for Systems Code" by Cook et al. (PLDI 2006)
-Does not compile
-*/
-/*
-NTSTATUS
-Serenum_ReadSerialPort_cook06(CHAR * PReadBuffer, USHORT Buflen,
-			      ULONG Timeout, USHORT * nActual,
-			      IO_STATUS_BLOCK * PIoStatusBlock,
-			      const FDO_DEVICE_DATA * FdoData)
+// Example with array - no manifest bug
+void array_iter_terminate(int array[])
 {
-  NTSTATUS status;
-  IRP * pIrp;
-  LARGE_INTEGER startingOffset;
-  KEVENT event;
-  SERIAL_TIMEOUTS timeouts;
-  ULONG i;
-  
-  startingOffset.QuadPart = (LONGLONG) 0;
-  //
-  // Set the proper timeouts for the read
-  //
-  
-  timeouts.ReadIntervalTimeout = MAXULONG;
-  timeouts.ReadTotalTimeoutMultiplier = MAXULONG;
-  timeouts.ReadTotalTimeoutConstant = Timeout;
-  timeouts.WriteTotalTimeoutMultiplier = 0;
-  timeouts.WriteTotalTimeoutConstant = 0;
-  KeInitializeEvent(&event, NotificationEvent, FALSE);
-  status = Serenum_IoSyncIoctlEx(IOCTL_SERIAL_SET_TIMEOUTS, FALSE,FdoData->TopOfStack,
-				 &event, &timeouts, sizeof(timeouts), NULL, 0);
-  if (!NT_SUCCESS(status)) {
-    return status;
-  }
-  
-  Serenum_KdPrint(FdoData, SER_DBG_SS_TRACE, ("Read pending...\n"));
-  
-  *nActual = 0;
-  
-  while (*nActual < Buflen) {
-    KeClearEvent(&event);
-    pIrp = IoBuildSynchronousFsdRequest(IRP_MJ_READ, FdoData->TopOfStack,
-					PReadBuffer, 1, &startingOffset,
-					&event, PIoStatusBlock);
-    if (pIrp == NULL) {
-      Serenum_KdPrint(FdoData, SER_DBG_SS_ERROR, ("Failed to allocate IRP\n"));
-      return STATUS_INSUFFICIENT_RESOURCES;
-    }
-    status = IoCallDriver(FdoData->TopOfStack, pIrp);
-    
-    if (status == STATUS_PENDING) {
-      status = KeWaitForSingleObject(&event, Executive, KernelMode, FALSE, NULL);
-      if (status == STATUS_SUCCESS) {
-	status = PIoStatusBlock->Status;
-      }
-    }
-    
-    if (!NT_SUCCESS(status) || status == STATUS_TIMEOUT) {
-      Serenum_KdPrint (FdoData, SER_DBG_SS_ERROR, ("IO Call failed with status %x\n", status));
-      return status;
-    }
-    *nActual += (USHORT)PIoStatusBlock->Information;
-    PReadBuffer += (USHORT)PIoStatusBlock->Information;
-  }
-  return status;
-}
-*/
-
-
-/*** Gupta et al. POPL 2008 -- Does not compile
-static void
-_mmpt_insert_gupta08(struct mmpt* mmpt, unsigned long base, unsigned long* len, int prot,
-                     tab_t* tab, int level, int* nonzero, int allocate_ok) {
-                     unsigned int idx; tab_t entry;
-if(*len == 0) return;
-  idx = make_idx(mmpt, base, level);
-  if(level < 2 && base == tab_base(mmpt, base, level + 1) && *len >= tab_len(mmpt, level + 1)) {
-    // CASE A: Upper level, new region is aligned & spans at least one entry
-    unsigned int entry_len;
-    if(tab[idx] && !uentry_is_data(mmpt, tab[idx])) {
-      look_for_nonzero(mmpt, (tab_t*)tab[idx], level, nonzero);
-      table_free(mmpt, (void*)tab[idx], level + 1);
-      tab[idx] = 0;
-    }
-    entry = tab[idx];
-    entry_len = make_entry(mmpt, base, *len, prot, level, &entry);
-    tab[idx] = entry;
-    *len -= entry_len;
-    base += entry_len;
-    _mmpt_insert(mmpt, base, len, prot, mmpt->tab, 0, nonzero, allocate_ok);
-  } else if(level < 2 && tab[idx] && !uentry_is_data(mmpt, tab[idx])) {
-    // CASE B: Upper level, pointer entry
-    // Recurse down through pointer
-    _mmpt_insert(mmpt, base, len, prot, (tab_t*)tab[idx], level + 1, nonzero, allocate_ok);
-  } else if(level < 2 && ((base & (subblock_len(mmpt, level)-1)) != 0 || *len < subblock_len(mmpt, level))) {
-    // CASE C: Upper level, NULL or data entry, new region doesn’t fit in
-    // subblock (not aligned or not big enough)
-    unsigned long upper_data_entry = tab[idx];
-    unsigned int i;
-    *nonzero |= (tab[idx] != 0);
-    if(allocate_ok) {
-      unsigned long sub_len;
-      tab[idx] = (tab_t)xmalloc(tab_nentries(mmpt, level + 1) * sizeof(*mmpt->tab));
-      memset((tab_t*)tab[idx], 0, tab_nentries(mmpt, level + 1) * sizeof(*mmpt->tab));
-      for(i = 0; i < 1<<mmpt->lg_num_subblock[level]; ++i) {
-	sub_len = subblock_len(mmpt, level);
-	_mmpt_insert(mmpt, tab_base(mmpt, base, level+1) + i * subblock_len(mmpt, level), &sub_len,
-		     entry_prot(mmpt, upper_data_entry, i), (tab_t*)tab[idx], level + 1, nonzero, allocate_ok);
-      }
-      _mmpt_insert(mmpt, base, len, prot, (tab_t*)tab[idx], level + 1, nonzero, allocate_ok);
-    } else {
-      unsigned int tlen = tab_len(mmpt, level + 1);
-      // CASE D: Upper level, NULL or data entry, new region doesn’t fit in
-      // subblock (not aligned or not big enough), and not
-      // allocating new tables
-      if(*len < tlen) return;
-      *len -= tlen;
-      _mmpt_insert(mmpt, tab_addr(mmpt, base, idx+1, level), len, prot,
-		   mmpt->tab, 0, nonzero, allocate_ok);
-    }
-  } else {
-    // CASE E: Any level, NULL or data entry, fill in the rest of
-    // this table and recurse for the remainder if necessary.
-    for(; *len >= subblock_len(mmpt, level)
-	  && idx < tab_nentries(mmpt, level); idx++) {
-      int entry_len;
-      *nonzero |= (tab[idx] != 0);
-      entry = tab[idx];
-      entry_len = make_entry(mmpt, base, *len, prot, level, &entry);
-      tab[idx] = entry;
-      *len -= entry_len;
-      base += entry_len;
-    }
-    _mmpt_insert(mmpt, base, len, prot, mmpt->tab, 0, nonzero, allocate_ok);
+  unsigned int i = 0;
+  while (array[i] != 0) {
+    array[i] = 42;
+    i++;
   }
 }
 
 
+// Example with two arrays - no manifest bug
+void array2_iter_terminate(int array1[], int array2[])
+{
+  unsigned int i = 0;
+  while (array1[i] != 0) {
+    array2[i] = 42;
+    i++;
+  }
+}
 
-****/
+// Example with array and non-termination
+/* Pulse-inf: unable to find bug (with default widen threshold=3) */
+void array_iter_nonterminate(int array[], int len)
+{
+  int i = 0;
+  while (i < len) {
+    array[i] = 42;
+    if (i > 100)
+      i = 0;
+    i++;
+  }
+}
 
+// Iterate over an array - no bug
+/* Pulse-Inf: works good */
+void iterate_arraysize_terminate(int array[256])
+{
+  unsigned int i = 0;
+  while (i < (sizeof(*array) / sizeof(array[0]))) {
+    array[i] = i;
+    i++;
+  }  
+}
+
+// Iterate over an array using a bitmask to compute array value
+/* Pulse-Inf: works good */
+void iterate_bitmask_terminate(int array[256], int len)
+{
+  unsigned int i = 0;
+  while (i < len) {
+    array[i] = (i & (~7));
+    i++;
+  }  
+}
+
+// Iterate over an array using a bitmask to compute array index
+/* Pulse-Inf: works good */
+void iterate_bitmask2_terminate(int array[256], int len)
+{
+  unsigned int i = 0;
+  unsigned int j = 0;
+  while (i < len) {
+    j = (i & (~7));
+    array[j] = i;
+    i++;
+  }  
+}
+
+// Iterate over an array using a bitmask leading to a non-termination
+/* Pulse-inf: able to find bug */
+void iterate_bitmask_nonterminate(int array[256], unsigned int len)
+{
+  unsigned int i = 0;
+  while (i < len) {
+    i = (i & (~7));
+    array[i] = i;
+    i++;
+  }  
+}
+
+// Iterate over an array using a bitshift to compute array index leading to a non-termination
+/* Pulse-inf: false negative. Unable to reason about integer overflow */
+void iterate_bitshift_nonterminate(int array[256])
+{
+  unsigned int i = 1;
+  while (i != 0)
+    {
+      array[i] = i;
+      i = i << 1;
+    }  
+}
+
+// Iterate over an array using a bitshift to compute array index
+/* Pulse-inf: no bug - good */
+void iterate_bitshift_terminate(int array[256], int len)
+{
+  unsigned int i = 1;
+  while (i < len) {
+    array[i] = i;
+    i = i << 1;
+  }  
+}
+
+// Iterate over an array using a bitshift to compute array index
+/* Pulse-inf: no bug - good */
+void iterate_bitshift_terminate(int array[256], unsigned char i)
+{
+  while (i != 0) {
+    array[i] = i;
+    i = i >> 1;
+  }  
+}
+
+// Integer test computing a condition that will never be true
+/* Pulse-Inf: false negative: unable to reason about integer underflow */
+void iterate_intoverflow_nonterminate(int len)
+{
+  unsigned int i = 0xFFFFFFFF;
+  while (i != 0)
+    i -= 2;
+}
+
+
+// Iterate over an array using a modulo arithmetic leading to a bug
+/* Pulse-infinite: false negative: unable to reason about unbounded index stuttering in the loop */
+void iterate_modulus_nonterminate(int array[256], unsigned int len, unsigned int i)
+{
+  //unsigned int i = 0;
+  while (i < len) {
+    i = i % 2;
+    array[i] = i;
+    i++;
+  }  
+}
