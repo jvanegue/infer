@@ -650,7 +650,7 @@ void array_iter_nonterminate(int array[], int len)
   int i = 0;
   while (i < len) {
     array[i] = 42;
-    if (i > 100)
+    if (i > 10)
       i = 0;
     i++;
   }
@@ -668,7 +668,7 @@ void iterate_arraysize_terminate(int array[256])
 }
 
 // Iterate over an array using a bitmask to compute array value
-/* Pulse-Inf: works good */
+/* Pulse-Inf: no bug - works good */
 void iterate_bitmask_terminate(int array[256], int len)
 {
   unsigned int i = 0;
@@ -679,7 +679,7 @@ void iterate_bitmask_terminate(int array[256], int len)
 }
 
 // Iterate over an array using a bitmask to compute array index
-/* Pulse-Inf: works good */
+/* Pulse-Inf: no bug - works good */
 void iterate_bitmask2_terminate(int array[256], int len)
 {
   unsigned int i = 0;
@@ -748,6 +748,7 @@ void iterate_intoverflow_nonterminate(int len)
 
 // Iterate over an array using a modulo arithmetic leading to a bug
 /* Pulse-infinite: false negative: unable to reason about unbounded index stuttering in the loop */
+/* To verify: this should work even with low widen threshold */
 void iterate_modulus_nonterminate(int array[256], unsigned int len, unsigned int i)
 {
   //unsigned int i = 0;
@@ -757,3 +758,51 @@ void iterate_modulus_nonterminate(int array[256], unsigned int len, unsigned int
     i++;
   }  
 }
+
+
+/* From: zlib */
+/* Iterate computing a crc value - terminates no bug */
+/* Pulse-inf: no bug - good */
+#define W 8
+#define N 5
+
+static unsigned int crc_braid_table[W][256];
+static unsigned int crc_braid_big_table[W][256];
+
+void iterate_crc_terminate()
+{
+  unsigned int k;
+  unsigned long crc0 = 0xFFFFFFFF, crc1 = 0, crc2 = 0, crc3 = 0, crc4 = 0, crc5 = 0;
+  unsigned short word0 = 6, word1 = 1, word2 = 2, word3 = 3, word4 = 4, word5 = 5;
+  
+  for (k = 1; k < W; k++) {
+    crc0 ^= crc_braid_table[k][(word0 >> (k << 3)) & 0xff];
+    crc1 ^= crc_braid_table[k][(word1 >> (k << 3)) & 0xff];
+    crc2 ^= crc_braid_table[k][(word2 >> (k << 3)) & 0xff];
+    crc3 ^= crc_braid_table[k][(word3 >> (k << 3)) & 0xff];
+    crc4 ^= crc_braid_table[k][(word4 >> (k << 3)) & 0xff];
+    crc5 ^= crc_braid_table[k][(word5 >> (k << 3)) & 0xff];
+  }
+}
+
+
+
+
+/* From: libpng */
+/* Test from libpng with typedefs */
+void	png_palette_terminate(int *p, int val)
+{
+  int	num;
+  int	i;
+
+  if (val == 0)
+    num = 1;
+  else
+    num = 256;
+
+  for (i = 0; i < num; i++)
+    *p = val;
+  
+}
+
+
