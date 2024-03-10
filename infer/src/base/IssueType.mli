@@ -282,6 +282,8 @@ val precondition_not_met : t
 
 val premature_nil_termination : t
 
+val pulse_dict_missing_key : t
+
 val pulse_transitive_access : t
 
 val pulse_memory_leak_c : t
@@ -339,8 +341,6 @@ val taint_error : t
 val thread_safety_violation : t
 
 val topl_error : latent:bool -> t
-
-val uninitialized_value : t
 
 val uninitialized_value_pulse : latent:bool -> t
 

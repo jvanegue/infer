@@ -238,6 +238,18 @@ val csharp_resource_release : recursive:bool -> AbstractValue.t -> t -> t
 (** releases the resource of the argument, and recursively calls itself on the delegated resource if
     [recursive==true] *)
 
+val add_dict_contain_const_keys : AbstractValue.t -> t -> t
+
+val remove_dict_contain_const_keys : AbstractValue.t -> t -> t
+
+val add_dict_read_const_key :
+     Timestamp.t
+  -> Trace.t
+  -> AbstractValue.t
+  -> Fieldname.t
+  -> t
+  -> (t, AccessResult.error) PulseResult.t
+
 val add_dynamic_type : Typ.t -> ?source_file:SourceFile.t -> AbstractValue.t -> t -> t
 
 val remove_allocation_attr : AbstractValue.t -> t -> t

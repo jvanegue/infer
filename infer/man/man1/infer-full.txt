@@ -625,6 +625,7 @@ OPTIONS
              PRECONDITION_NOT_MET (enabled by default),
              PREMATURE_NIL_TERMINATION_ARGUMENT (enabled by default),
              PULSE_CONST_REFABLE (enabled by default),
+             PULSE_DICT_MISSING_KEY (disabled by default),
              PULSE_READONLY_SHARED_PTR_PARAM (enabled by default),
              PULSE_REFERENCE_STABILITY (disabled by default),
              PULSE_RESOURCE_LEAK (enabled by default),
@@ -666,7 +667,6 @@ OPTIONS
              THREAD_SAFETY_VIOLATION (enabled by default),
              TOPL_ERROR (enabled by default),
              TOPL_ERROR_LATENT (disabled by default),
-             UNINITIALIZED_VALUE (enabled by default),
              UNREACHABLE_CODE (enabled by default),
              UNTRUSTED_BUFFER_ACCESS (disabled by default),
              UNTRUSTED_DESERIALIZATION (enabled by default),
@@ -1222,8 +1222,8 @@ OPTIONS
 
        --procedures-summary
            Activates: Print the summaries of each procedure in the output of
-           --procedures. See also --procedures-summary-nonempty. (Conversely:
-           --no-procedures-summary)           See also infer-debug(1).
+           --procedures. See also --procedures-summary-skip-empty.
+           (Conversely: --no-procedures-summary)           See also infer-debug(1).
 
        --procedures-summary-json
            Activates: Emit the summaries of each procedure in the output of
@@ -1935,17 +1935,6 @@ OPTIONS
        --topl-only
            Activates: Enable topl and disable all other checkers (Conversely:
            --no-topl-only)           See also infer-analyze(1).
-
-       --uninit
-           Activates: uninit checker: Warns when values are used before
-           having been initialized.           
-           DEPRECATED: Uninitialized value checking has moved to Pulse.
-            (Conversely: --no-uninit)
-           See also infer-analyze(1).
-
-       --uninit-only
-           Activates: Enable uninit and disable all other checkers
-           (Conversely: --no-uninit-only)           See also infer-analyze(1).
 
        --version
            Print version information and exit           See also infer-run(1).
@@ -3077,10 +3066,6 @@ INTERNAL OPTIONS
        --trace-topl
            Activates: Detailed tracing information during Topl analysis
            (Conversely: --no-trace-topl)
-
-       --uninit-interproc
-           Activates: Run uninit check in the experimental interprocedural
-           mode (Conversely: --no-uninit-interproc)
 
        --no-unix-fork
            Deactivates: Use the fork(2) system call to spawn sub-processes.

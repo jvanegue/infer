@@ -90,12 +90,24 @@ module ConfigUsage : sig
 end
 
 module UninitializedTyp : sig
-  type t = Value | Const of Fieldname.t [@@deriving compare, equal]
+  type t =
+    | Value
+    | Const of Fieldname.t
+    | DictMissingKey of {dict: DecompilerExpr.t; key: Fieldname.t}
+  [@@deriving compare, equal]
 
   val pp : F.formatter -> t -> unit
 end
 
 type dynamic_type_data = {typ: Typ.t; source_file: SourceFile.t option} [@@deriving compare, equal]
+
+module ConstKeys : sig
+  type t
+
+  val singleton : Fieldname.t -> Timestamp.t * Trace.t -> t
+
+  val fold : (Fieldname.t -> Timestamp.t * Trace.t -> 'a -> 'a) -> t -> 'a -> 'a
+end
 
 type t =
   | AddressOfCppTemporary of Var.t * ValueHistory.t
@@ -109,6 +121,10 @@ type t =
   | CopiedReturn of
       {source: AbstractValue.t; is_const_ref: bool; from: CopyOrigin.t; copied_location: Location.t}
       (** records the copied value for the return address *)
+  | DictContainConstKeys
+      (** the dictionary contains only constant keys (note: only string constant is supported for
+          now) *)
+  | DictReadConstKeys of ConstKeys.t  (** constant string keys that are read from the dictionary *)
   | DynamicType of dynamic_type_data
   | EndOfCollection
   | Initialized
@@ -176,6 +192,12 @@ module Attributes : sig
   val remove_allocation : t -> t
 
   val get_unknown_effect : t -> (CallEvent.t * ValueHistory.t) option
+
+  val remove_dict_contain_const_keys : t -> t
+
+  val is_dict_contain_const_keys : t -> bool
+
+  val get_dict_read_const_keys : t -> ConstKeys.t option
 
   val get_dynamic_type : t -> dynamic_type_data option
 

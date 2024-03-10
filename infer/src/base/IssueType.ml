@@ -740,6 +740,11 @@ let premature_nil_termination =
     ~user_documentation:[%blob "./documentation/issues/PREMATURE_NIL_TERMINATION_ARGUMENT.md"]
 
 
+let pulse_dict_missing_key =
+  register ~enabled:false ~id:"PULSE_DICT_MISSING_KEY" Error Pulse
+    ~user_documentation:[%blob "./documentation/issues/PULSE_DICT_MISSING_KEY.md"]
+
+
 let pulse_transitive_access =
   register ~enabled:true ~id:"PULSE_TRANSITIVE_ACCESS" Error Pulse
     ~user_documentation:[%blob "./documentation/issues/PULSE_TRANSITIVE_ACCESS.md"]
@@ -895,15 +900,9 @@ let topl_error =
     ~user_documentation:[%blob "./documentation/issues/TOPL_ERROR.md"]
 
 
-let uninitialized_value =
-  register ~id:"UNINITIALIZED_VALUE" Error Uninit
-    ~user_documentation:[%blob "./documentation/issues/UNINITIALIZED_VALUE.md"]
-
-
 let uninitialized_value_pulse =
   register_with_latent ~id:"PULSE_UNINITIALIZED_VALUE" Error Pulse ~hum:"Uninitialized Value"
-    ~user_documentation:
-      "See [UNINITIALIZED_VALUE](#uninitialized_value). Re-implemented using Pulse."
+    ~user_documentation:[%blob "./documentation/issues/PULSE_UNINITIALIZED_VALUE.md"]
 
 
 let unnecessary_copy_pulse =

@@ -184,6 +184,14 @@ module AddressAttributes : sig
 
   val is_csharp_resource_released : AbstractValue.t -> t -> bool
 
+  val add_dict_contain_const_keys : AbstractValue.t -> t -> t
+
+  val remove_dict_contain_const_keys : AbstractValue.t -> t -> t
+
+  val is_dict_contain_const_keys : AbstractValue.t -> t -> bool
+
+  val add_dict_read_const_key : Timestamp.t -> Trace.t -> AbstractValue.t -> Fieldname.t -> t -> t
+
   val add_dynamic_type : Attribute.dynamic_type_data -> AbstractValue.t -> t -> t
 
   val add_static_type : Tenv.t -> Typ.name -> AbstractValue.t -> t -> t

@@ -6,6 +6,7 @@
  *)
 
 open! IStd
+module F = Format
 module L = Logging
 open PulseBasicInterface
 open PulseDomainInterface
@@ -445,7 +446,12 @@ let hhbc_class_get_c value : model =
                  get_static_companion_dsl ~model_desc:"hhbc_class_get_c" typ_name
                in
                assign_ret class_object ) ]
-       ~default:(fun () -> get_static_class value |> lift_to_monad)
+       ~default:(fun () ->
+         let* {location} = DSL.Syntax.get_data in
+         ScubaLogging.log_message_with_location ~label:"hhbc_class_get_c argument"
+           ~loc:(F.asprintf "%a" Location.pp_file_pos location)
+           ~message:"hhbc_class_get_c received a non-constant-string argument." ;
+         get_static_class value |> lift_to_monad )
 
 
 module Dict = struct
@@ -460,25 +466,49 @@ module Dict = struct
     ret (Option.map string ~f:(fun string -> TextualSil.wildcard_sil_fieldname Hack string))
 
 
-  let get_bindings values : (Fieldname.t * DSL.aval) list DSL.model_monad =
+  let read_dict_field_with_check dict field : DSL.aval DSL.model_monad =
+    let open DSL.Syntax in
+    let* () = add_dict_read_const_key dict field in
+    eval_deref_access Read dict (FieldAccess field)
+
+
+  type key_types = AllConstStrs | SomeOthers
+
+  let get_bindings values : ((Fieldname.t * DSL.aval) list * key_types) DSL.model_monad =
     let open DSL.Syntax in
     let chunked = List.chunks_of ~length:2 values in
-    list_filter_map chunked ~f:(function
-      | [string; value] ->
-          let* field = field_of_string_value string in
-          ret (Option.map field ~f:(fun field -> (field, value)))
-      | _ ->
-          ret None )
+    let bindings_type = ref AllConstStrs in
+    let* res =
+      list_filter_map chunked ~f:(fun chunk ->
+          let* res =
+            match chunk with
+            | [string; value] ->
+                let* field = field_of_string_value string in
+                ret (Option.map field ~f:(fun field -> (field, value)))
+            | _ ->
+                ret None
+          in
+          if Option.is_none res then bindings_type := SomeOthers ;
+          ret res )
+    in
+    ret (res, !bindings_type)
 
 
   (* TODO: handle integers keys *)
   let new_dict args : model =
     let open DSL.Syntax in
     start_model
-    @@ let* bindings = get_bindings args in
+    @@ let* bindings, key_types = get_bindings args in
        let* dict = constructor type_name [] in
        let* () =
          list_iter bindings ~f:(fun (field, value) -> write_deref_field ~ref:dict field ~obj:value)
+       in
+       let* () =
+         match key_types with
+         | AllConstStrs ->
+             add_dict_contain_const_keys dict
+         | SomeOthers ->
+             ret ()
        in
        assign_ret dict
 
@@ -492,7 +522,7 @@ module Dict = struct
          list_iter fields ~f:(fun field_access ->
              match (field_access : Access.t) with
              | FieldAccess field_name ->
-                 let* awaitable_value = eval_deref_access Read dict field_access in
+                 let* awaitable_value = read_dict_field_with_check dict field_name in
                  let* awaited_value = await_hack_value awaitable_value in
                  write_deref_field ~ref:new_dict field_name ~obj:awaited_value
              | _ ->
@@ -500,6 +530,19 @@ module Dict = struct
        in
        let* new_awaitable = make_new_awaitable new_dict in
        assign_ret new_awaitable
+
+
+  let hack_add_elem_c_dsl dict key value : unit DSL.model_monad =
+    let open DSL.Syntax in
+    let* field = field_of_string_value key in
+    let* () =
+      match field with
+      | None ->
+          remove_dict_contain_const_keys dict
+      | Some field ->
+          write_deref_field ~ref:dict ~obj:value field
+    in
+    assign_ret dict
 
 
   (* TODO: handle the situation where we have mix of dict and vec *)
@@ -515,7 +558,7 @@ module Dict = struct
               let* field = field_of_string_value key in
               match field with
               | Some field ->
-                  let* inner_dict = eval_deref_access Read dict (FieldAccess field) in
+                  let* inner_dict = read_dict_field_with_check dict field in
                   let* copied_inned_dict = deep_copy ~depth_max:1 inner_dict in
                   let* () = write_deref_field ~ref:dict field ~obj:copied_inned_dict in
                   ret copied_inned_dict
@@ -526,6 +569,7 @@ module Dict = struct
         let* () =
           match field with
           | None ->
+              let* () = remove_dict_contain_const_keys inner_dict in
               deep_await_hack_value value
           | Some field ->
               write_deref_field field ~ref:inner_dict ~obj:value
@@ -544,7 +588,7 @@ module Dict = struct
     let* field = field_of_string_value key in
     match field with
     | Some field ->
-        eval_deref_access Read dict (FieldAccess field)
+        read_dict_field_with_check dict field
     | None ->
         mk_fresh ~model_desc:"hack_array_get_one_dim" ()
 
@@ -686,6 +730,19 @@ module DictIter = struct
     in
     disjuncts [finished; not_finished]
 end
+
+let hack_add_elem_c this key value : model =
+  let open DSL.Syntax in
+  start_model
+  @@
+  let default () =
+    let* fresh = mk_fresh ~model_desc:"hack_add_elem_c" () in
+    assign_ret fresh
+  in
+  dynamic_dispatch this
+    ~cases:[(TextualSil.hack_dict_type_name, fun () -> Dict.hack_add_elem_c_dsl this key value)]
+    ~default
+
 
 let hack_array_cow_set this args : model =
   let open DSL.Syntax in
@@ -1310,12 +1367,15 @@ let matchers : matcher list =
   ; +BuiltinDecl.(match_builtin __get_lazy_class) <>$ capt_exp $--> lazy_class_initialize
   ; +BuiltinDecl.(match_builtin __hack_throw) <>--> hack_throw
   ; -"$builtins" &:: "__sil_splat" <>$ capt_arg_payload $--> SplatedVec.make
+  ; -"$builtins" &:: "hhbc_add_elem_c" <>$ capt_arg_payload $+ capt_arg_payload $+ capt_arg_payload
+    $--> hack_add_elem_c
   ; -"$builtins" &:: "hhbc_await" <>$ capt_arg_payload $--> hack_await
   ; -"$builtins" &:: "hack_array_get" <>$ capt_arg_payload $+++$--> hack_array_get
   ; -"$builtins" &:: "hhbc_idx" <>$ capt_arg_payload $+ capt_arg_payload $+ capt_arg_payload
     $--> hack_array_idx
   ; -"$builtins" &:: "hack_array_cow_set" <>$ capt_arg_payload $+++$--> hack_array_cow_set
   ; -"$builtins" &:: "hack_new_dict" &::.*+++> Dict.new_dict
+  ; -"$builtins" &:: "hhbc_new_dict" &::.*+++> Dict.new_dict
   ; -"$builtins" &:: "hhbc_new_vec" &::.*+++> Vec.new_vec
   ; -"$builtins" &:: "hhbc_not" <>$ capt_arg_payload $--> hhbc_not
   ; -"$builtins" &:: "hack_get_class" <>$ capt_arg_payload $--> hack_get_class

@@ -242,6 +242,20 @@ module Syntax = struct
     >> sat |> exec_partial_operation
 
 
+  let add_dict_contain_const_keys (addr, _) : unit model_monad =
+    PulseOperations.add_dict_contain_const_keys addr |> exec_command
+
+
+  let add_dict_read_const_key (addr, history) key : unit model_monad =
+    let* {path= {timestamp}; location} = get_data in
+    PulseOperations.add_dict_read_const_key timestamp (Immediate {location; history}) addr key
+    >> sat |> exec_partial_command
+
+
+  let remove_dict_contain_const_keys (addr, _) : unit model_monad =
+    PulseOperations.remove_dict_contain_const_keys addr |> exec_command
+
+
   let add_dynamic_type typ (addr, _) : unit model_monad =
     PulseOperations.add_dynamic_type typ addr |> exec_command
 
@@ -270,7 +284,8 @@ module Syntax = struct
 
 
   let and_equal_instanceof (res, _) (obj, _) ty : unit model_monad =
-    PulseArithmetic.and_equal_instanceof res obj ty |> exec_partial_command
+    let* {analysis_data= {tenv}} = get_data in
+    PulseArithmetic.and_equal_instanceof res obj ty ~tenv |> exec_partial_command
 
 
   let and_positive (addr, _) : unit model_monad =

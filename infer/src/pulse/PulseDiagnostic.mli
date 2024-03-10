@@ -93,8 +93,7 @@ type t =
   | ReadUninitialized of ReadUninitialized.t
   | RetainCycle of
       { assignment_traces: Trace.t list
-      ; value: DecompilerExpr.t
-      ; path: DecompilerExpr.t
+      ; values: (DecompilerExpr.t * Location.t option) list
       ; location: Location.t }
   | StackVariableAddressEscape of {variable: Var.t; history: ValueHistory.t; location: Location.t}
   | TaintFlow of

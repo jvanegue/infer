@@ -642,16 +642,6 @@ Example format: for custom annotations com.my.annotation.{Source1,Source2,Sink1}
 { "sources" : ["Source1", "Source2"], "sinks" : ["Sink1"] }|}
 
 
-and _annotation_reachability_builtin_pairs =
-  CLOpt.mk_bool ~long:""
-    ~deprecated:["annotation-reachability-builtin-pairs"]
-    ~deprecated_no:["-no-annotation-reachability-builtin-pairs"]
-    ~in_help:InferCommand.[(Analyze, manual_java)]
-    ~default:true
-    "include default builtin source/sink pairs for the annotation reachability checker \
-     (deprecated, does nothing)"
-
-
 and annotation_reachability_no_allocation =
   CLOpt.mk_bool ~long:"annotation-reachability-no-allocation"
     ~in_help:InferCommand.[(Analyze, manual_java)]
@@ -2265,7 +2255,7 @@ and procedures_summary =
   CLOpt.mk_bool ~long:"procedures-summary" ~default:false
     ~in_help:InferCommand.[(Debug, manual_debug_procedures)]
     "Print the summaries of each procedure in the output of $(b,--procedures). See also \
-     $(b,--procedures-summary-nonempty)."
+     $(b,--procedures-summary-skip-empty)."
 
 
 and procedures_summary_json =
@@ -3483,10 +3473,6 @@ and trace_topl =
   CLOpt.mk_bool ~long:"trace-topl" "Detailed tracing information during Topl analysis"
 
 
-and uninit_interproc =
-  CLOpt.mk_bool ~long:"uninit-interproc" "Run uninit check in the experimental interprocedural mode"
-
-
 and unix_fork =
   CLOpt.mk_bool ~long:"unix-fork"
     ~default:(not (Stdlib.( = ) Version.build_platform Version.Windows))
@@ -4698,8 +4684,6 @@ and trace_events = !trace_events
 and trace_ondemand = !trace_ondemand
 
 and trace_topl = !trace_topl
-
-and uninit_interproc = !uninit_interproc
 
 and unix_fork = !unix_fork
 

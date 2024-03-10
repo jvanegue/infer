@@ -211,7 +211,10 @@ and record_closure astate (path : PathContext.t) loc procname
     let=+ astate, lhs_addr_hist =
       eval_access path Read loc closure_addr_hist (FieldAccess field_name) astate
     in
-    write_deref path loc ~ref:lhs_addr_hist ~obj:(rhs_addr, rhs_history) astate
+    let* astate = write_deref path loc ~ref:lhs_addr_hist ~obj:(rhs_addr, rhs_history) astate in
+    (* This is to update the decompiler entry for lhs_addr *)
+    let astate, _ = Memory.eval_edge lhs_addr_hist Dereference astate in
+    Ok astate
   in
   let++ astate = List.fold captured_vars ~init:(Sat (Ok astate)) ~f:store_captured_var in
   (astate, ValueOrigin.Unknown closure_addr_hist)
@@ -500,6 +503,33 @@ let csharp_resource_release ~recursive address astate =
           astate
   in
   loop AbstractValue.Set.empty address astate
+
+
+let add_dict_contain_const_keys address astate =
+  AddressAttributes.add_dict_contain_const_keys address astate
+
+
+let remove_dict_contain_const_keys address astate =
+  AddressAttributes.remove_dict_contain_const_keys address astate
+
+
+let add_dict_read_const_key timestamp trace address key astate =
+  let has_key =
+    Memory.exists_edge address astate ~f:(fun (access, _) ->
+        match access with
+        | FieldAccess fld ->
+            Fieldname.equal key fld
+        | ArrayAccess _ | TakeAddress | Dereference ->
+            false )
+  in
+  if has_key then Ok astate
+  else if AddressAttributes.is_dict_contain_const_keys address astate then
+    let diagnostic =
+      Diagnostic.ReadUninitialized
+        {typ= DictMissingKey {dict= Decompiler.find address astate; key}; calling_context= []; trace}
+    in
+    Recoverable (astate, [ReportableError {astate; diagnostic}])
+  else Ok (AddressAttributes.add_dict_read_const_key timestamp trace address key astate)
 
 
 let add_dynamic_type typ ?source_file address astate =
