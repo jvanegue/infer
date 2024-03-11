@@ -102,11 +102,11 @@ let pp_ ~is_summary f
     else F.fprintf f "POST=@[%a@]\n @;PRE=[%a]\n" PostDomain.pp post PreDomain.pp pre
   in
   F.fprintf f
-    "@[<v>PATHCOND=%a@;\
-     %t@;\
-     %tneed_dynamic_type_specialization=%a@;\
-     transitive_info=%a@;\
-     skipped_calls=%a@;\
+    "@[<v>PATHCOND=%a@;\ \n
+     %t@;\ \n
+     %tneed_dynamic_type_specialization=%a@;\ \n
+     transitive_info=%a@;\ \n
+     skipped_calls=%a@;\ \n
      Topl=%a@] \n --------------------------------------------------- \n"
     Formula.pp path_condition pp_pre_post pp_decompiler AbstractValue.Set.pp
     need_dynamic_type_specialization TransitiveInfo.pp transitive_info SkippedCalls.pp skipped_calls

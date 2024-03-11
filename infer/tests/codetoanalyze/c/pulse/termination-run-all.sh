@@ -14,7 +14,8 @@ rm -fr infer-out/ infinite.o infer-run.log
 #$HOME/infer/bin/infer run --pulse-only --print-logs -g -- clang++ -c pulseinf/simple_goto_nonterminate.cpp 2> infer-run.log
 #$HOME/infer/bin/infer run --pulse-only --print-logs -g -- clang++ -c pulseinf/two_liner_terminate.cpp 2> infer-run.log
 #$HOME/infer/bin/infer run --pulse-only --print-logs -g -- clang++ -c pulseinf/simple_loop_equal.cpp 2> infer-run.log
-$HOME/infer/bin/infer run --debug-level=2 --pulse-only --print-logs -g -- clang++ -c pulseinf/png_palette_terminate.cpp 2> infer-run.log
+#$HOME/infer/bin/infer run --debug-level=2 --pulse-only --print-logs -g -- clang++ -c pulseinf/png_palette_terminate.cpp 2> infer-run.log
+$HOME/infer/bin/infer run -g --debug-level=2 --print-logs --pulse-only -- clang++ -c pulseinf/loop_conditional_non_terminate.cpp 2> infer-run.log
 
 # All tests in one file (Debug mode)
 #$HOME/infer/bin/infer run --debug-level=2 --pulse-only --print-logs -g -- clang++ -c infinite.cpp 2> infer-run.log

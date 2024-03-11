@@ -1321,7 +1321,7 @@ module PulseTransferFunctions = struct
       (instr : Sil.instr) : ExecutionDomain.t list * PathContext.t * NonDisjDomain.t =
     match astate with
     | AbortProgram _ | LatentAbortProgram _ | LatentInvalidAccess _ | InfiniteProgram _ ->
-       L.debug Analysis Quiet "exec_instr: Abort/Latent/Invalid/Infinite \n";
+       (* L.debug Analysis Quiet "exec_instr: Abort/Latent/Invalid/Infinite \n"; *)
         ([astate], path, astate_n)
     (* an exception has been raised, we skip the other instructions until we enter in
        exception edge *)

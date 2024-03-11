@@ -88,7 +88,7 @@ let pp fmt exec_state = pp_ AbductiveDomain.pp fmt exec_state
 let widenstate = ref None;; 
 let () = AnalysisGlobalState.register_ref ~init:(fun () -> Some (Caml.Hashtbl.create 16)) widenstate;;
 
-let back_edge (prev: t list) (next: t list) _ : t list * int =
+let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
 
   (* Instead of this, we want to stop reporting at current and next widening iteration 
      if we already have had an alert at a previous widening iteration *)
@@ -110,9 +110,8 @@ let back_edge (prev: t list) (next: t list) _ : t list * int =
    *)
 
   (* Use this when disabling debug output *)
- let print_warning _ _ _ = () in
+  (* let print_warning _ _ _ = () in *)
 
- (*
   let print_warning s cnt state =
     (* let _ = state in *)
     L.debug Analysis Quiet "JV: BACK-EDGE FOUND infinite state from %s at iter %i with cnt %i) \n" s num_iters cnt; 
@@ -121,7 +120,6 @@ let back_edge (prev: t list) (next: t list) _ : t list * int =
     pp_ AbductiveDomain.pp Format.std_formatter state; 
     L.debug Analysis Quiet "JV: End infinite state numiter %d \n" num_iters; 
   in
-   *)
   
   let rec detect_elem e lst curi : bool * int =
     match lst with
@@ -151,7 +149,7 @@ let back_edge (prev: t list) (next: t list) _ : t list * int =
   (* L.debug Analysis Quiet "PULSEINF: BACKEDGE prevlen %d nextlen %d diff %d worklen %d \n" prevlen nextlen (nextlen - prevlen) worklen; *)
 
   (* Do-nothing version to avoid debug output *)
-  let print_workset _ = true in 
+  let print_workset _ = L.debug Analysis Quiet "JV: Computing Workset at numiter %i \n" num_iters; true in 
   
   (* Pulse-inf debug output: useful but verbose *)
 (*
