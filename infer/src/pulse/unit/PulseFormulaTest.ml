@@ -32,6 +32,9 @@ open PulseSatUnsat.Import
 (** a literal integer leaves the formula unchanged and returns a [ConstOperand] *)
 let i i phi = Sat (phi, ConstOperand (Cint (IntLit.of_int i)))
 
+(** a literal string leaves the formula unchanged and returns a [ConstOperand] *)
+let s s phi = Sat (phi, ConstOperand (Cstr s))
+
 (** similarly as for literals; this is not used directly in tests so the name is a bit more
     descriptive *)
 let op_of_var x phi = Sat (phi, AbstractValueOperand x)
@@ -68,6 +71,14 @@ let ( / ) f1 f2 phi = of_binop DivI f1 f2 phi
 let ( & ) f1 f2 phi = of_binop BAnd f1 f2 phi
 
 let ( mod ) f1 f2 phi = of_binop Mod f1 f2 phi
+
+let ( ^ ) f1 f2 phi =
+  let* phi, op1 = f1 phi in
+  let* phi, op2 = f2 phi in
+  let v = Var.mk_fresh () in
+  let+ phi, _new_eqs = and_equal_string_concat v op1 op2 phi in
+  (phi, AbstractValueOperand v)
+
 
 let eq f1 f2 phi = of_binop Eq f1 f2 phi
 
@@ -352,8 +363,7 @@ let%test_module "normalization" =
         Formula:
           conditions: (empty)
           phi: linear_eqs: x = -v6 +v8 -1 ∧ v7 = v8 -1 ∧ v10 = 0
-               && term_eqs: 0=v10∧[-v6 +v8 -1]=x∧[v8 -1]=v7∧([z]×[v8])=v9
-                            ∧([v]×[y])=v6∧([v9]÷[w])=v10
+               && term_eqs: 0=v10∧[-v6 +v8 -1]=x∧[v8 -1]=v7∧(z×v8)=v9∧(v×y)=v6∧(v9÷w)=v10
                && intervals: v10=0
         Result: same|}]
 
@@ -507,10 +517,7 @@ let%test_module "non-linear simplifications" =
         {|
         Formula:
           conditions: (empty)
-          phi: var_eqs: w=v7=v8=v9=v10
-               && linear_eqs: w = 0
-               && term_eqs: 0=w∧([x]×[z])=v6
-               && intervals: w=0
+          phi: var_eqs: w=v7=v8=v9=v10 && linear_eqs: w = 0 && term_eqs: 0=w∧(x×z)=v6 && intervals: w=0
         Result: changed
           conditions: (empty) phi: term_eqs: 0=w|}]
 
@@ -673,10 +680,10 @@ let%test_module "conjunctive normal form" =
         {|
           Formula:
             conditions: (empty)
-            phi: var_eqs: a4=a3=a2=x=v6=v7=v8=v9=v10
-                 && linear_eqs: a4 = 0
-                 && term_eqs: 0=a4
-                 && intervals: a4=0
+            phi: var_eqs: a5=a4=a3=a2=x=v6=v7=v8=v9=v10
+                 && linear_eqs: a5 = 0
+                 && term_eqs: 0=a5
+                 && intervals: a5=0
           Result: same |}]
 
 
@@ -694,10 +701,70 @@ let%test_module "conjunctive normal form" =
         {|
           Formula:
             conditions: (empty)
-            phi: var_eqs: a3=a1 ∧ a2=x ∧ v6=v7
-                 && linear_eqs: a2 = a3 +1 ∧ v6 = 1
-                 && term_eqs: 1=v6∧[a3 +1]=a2
+            phi: var_eqs: a4=a2=x ∧ a3=a1 ∧ v6=v7
+                 && linear_eqs: a3 = a4 -1 ∧ v6 = 1
+                 && term_eqs: 1=v6∧[a4 -1]=a3
                  && intervals: v8≠0
                  && atoms: {v8 ≠ 0}
           Result: same|}]
+  end )
+
+
+let%test_module "non-numerical constants" =
+  ( module struct
+    let%expect_test _ =
+      normalize (x = s "hello world") ;
+      [%expect
+        {|
+        Formula:
+          conditions: (empty) phi: const_eqs: x="hello world" && term_eqs: "hello world"=x
+        Result: same |}]
+
+
+    let%expect_test _ =
+      normalize (x = s "hello" && x = s "world") ;
+      [%expect {|
+        Formula:
+          unsat
+        Result: same |}]
+
+
+    let%expect_test _ =
+      normalize (x = s "hello" ^ s " " ^ s "world" && y = s "hello world" && x = y) ;
+      [%expect
+        {|
+        Formula:
+          conditions: (empty)
+          phi: var_eqs: x=y=v7
+               && const_eqs: x="hello world" ∧ y="hello world" ∧ v6=" world"
+               && term_eqs: " world"=v6∧"hello world"=x∧("hello"^v6)=x
+        Result: same |}]
+
+
+    let%expect_test _ =
+      normalize (x = s "hello" ^ s "world" && y = s "no match" && x = y) ;
+      [%expect {|
+        Formula:
+          unsat
+        Result: same |}]
+
+
+    let%expect_test _ =
+      normalize (x = y ^ z && y = s "hello" && z = s "world" && x = y) ;
+      [%expect {|
+        Formula:
+          unsat
+        Result: same |}]
+
+
+    let%expect_test _ =
+      normalize (x = y ^ z && y = s "hello" && x = s "prefix cannot match") ;
+      [%expect
+        {|
+        Formula:
+          conditions: (empty)
+          phi: var_eqs: x=v6
+               && const_eqs: x="prefix cannot match" ∧ y="hello"
+               && term_eqs: "hello"=y∧"prefix cannot match"=x∧("hello"^z)=x
+        Result: same |}]
   end )
