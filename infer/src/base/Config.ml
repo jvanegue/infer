@@ -654,8 +654,8 @@ and annotation_reachability_expensive =
   CLOpt.mk_bool ~long:"annotation-reachability-expensive"
     ~in_help:InferCommand.[(Analyze, manual_java)]
     ~default:false
-    "check if expensive methods (annotated @Expensive or modeled) can call @PerformanceCritical \
-     (with annotation reachability checker)"
+    "check if methods annotated with @PerformanceCritical can call expensive methods (annotated \
+     @Expensive or modeled, with annotation reachability checker)"
 
 
 and append_buck_flavors =
@@ -848,6 +848,14 @@ and buck2_build_args_no_inline_rev =
     ~in_help:InferCommand.[(Capture, manual_buck)]
     "Pass values as command-line arguments to invocations of $(i,`buck2 build`), don't inline any \
      args starting with '@'. Only valid for $(b,--buck-clang)."
+
+
+and buck2_bxl_capture_file_block_list =
+  CLOpt.mk_string_list ~long:"buck2-bxl-capture-file-block-list"
+    ~in_help:InferCommand.[(Run, manual_buck); (Capture, manual_buck)]
+    ~meta:"regex"
+    "Skip capture of files matched by the specified regular expression. Only the clang,      Buck2 \
+     integration is supported, not Java."
 
 
 and buck2_bxl_target =
@@ -3828,6 +3836,8 @@ and buck = !buck
 and buck2_build_args = RevList.to_list !buck2_build_args
 
 and buck2_build_args_no_inline = RevList.to_list !buck2_build_args_no_inline_rev
+
+and buck2_bxl_capture_file_block_list = RevList.to_list !buck2_bxl_capture_file_block_list
 
 and buck2_bxl_target = !buck2_bxl_target
 
