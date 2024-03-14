@@ -3635,7 +3635,8 @@ let prune_binop ~negated (bop : Binop.t) x y formula =
 
 
 module DynamicTypes = struct
-  let evaluate_instanceof tenv ~get_dynamic_type v typ =
+  let evaluate_instanceof _tenv ~get_dynamic_type v typ =
+    let tenv = PulseContext.tenv_exn () in
     get_dynamic_type v
     |> Option.map ~f:(fun dynamic_type ->
            let is_instanceof =

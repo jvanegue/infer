@@ -92,13 +92,16 @@ let check_retain_cycles tenv location addresses orig_astate =
       (* [seen] tracks addresses met in the current path
          [addr] is the address to explore
       *)
-      if AbstractValue.Set.mem addr !checked then Ok ()
+      if AbstractValue.Set.mem addr !checked then Ok astate
       else
         let value = Decompiler.find addr astate in
         let is_known = not (DecompilerExpr.is_unknown value) in
         let is_seen = List.mem ~equal:AbstractValue.equal seen addr in
         let is_ref_counted_or_block = is_ref_counted_or_block addr astate in
-        if is_known && is_seen && is_ref_counted_or_block then
+        let not_previously_reported =
+          not (AddressAttributes.is_in_reported_retain_cycle addr astate)
+        in
+        if is_known && is_seen && is_ref_counted_or_block && not_previously_reported then
           let seen = List.rev seen in
           let cycle = crop_seen_to_cycle seen addr in
           let cycle = remove_non_objc_objects cycle astate in
@@ -106,16 +109,21 @@ let check_retain_cycles tenv location addresses orig_astate =
           if List.exists ~f:(fun {Diagnostic.trace} -> Option.is_some trace) values then
             match List.rev values with
             | {Diagnostic.trace} :: _ ->
+                let astate =
+                  List.fold ~init:astate
+                    ~f:(fun astate addr -> AddressAttributes.in_reported_retain_cycle addr astate)
+                    seen
+                in
                 let location =
                   Option.value_map trace
                     ~f:(fun trace -> Trace.get_outer_location trace)
                     ~default:location
                 in
                 let diagnostic = Diagnostic.RetainCycle {values; location} in
-                Recoverable ((), [ReportableError {astate; diagnostic}])
+                Recoverable (astate, [ReportableError {astate; diagnostic}])
             | [] ->
-                Ok ()
-          else Ok ()
+                Ok astate
+          else Ok astate
         else (
           if is_seen && ((not is_known) || not is_ref_counted_or_block) then
             (* add the `UNKNOWN` address at which we have found a cycle to the [checked]
@@ -124,12 +132,12 @@ let check_retain_cycles tenv location addresses orig_astate =
                we could loop forever otherwise *)
             checked := AbstractValue.Set.add addr !checked ;
           let res =
-            AbductiveDomain.Memory.fold_edges ~init:(Ok ()) addr astate
+            AbductiveDomain.Memory.fold_edges ~init:(Ok astate) addr astate
               ~f:(fun acc (access, (accessed_addr, accessed_hist)) ->
                 match acc with
                 | Recoverable _ | FatalError _ ->
                     acc
-                | Ok () ->
+                | Ok astate ->
                     if PulseRefCounting.is_strong_access tenv access then
                       (* This is needed to update the decompiler and be able to get good values when printing the path (above).
                           We don't want to return those changes in the decompiler to the rest of the analysis though, that was
@@ -140,7 +148,7 @@ let check_retain_cycles tenv location addresses orig_astate =
                       in
                       let seen = addr :: seen in
                       contains_cycle ~seen (accessed_addr, accessed_hist) astate
-                    else Ok () )
+                    else Ok astate )
           in
           (* all paths down [addr] have been explored *)
           checked := AbstractValue.Set.add addr !checked ;
@@ -148,13 +156,13 @@ let check_retain_cycles tenv location addresses orig_astate =
     in
     contains_cycle ~seen:[] src_addr orig_astate
   in
-  List.fold addresses ~init:(Ok ()) ~f:(fun acc (addr, hist) ->
+  List.fold addresses ~init:(Ok orig_astate) ~f:(fun acc (addr, hist) ->
       match acc with
       | Recoverable _ | FatalError _ ->
           acc
-      | Ok () ->
+      | Ok astate ->
           if is_ref_counted_or_block addr orig_astate then check_retain_cycle (addr, hist)
-          else Ok () )
+          else Ok astate )
 
 
 let check_retain_cycles_call tenv location func_args ret_opt astate =
@@ -166,9 +174,9 @@ let check_retain_cycles_call tenv location func_args ret_opt astate =
   let addresses = Option.value_map ~default:actuals ~f:(fun ret -> ret :: actuals) ret_opt in
   if Language.curr_language_is Language.Clang then
     check_retain_cycles tenv location addresses astate
-  else Ok ()
+  else Ok astate
 
 
 let check_retain_cycles_store tenv location addr astate =
   if Language.curr_language_is Language.Clang then check_retain_cycles tenv location [addr] astate
-  else Ok ()
+  else Ok astate
