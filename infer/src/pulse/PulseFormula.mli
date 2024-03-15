@@ -24,8 +24,8 @@ module LinArith : sig
   (** linear combination of variables, eg [2·x + 3/4·y + 12] *)
   type t [@@deriving compare, yojson_of, equal]
 end
-  
-module Term : sig 
+
+module Term : sig
   type t =
     | Const of Q.t
     | String of string
@@ -52,6 +52,7 @@ module Term : sig
     | BitShiftLeft of t * t
     | BitShiftRight of t * t
     | BitXor of t * t
+    | StringConcat of t * t
     | IsInstanceOf of Var.t * Typ.t
     | IsInt of t
   [@@deriving compare, equal, yojson_of]
