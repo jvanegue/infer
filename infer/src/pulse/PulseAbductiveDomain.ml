@@ -589,10 +589,6 @@ module Internal = struct
       BaseAddressAttributes.get_config_usage addr (astate.post :> base_domain).attrs
 
 
-    let get_const_string addr astate =
-      BaseAddressAttributes.get_const_string addr (astate.post :> base_domain).attrs
-
-
     let get_valid_returned_from_unknown addr astate =
       let open IOption.Let_syntax in
       let+ returned_from =
@@ -1727,7 +1723,7 @@ let discard_unreachable_ ~for_summary ({pre; post} as astate) =
   (astate, pre_addresses, post_addresses, dead_addresses)
 
 
-let filter_for_summary tenv proc_name astate0 =
+let filter_for_summary proc_name astate0 =
   let open SatUnsat.Import in
   L.d_printfln "Canonicalizing..." ;
   let* astate_before_filter = canonicalize astate0 in
@@ -1760,7 +1756,7 @@ let filter_for_summary tenv proc_name astate0 =
     |> Option.map ~f:(fun dynamic_type_data -> dynamic_type_data.Attribute.typ)
   in
   let+ path_condition, live_via_arithmetic, new_eqs =
-    Formula.simplify tenv ~get_dynamic_type ~precondition_vocabulary ~keep:live_addresses
+    Formula.simplify ~get_dynamic_type ~precondition_vocabulary ~keep:live_addresses
       astate.path_condition
   in
   (* [unsafe_cast_set] is safe because a) all the values are actually canon_values in disguise,
@@ -1878,14 +1874,14 @@ module Summary = struct
 
   let remove_all_must_not_be_tainted = SafeAttributes.remove_all_must_not_be_tainted
 
-  let of_post_ tenv proc_name (proc_attrs : ProcAttributes.t) location astate0 =
+  let of_post_ proc_name (proc_attrs : ProcAttributes.t) location astate0 =
     let open SatUnsat.Import in
     let astate = astate0 in
     (* NOTE: we normalize (to strengthen the equality relation used by canonicalization) then
        canonicalize *before* garbage collecting unused addresses in case we detect any last-minute
        contradictions about addresses we are about to garbage collect *)
     let* path_condition, new_eqs =
-      Formula.normalize tenv
+      Formula.normalize
         ~get_dynamic_type:(fun v ->
           (* [unsafe_cast] is safe because the formula will only query canonical values *)
           BaseAddressAttributes.get_dynamic_type (astate.post :> BaseDomain.t).attrs
@@ -1899,9 +1895,7 @@ module Summary = struct
     (* do not store the decompiler in the summary and make sure we only use the original one by
        marking it invalid *)
     let astate = {astate with decompiler= Decompiler.invalid} in
-    let* astate, live_addresses, dead_addresses, new_eqs =
-      filter_for_summary tenv proc_name astate
-    in
+    let* astate, live_addresses, dead_addresses, new_eqs = filter_for_summary proc_name astate in
     let+ astate, error =
       match error with None -> incorporate_new_eqs astate new_eqs | Some _ -> Sat (astate, error)
     in
@@ -1954,8 +1948,8 @@ module Summary = struct
             )
 
 
-  let of_post tenv proc_name proc_attrs location astate0 =
-    let summary_sat = of_post_ tenv proc_name proc_attrs location astate0 in
+  let of_post proc_name proc_attrs location astate0 =
+    let summary_sat = of_post_ proc_name proc_attrs location astate0 in
     match summary_sat with
     | Sat _ ->
         summary_sat
@@ -2376,10 +2370,6 @@ module AddressAttributes = struct
 
 
   let is_std_moved v astate = SafeAttributes.is_std_moved (CanonValue.canon' astate v) astate
-
-  let get_const_string v astate =
-    SafeAttributes.get_const_string (CanonValue.canon' astate v) astate
-
 
   let get_address_of_stack_variable v astate =
     SafeAttributes.get_address_of_stack_variable (CanonValue.canon' astate v) astate

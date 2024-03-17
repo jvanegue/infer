@@ -140,7 +140,6 @@ val and_equal_instanceof :
   -> Var.t
   -> Typ.t
   -> get_dynamic_type:(Var.t -> Typ.t option)
-  -> tenv:Tenv.t
   -> t
   -> (t * new_eqs) SatUnsat.t
 
@@ -161,12 +160,11 @@ val prune_binop : negated:bool -> Binop.t -> operand -> operand -> t -> (t * new
 
 (** {3 Operations} *)
 
-val normalize : Tenv.t -> get_dynamic_type:(Var.t -> Typ.t option) -> t -> (t * new_eqs) SatUnsat.t
+val normalize : get_dynamic_type:(Var.t -> Typ.t option) -> t -> (t * new_eqs) SatUnsat.t
 (** think a bit harder about the formula *)
 
 val simplify :
-     Tenv.t
-  -> get_dynamic_type:(Var.t -> Typ.t option)
+     get_dynamic_type:(Var.t -> Typ.t option)
   -> precondition_vocabulary:Var.Set.t
   -> keep:Var.Set.t
   -> t
@@ -174,7 +172,9 @@ val simplify :
 
 val is_known_zero : t -> Var.t -> bool
 
-val get_known_constant_opt : t -> Var.t -> Q.t option
+val as_constant_q : t -> Var.t -> Q.t option
+
+val as_constant_string : t -> Var.t -> string option
 
 val is_known_non_pointer : t -> Var.t -> bool
 
@@ -216,3 +216,5 @@ val absval_of_int : t -> IntLit.t -> t * Var.t
     {!IR.IntLit.t}. The idea is that clients will record in the abstract state that the returned [t]
     is equal to the given integer. If the same integer is queried later on then this module will
     return the same abstract variable. *)
+
+val absval_of_string : t -> string -> t * Var.t

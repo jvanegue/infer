@@ -28,6 +28,8 @@ and 'a execution =
   | Other of ExecutionDomain.t (* should never contain a ExecutionDomain.ContinueProgram *)
 
 module Syntax = struct
+  module ModeledField = PulseOperations.ModeledField
+
   let ret (a : 'a) : 'a model_monad =
    fun _data astate non_disj -> ([Ok (ContinueProgram (a, astate))], non_disj)
 
@@ -181,13 +183,25 @@ module Syntax = struct
   let as_constant_q (v, _) : Q.t option model_monad =
    fun data astate ->
     let phi = astate.path_condition in
-    ret (Formula.get_known_constant_opt phi v) data astate
+    ret (Formula.as_constant_q phi v) data astate
 
 
   let as_constant_int v : int option model_monad =
     let* n_q_opt = as_constant_q v in
     let n = Option.bind n_q_opt ~f:QSafeCapped.to_int in
     ret n
+
+
+  let as_constant_string (v, _) : string option model_monad =
+   fun data astate ->
+    let phi = astate.path_condition in
+    ret (Formula.as_constant_string phi v) data astate
+
+
+  let aval_of_int hist i : aval model_monad =
+   fun data astate ->
+    let astate, v = PulseArithmetic.absval_of_int astate (IntLit.of_int i) in
+    ret (v, hist) data astate
 
 
   let get_known_fields (v, _) =
@@ -283,8 +297,7 @@ module Syntax = struct
 
 
   let and_equal_instanceof (res, _) (obj, _) ty : unit model_monad =
-    let* {analysis_data= {tenv}} = get_data in
-    PulseArithmetic.and_equal_instanceof res obj ty ~tenv |> exec_partial_command
+    PulseArithmetic.and_equal_instanceof res obj ty |> exec_partial_command
 
 
   let and_positive (addr, _) : unit model_monad =
@@ -297,8 +310,8 @@ module Syntax = struct
     ret () data astate
 
 
-  let get_const_string (addr, _) : string option model_monad =
-    AddressAttributes.get_const_string addr |> exec_pure_operation
+  let get_const_string (v, _) : string option model_monad =
+   fun data astate -> ret (PulseArithmetic.as_constant_string astate v) data astate
 
 
   let tenv_resolve_field_info typ_name field_name : Struct.field_info option model_monad =
@@ -428,6 +441,16 @@ module Syntax = struct
 
   let prune_eq_int arg i : unit model_monad =
     prune_binop ~negated:false Eq (aval_operand arg) (PulseArithmetic.ConstOperand (Cint i))
+
+
+  let prune_eq_string (v, _) s : unit model_monad =
+    PulseArithmetic.prune_binop ~negated:false Eq (AbstractValueOperand v) (ConstOperand (Cstr s))
+    |> exec_partial_command
+
+
+  let prune_ne_string (v, _) s : unit model_monad =
+    PulseArithmetic.prune_binop ~negated:false Ne (AbstractValueOperand v) (ConstOperand (Cstr s))
+    |> exec_partial_command
 
 
   let prune_eq_zero (addr, _) : unit model_monad =

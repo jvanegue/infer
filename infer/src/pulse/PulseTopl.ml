@@ -199,9 +199,6 @@ end = struct
 
   let substitute = sub_list substitute_predicate
 
-  (* TODO: Replace with a proper type environment. *)
-  let default_tenv = Tenv.create ()
-
   let pp_operator f operator =
     match operator with
     | Builtin op ->
@@ -340,9 +337,7 @@ end = struct
             let* path_condition, new_eqs_a =
               Formula.prune_binop ~negated:false op l r path_condition
             in
-            let* path_condition, new_eqs_b =
-              Formula.normalize default_tenv ~get_dynamic_type path_condition
-            in
+            let* path_condition, new_eqs_b = Formula.normalize ~get_dynamic_type path_condition in
             let new_eqs =
               let new_eqs = RevList.empty in
               let new_eqs =
@@ -556,7 +551,7 @@ let deref_field_access pulse_state value class_name field_name : Formula.operand
   let* v1, _hist = Memory.Edges.find_opt (FieldAccess field) edges in
   let* edges = Memory.find_opt v1 heap in
   let* v2, _hist = Memory.Edges.find_opt Dereference edges in
-  match BaseAddressAttributes.get_const_string v2 pulse_state.pulse_post.attrs with
+  match Formula.as_constant_string pulse_state.path_condition v2 with
   | Some r ->
       Some (Formula.ConstOperand (Const.Cstr r))
   | _ ->

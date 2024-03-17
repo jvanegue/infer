@@ -109,8 +109,11 @@ val and_equal_instanceof :
      AbstractValue.t
   -> AbstractValue.t
   -> Typ.t
-  -> tenv:Tenv.t
   -> AbductiveDomain.t
   -> AbductiveDomain.t AccessResult.t SatUnsat.t
 
 val absval_of_int : AbductiveDomain.t -> IntLit.t -> AbductiveDomain.t * AbstractValue.t
+
+val absval_of_string : AbductiveDomain.t -> string -> AbductiveDomain.t * AbstractValue.t
+
+val as_constant_string : AbductiveDomain.t -> AbstractValue.t -> string option

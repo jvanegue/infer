@@ -246,8 +246,6 @@ module AddressAttributes : sig
 
   val get_config_usage : AbstractValue.t -> t -> Attribute.ConfigUsage.t option
 
-  val get_const_string : AbstractValue.t -> t -> string option
-
   val get_valid_returned_from_unknown : AbstractValue.t -> t -> AbstractValue.t list option
 
   val get_written_to : AbstractValue.t -> t -> (Timestamp.t * Trace.t) option
@@ -346,8 +344,7 @@ module Summary : sig
   val add_need_dynamic_type_specialization : AbstractValue.t -> summary -> summary
 
   val of_post :
-       Tenv.t
-    -> Procname.t
+       Procname.t
     -> ProcAttributes.t
     -> Location.t
     -> t

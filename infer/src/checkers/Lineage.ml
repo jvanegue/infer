@@ -29,47 +29,10 @@ module PPNode = struct
     (Procdesc.Node.dummy dummy_procname, dummy_instr_index)
 end
 
+open LineageShape.StdModules
 module Shapes = LineageShape.Summary
-module FieldLabel = LineageShape.FieldLabel
-module FieldPath = LineageShape.FieldPath
-module Cell = LineageShape.Cell
 
-module VarPath : sig
-  (** A variable path is a pair of a variable and a possibly empty list of subscripted fields. They
-      are built from their in-program occurrences. They may semantically have sub-fields themselves:
-      it is the job of the {!Cell} module to determine the final graph nodes constructed from paths. *)
-
-  (** The type of variable paths: a variable and a possibly empty list of subscripted fields. *)
-  type t = Var.t * FieldPath.t
-
-  val var : Var.t -> t
-
-  val sub_label : t -> FieldLabel.t -> t
-  (** Subscript one sub-field from a variable path.*)
-
-  val sub_path : t -> FieldPath.t -> t
-  (** Subscript nested sub-fields from a variable path. *)
-
-  val make : Var.t -> FieldPath.t -> t
-
-  val pvar : Pvar.t -> t
-
-  val ident : Ident.t -> t
-end = struct
-  type t = Var.t * FieldPath.t
-
-  let var v = (v, [])
-
-  let sub_path (var, field_path) subfields = (var, field_path @ subfields)
-
-  let sub_label var_path label = sub_path var_path [label]
-
-  let make var field_path = (var, field_path)
-
-  let pvar pvar = var (Var.of_pvar pvar)
-
-  let ident id = var (Var.of_id id)
-end
+type shapes = Shapes.t option
 
 module Local = struct
   module T = struct
@@ -109,9 +72,9 @@ module Vertex = struct
     type t =
       | Local of ((Local.t * PPNode.t)[@sexp.opaque])
       | Argument of int * FieldPath.t
-      | ArgumentOf of int * (Procname.t[@sexp.opaque])
+      | ArgumentOf of (Procname.t[@sexp.opaque]) * int
       | Captured of int
-      | CapturedBy of int * (Procname.t[@sexp.opaque])
+      | CapturedBy of (Procname.t[@sexp.opaque]) * int
       | Return of FieldPath.t
       | ReturnOf of (Procname.t[@sexp.opaque])
       | Self
@@ -134,9 +97,9 @@ module Vertex = struct
         Format.fprintf fmt "cap%d" index
     | Return field_path ->
         Format.fprintf fmt "ret%a" FieldPath.pp field_path
-    | CapturedBy (index, proc_name) ->
+    | CapturedBy (proc_name, index) ->
         Format.fprintf fmt "%a.cap%d" Procname.pp proc_name index
-    | ArgumentOf (index, proc_name) ->
+    | ArgumentOf (proc_name, index) ->
         Format.fprintf fmt "%a.arg%d" Procname.pp proc_name index
     | ReturnOf proc_name ->
         Format.fprintf fmt "%a.ret" Procname.pp proc_name
@@ -296,7 +259,7 @@ module G = struct
 
 
       type term =
-        { term_data: string [@key "name" (* T106560112 *)]
+        { term_name: string [@key "name" (* T106560112 *)]
         ; term_type: term_type [@key "variable_type" (* T106560112 *)] }
       [@@deriving yojson_of]
 
@@ -396,7 +359,7 @@ module G = struct
         - With some information lost/summarised, such as fields of procedure arguments/return
           (although the Derive edges will be generated taking fields into account, we only output
           one node for each argument in the Json graph to denote function calls). *)
-    type data_local = Argument of int | Captured of int | Return | Normal of Local.t | Function
+    type local_vertex = Argument of int | Captured of int | Return | Normal of Local.t | Function
 
     module Id = struct
       (** Internal representation of an Id. *)
@@ -453,8 +416,8 @@ module G = struct
 
       let of_term_type (term_type : Json.term_type) = Z.of_int (Json.rank_of_term_type term_type)
 
-      let of_term {Json.term_data; term_type} : t =
-        of_list [of_string term_data; of_term_type term_type]
+      let of_term {Json.term_name; term_type} : t =
+        of_list [of_string term_name; of_term_type term_type]
 
 
       let of_kind (kind : Edge.kind) : t = Z.of_int (Edge.Kind.to_rank kind)
@@ -474,9 +437,9 @@ module G = struct
         try Z.to_int64 id with Z.Overflow -> L.die InternalError "Hash does not fit in int64"
     end
 
-    let term_of_data (data : data_local) : Json.term =
-      let term_data =
-        match data with
+    let term_of_vertex (vertex : local_vertex) : Json.term =
+      let term_name =
+        match vertex with
         | Argument index ->
             Format.asprintf "$arg%d" index
         | Captured index ->
@@ -491,7 +454,7 @@ module G = struct
             "$fun"
       in
       let term_type : Json.term_type =
-        match data with
+        match vertex with
         | Argument _ | Captured _ ->
             Argument
         | Return ->
@@ -507,7 +470,7 @@ module G = struct
         | Function ->
             Function
       in
-      {Json.term_data; term_type}
+      {Json.term_name; term_type}
 
 
     module JsonCacheKey = struct
@@ -566,9 +529,9 @@ module G = struct
 
 
     let save_vertex proc_desc (vertex : V.t) =
-      let save ?(write = true) procname state_local data_local =
+      let save ?(write = true) procname state_local local_vertex =
         let state_id = save_state ~write procname state_local in
-        let term = term_of_data data_local in
+        let term = term_of_vertex local_vertex in
         let node_id = Id.of_list [state_id; Id.of_term term] in
         if write then
           write_json Node node_id
@@ -585,11 +548,11 @@ module G = struct
           (* We don't distinguish the fields of arguments when generating Argument nodes. See
              {!type:data_local}. *)
           save procname start (Argument index)
-      | ArgumentOf (index, callee_procname) ->
+      | ArgumentOf (callee_procname, index) ->
           save callee_procname (Start Location.dummy) (Argument index)
       | Captured index ->
           save procname start (Captured index)
-      | CapturedBy (index, lambda_procname) ->
+      | CapturedBy (lambda_procname, index) ->
           save ~write:false lambda_procname (Start Location.dummy) (Captured index)
       | Return _field_path ->
           (* We don't distinguish the fields of the returned value when generating Return nodes. See
@@ -744,15 +707,15 @@ module Tito : sig
 
   val fold :
        t
-    -> init:'init
+    -> init:'accum
     -> f:
          (   arg_index:int
           -> arg_field_path:FieldPath.t
           -> ret_field_path:FieldPath.t
           -> shape_is_preserved:bool
-          -> 'init
-          -> 'init )
-    -> 'init
+          -> 'accum
+          -> 'accum )
+    -> 'accum
 end = struct
   (* Utility pretty printers *)
 
@@ -1219,9 +1182,9 @@ module Domain : sig
 
     type t
 
-    val captured_by : int -> Procname.t -> t
+    val captured_by : Procname.t -> int -> t
 
-    val argument_of : int -> Procname.t -> t
+    val argument_of : Procname.t -> int -> t
 
     val return : FieldPath.t -> t
   end
@@ -1250,16 +1213,10 @@ module Domain : sig
       corresponding [add_write_...] function instead. *)
 
   val add_flow_from_path :
-       shapes:Shapes.t option
-    -> node:PPNode.t
-    -> kind:Edge.kind
-    -> src:VarPath.t
-    -> dst:Dst.t
-    -> t
-    -> t
+    shapes:shapes -> node:PPNode.t -> kind:Edge.kind -> src:VarPath.t -> dst:Dst.t -> t -> t
 
   val add_flow_from_path_f :
-       shapes:Shapes.t option
+       shapes:shapes
     -> node:PPNode.t
     -> kind_f:(FieldPath.t -> Edge.kind)
     -> src:VarPath.t
@@ -1280,16 +1237,10 @@ module Domain : sig
       corresponding [add_flow_...] function instead. *)
 
   val add_write :
-       shapes:Shapes.t option
-    -> node:PPNode.t
-    -> kind:Edge.kind
-    -> src:Src.t
-    -> dst:VarPath.t
-    -> t
-    -> t
+    shapes:shapes -> node:PPNode.t -> kind:Edge.kind -> src:Src.t -> dst:VarPath.t -> t -> t
 
   val add_write_f :
-       shapes:Shapes.t option
+       shapes:shapes
     -> node:PPNode.t
     -> kind_f:(FieldPath.t -> Edge.kind)
     -> src_f:(FieldPath.t -> Src.t)
@@ -1304,25 +1255,13 @@ module Domain : sig
       fields already present in the [dst] path. *)
 
   val add_write_from_local :
-       shapes:Shapes.t option
-    -> node:PPNode.t
-    -> kind:Edge.kind
-    -> src:Local.t
-    -> dst:VarPath.t
-    -> t
-    -> t
+    shapes:shapes -> node:PPNode.t -> kind:Edge.kind -> src:Local.t -> dst:VarPath.t -> t -> t
 
   val add_write_from_local_set :
-       shapes:Shapes.t option
-    -> node:PPNode.t
-    -> kind:Edge.kind
-    -> src:Local.Set.t
-    -> dst:VarPath.t
-    -> t
-    -> t
+    shapes:shapes -> node:PPNode.t -> kind:Edge.kind -> src:Local.Set.t -> dst:VarPath.t -> t -> t
 
   val add_write_parallel :
-       shapes:Shapes.t option
+       shapes:shapes
     -> node:PPNode.t
     -> kind:Edge.kind
     -> src:VarPath.t
@@ -1337,13 +1276,7 @@ module Domain : sig
       and destination paths) won't be added. *)
 
   val add_write_product :
-       shapes:Shapes.t option
-    -> node:PPNode.t
-    -> kind:Edge.kind
-    -> src:VarPath.t
-    -> dst:VarPath.t
-    -> t
-    -> t
+    shapes:shapes -> node:PPNode.t -> kind:Edge.kind -> src:VarPath.t -> dst:VarPath.t -> t -> t
   (** Add flow from every cell under the source variable path to every cell under the destination
       variable path. *)
 end = struct
@@ -1399,7 +1332,7 @@ end = struct
 
     let captured_by i proc_name : t = CapturedBy (i, proc_name)
 
-    let argument_of i callee_pname : t = ArgumentOf (i, callee_pname)
+    let argument_of callee_pname index : t = ArgumentOf (callee_pname, index)
 
     let return field_path : t = Return field_path
 
@@ -1410,8 +1343,8 @@ end = struct
     end
   end
 
-  let update_write ~node ~var_path ((last_writes, has_unsupported_features), partial_graph) =
-    let last_writes = Real.LastWrites.set_to_single_value var_path node last_writes in
+  let update_write ~node ~cell ((last_writes, has_unsupported_features), partial_graph) =
+    let last_writes = Real.LastWrites.set_to_single_value cell node last_writes in
     ((last_writes, has_unsupported_features), partial_graph)
 
 
@@ -1450,19 +1383,19 @@ end = struct
   let add_cell_write ~node ~kind ~src ~dst astate =
     astate
     |> add_edge ~node ~kind ~src ~dst:(Dst.Private.cell node dst)
-    |> update_write ~node ~var_path:dst
+    |> update_write ~node ~cell:dst
 
 
   let add_cell_write_from_local ~node ~kind ~src ~dst astate =
     astate
     |> add_flow_from_local ~node ~kind ~src ~dst:(Dst.Private.cell node dst)
-    |> update_write ~node ~var_path:dst
+    |> update_write ~node ~cell:dst
 
 
   let add_cell_write_from_local_set ~node ~kind ~src ~dst astate =
     astate
     |> add_flow_from_local_set ~node ~kind ~src ~dst:(Dst.Private.cell node dst)
-    |> update_write ~node ~var_path:dst
+    |> update_write ~node ~cell:dst
 
 
   (* Update all the cells under a path, as obtained from the shapes information. *)
@@ -1523,14 +1456,14 @@ module TransferFunctions = struct
   module Domain = Domain
 
   (** The payload returned by the interprocedural analysis of dependency procedures *)
-  type payload = Summary.t option * Shapes.t option
+  type payload = Summary.t option * shapes
 
   (** Un-nest options from a payload option *)
   let join_payload (payload_opt : payload option) : payload =
     match payload_opt with None -> (None, None) | Some payload -> payload
 
 
-  type analysis_data = Shapes.t option * payload InterproceduralAnalysis.t
+  type analysis_data = shapes * payload InterproceduralAnalysis.t
 
   (** If an expression is made of a single variable, return it. *)
   let exp_as_single_var (e : Exp.t) : Var.t option =
@@ -1590,7 +1523,10 @@ module TransferFunctions = struct
     Shapes.fold_cells shapes var_path ~f:Local.Set.add_cell ~init:Local.Set.empty
 
 
-  (** Return constants and free cells that occur in [e]. *)
+  (** Return constants and free cells that occur in [e].
+
+      Note: we build (and return) the set, rather than for instance directly folding over its
+      elements, to make sure we end up with unique free locals. *)
   let rec free_locals_of_exp shapes (e : Exp.t) : Local.Set.t =
     match e with
     | Lvar pvar ->
@@ -1663,7 +1599,7 @@ module TransferFunctions = struct
     and closure astate ({name; captured_vars} : Exp.closure) =
       let one_var index astate (_exp, pvar, _typ, _mode) =
         Domain.add_flow_from_path ~shapes ~node ~kind:Direct ~src:(VarPath.pvar pvar)
-          ~dst:(Domain.Dst.captured_by index name)
+          ~dst:(Domain.Dst.captured_by name index)
           astate
       in
       List.foldi ~init:astate ~f:one_var captured_vars
@@ -1691,7 +1627,7 @@ module TransferFunctions = struct
           warn_on_complex_arg actual_arg ;
           let read_set = free_locals_of_exp shapes actual_arg in
           Domain.add_flow_from_local_set ~node:call_node ~kind:(Call []) ~src:read_set
-            ~dst:(Domain.Dst.argument_of index callee_pname)
+            ~dst:(Domain.Dst.argument_of callee_pname index)
             astate
       | Some actual_arg_var ->
           (* The concrete argument is a single var: we collect all its cells and have
@@ -1700,7 +1636,7 @@ module TransferFunctions = struct
           Domain.add_flow_from_path_f ~shapes ~node:call_node
             ~kind_f:(fun arg_field_path -> Call arg_field_path)
             ~src:actual_arg_var_path
-            ~dst_f:(fun _ -> Domain.Dst.argument_of index callee_pname)
+            ~dst_f:(fun _ -> Domain.Dst.argument_of callee_pname index)
             astate
     in
     List.foldi argument_list ~init:astate ~f:add_one_arg_flows
@@ -1742,7 +1678,7 @@ module TransferFunctions = struct
 
   (* Add Summary (or Direct if this is a suppressed builtin call) edges from the concrete arguments
      to the concrete destination variable of a call, as specified by the tito_arguments summary information *)
-  let add_tito (shapes : Shapes.t option) node kind_f (tito : Tito.t) (argument_list : Exp.t list)
+  let add_tito (shapes : shapes) node kind_f (tito : Tito.t) (argument_list : Exp.t list)
       (ret_id : Ident.t) (astate : Domain.t) : Domain.t =
     let add_one_tito_flow ~arg_index ~arg_field_path ~ret_field_path ~shape_is_preserved astate =
       let arg_expr = List.nth_exn argument_list arg_index in
@@ -1769,8 +1705,8 @@ module TransferFunctions = struct
 
   (* Add all the possible Summary/Direct (see add_tito) call edges from arguments to destination for
      when no summary is available. *)
-  let add_tito_all (shapes : Shapes.t option) node kind_f (argument_list : Exp.t list)
-      (ret_id : Ident.t) (astate : Domain.t) : Domain.t =
+  let add_tito_all (shapes : shapes) node kind_f (argument_list : Exp.t list) (ret_id : Ident.t)
+      (astate : Domain.t) : Domain.t =
     let arity = List.length argument_list in
     let tito_full = Tito.full ~arity in
     add_tito shapes node kind_f tito_full argument_list ret_id astate
@@ -1923,16 +1859,23 @@ module TransferFunctions = struct
           let key_path = exp_as_single_var_path_exn key_exp in
           let value_path = exp_as_single_var_path_exn value_exp in
           let map_path = exp_as_single_var_path_exn map_exp in
-          (* First copy the argument map into the returned map, except the new key. *)
+          (* First copy the argument map into the returned map. *)
           let exclude_new_key ~src_field_path ~dst_field_path =
-            Shapes.fold_field_labels
-              ~f:(fun acc field_label ->
+            (* Precision optimisation: if the newly put key is statically known to be a single label,
+               then the corresponding field from the source map does not flow into the resulting
+               map.
+
+               Note that we need the single-label property for this optimisation to be
+               correct. Eg. on [M' = put(foo|bar, val, M)], both [M#foo] and [val] may flow into
+               M'#foo. *)
+            match Shapes.as_field_label_singleton shapes key_path with
+            | Some field_label ->
                 (* Since abstraction may truncate either the copied path or the returned one, we
                    check that both are separate from the newly put key. *)
-                acc
-                || [%equal: FieldLabel.t option] (List.hd src_field_path) (Some field_label)
-                || [%equal: FieldLabel.t option] (List.hd dst_field_path) (Some field_label) )
-              ~fallback:(Fn.const false) ~init:false shapes key_path
+                [%equal: FieldLabel.t option] (List.hd src_field_path) (Some field_label)
+                || [%equal: FieldLabel.t option] (List.hd dst_field_path) (Some field_label)
+            | None ->
+                false
           in
           let astate =
             Domain.add_write_parallel ~shapes ~node ~kind:Direct ~src:map_path ~dst:ret_path
@@ -2054,7 +1997,7 @@ end
 
 module Analyzer = AbstractInterpreter.MakeWTO (TransferFunctions)
 
-let unskipped_checker ({InterproceduralAnalysis.proc_desc} as analysis) (shapes : Shapes.t option) =
+let unskipped_checker ({InterproceduralAnalysis.proc_desc} as analysis) (shapes : shapes) =
   let analysis_data = (shapes, analysis) in
   let cfg = CFG.from_pdesc proc_desc in
   (* Build the initial abstract state *)
@@ -2112,4 +2055,4 @@ let unskipped_checker ({InterproceduralAnalysis.proc_desc} as analysis) (shapes 
 
 
 let checker =
-  LineageUtils.skip_unwanted "Lineage" ~max_size:Config.lineage_max_cfg_size unskipped_checker
+  LineageBase.skip_unwanted "Lineage" ~max_size:Config.lineage_max_cfg_size unskipped_checker
