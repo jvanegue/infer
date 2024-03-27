@@ -309,7 +309,8 @@ module PulseTransferFunctions = struct
          let topl_event = PulseTopl.ArrayWrite {aw_array; aw_index} in
          AbductiveDomain.Topl.small_step loc topl_event astate )
         |> PulseOperationResult.sat_ok
-        |> (* don't emit Topl event if evals fail *) Option.value ~default:astate
+        |> (* don't emit Topl event if evals fail *)
+        Option.value ~default:astate
     | _ ->
         astate
 
@@ -829,7 +830,7 @@ module PulseTransferFunctions = struct
     in
     let callee_pname = Option.map ~f:Tenv.MethodInfo.get_procname method_info in
     let astate =
-      if Language.curr_language_is Hack then
+      if Config.pulse_transitive_access_enabled then
         PulseTransitiveAccessChecker.record_call tenv callee_pname call_loc astate
       else astate
     in
@@ -969,8 +970,8 @@ module PulseTransferFunctions = struct
                     astate
               in
               let* astate =
-                PulseRetainCycleChecker.check_retain_cycles_call tenv call_loc func_args ret_opt
-                  astate_after_call
+                PulseRetainCycleChecker.check_retain_cycles_call path tenv call_loc func_args
+                  ret_opt astate_after_call
               in
               PulseTaintOperations.call tenv path call_loc ret ~call_was_unknown call_event
                 func_args astate
@@ -1385,7 +1386,7 @@ module PulseTransferFunctions = struct
                     [astate] )
           in
           let astates =
-            if Language.curr_language_is Hack then
+            if Config.pulse_transitive_access_enabled then
               PulseTransitiveAccessChecker.record_load rhs_exp loc astates
             else astates
           in
@@ -1425,7 +1426,8 @@ module PulseTransferFunctions = struct
               PulseOperations.write_deref path loc ~ref:lhs_addr_hist ~obj:(rhs_addr, hist) astate
             in
             let* astate =
-              PulseRetainCycleChecker.check_retain_cycles_store tenv loc (rhs_addr, hist) astate
+              PulseRetainCycleChecker.check_retain_cycles_store path tenv loc (rhs_addr, hist)
+                astate
             in
             let astate =
               if Topl.is_active () then topl_store_step path loc ~lhs:lhs_exp ~rhs:rhs_exp astate
@@ -1758,7 +1760,8 @@ let analyze specialization
                 PulseSummary.add_disjunctive_pre_post objc_nil_summary summary )
           else summary
         in
-        PulseTransitiveAccessChecker.report_errors tenv proc_desc err_log summary ;
+        if Config.pulse_transitive_access_enabled then
+          PulseTransitiveAccessChecker.report_errors tenv proc_desc err_log summary ;
         report_topl_errors proc_desc err_log summary.pre_post_list ;
         report_unnecessary_copies tenv proc_desc err_log non_disj_astate ;
         report_unnecessary_parameter_copies tenv proc_desc err_log non_disj_astate ;

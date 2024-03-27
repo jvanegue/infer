@@ -669,7 +669,7 @@ module Tito : sig
   (** TITO stands for "taint-in taint-out". In this context a tito flow is a data path from an
       argument field to a field of the return node, without going through call edges; more
       precisely, [i#foo#bar] is a tito path to [ret#baz] if there is a path from
-      [Argument (i, \[foo, bar\])] to [Return baz] not going through [ArgumentOf _] nodes.
+      [Argument (i, [foo, bar])] to [Return baz] not going through [ArgumentOf _] nodes.
 
       As the abstraction mandates, fields are to be considered in a prefix sense: a path from
       [i#foo] to [ret#bar] means that any subfield of [i#foo] flows into all fields of [ret#bar].
@@ -694,8 +694,7 @@ module Tito : sig
 
   val full : arity:int -> t
   (** A full tito has paths from every argument field to every return field. Due to the prefix
-      abstraction, it is equivalent to having a path from every [Argument (i, \[\])] to
-      [Return \[\]].*)
+      abstraction, it is equivalent to having a path from every [Argument (i, [])] to [Return []].*)
 
   val add :
        arg_index:int
@@ -1227,8 +1226,8 @@ module Domain : sig
       every cell under the source variable path. This can be used for instance to record injecting
       [Call] edges where the edge holds the field information.
 
-      [kind_f] and [dst_f] will be passed the full field path of each relevant cell, including
-      fields already present in the [src] path. *)
+      [kind_f] and [dst_f] will be passed the sub each relevant cell extracted from the [src] path,
+      as obtained by {!Cell.path_from_origin}. *)
 
   (** {2 Add flow to non-variable nodes} *)
 
@@ -1251,8 +1250,8 @@ module Domain : sig
       under the destination variable path. This can be used for instance to record projecting
       [Return] edges where the edge holds the field information.
 
-      [kind_f] and [src_f] will be passed the full field path of each relevant cell, including
-      fields already present in the [dst] path. *)
+      [kind_f] and [dst_f] will be passed the sub each relevant cell extracted from the [dst] path,
+      as obtained by {!Cell.path_from_origin}. *)
 
   val add_write_from_local :
     shapes:shapes -> node:PPNode.t -> kind:Edge.kind -> src:Local.t -> dst:VarPath.t -> t -> t
@@ -1266,7 +1265,7 @@ module Domain : sig
     -> kind:Edge.kind
     -> src:VarPath.t
     -> dst:VarPath.t
-    -> ?exclude:(src_field_path:FieldPath.t -> dst_field_path:FieldPath.t -> bool)
+    -> ?exclude:(src_sub_path:FieldPath.t -> dst_sub_path:FieldPath.t -> bool)
     -> t
     -> t
   (** Add flow from every cell under the source variable path to the cell with the same field path
@@ -1280,13 +1279,15 @@ module Domain : sig
   (** Add flow from every cell under the source variable path to every cell under the destination
       variable path. *)
 end = struct
-  module Real = struct
-    module LastWrites = AbstractDomain.FiniteMultiMap (Cell) (PPNode)
-    module UnsupportedFeatures = AbstractDomain.BooleanOr
-    include AbstractDomain.PairWithBottom (LastWrites) (UnsupportedFeatures)
-  end
+  module LastWrites = AbstractDomain.FiniteMultiMap (Cell) (PPNode)
+  module HasUnsupportedFeatures = AbstractDomain.BooleanOr
 
+  (** Actual domain for iterations *)
+  module Real = AbstractDomain.PairWithBottom (LastWrites) (HasUnsupportedFeatures)
+
+  (** Stored with abstract states for convenience, not used for iteration purposes *)
   module Unit = PartialGraph
+
   include AbstractDomain.PairWithBottom (Real) (Unit)
 
   let get_partial_graph (_, partial_graph) = partial_graph
@@ -1322,8 +1323,9 @@ end = struct
         | ConstantAtom _ | ConstantInt _ | ConstantString _ ->
             f init (Vertex.Local (local, node))
         | Cell cell ->
-            let source_nodes = Real.LastWrites.get_all cell last_writes in
-            List.fold ~f:(fun acc node -> f acc (Vertex.Local (local, node))) ~init source_nodes
+            LastWrites.find_fold
+              (fun node acc -> f acc (Vertex.Local (local, node)))
+              cell last_writes init
     end
   end
 
@@ -1343,19 +1345,22 @@ end = struct
     end
   end
 
-  let update_write ~node ~cell ((last_writes, has_unsupported_features), partial_graph) =
-    let last_writes = Real.LastWrites.set_to_single_value cell node last_writes in
-    ((last_writes, has_unsupported_features), partial_graph)
-
-
-  let add_edge ~node ~kind ~src ~dst ((last_writes, has_unsupported_features), partial_graph) : t =
+  let add_flow_edge ~node ~kind ~src ~(dst : Vertex.t)
+      ((last_writes, has_unsupported_features), partial_graph) : t =
     let partial_graph = PartialGraph.add_edge ~node ~kind ~src ~dst partial_graph in
+    let last_writes =
+      match dst with
+      | Local (Cell cell, _) ->
+          LastWrites.set_to_single_value cell node last_writes
+      | _ ->
+          last_writes
+    in
     ((last_writes, has_unsupported_features), partial_graph)
 
 
   let add_flow_from_local ~node ~kind ~src ~dst astate : t =
     Src.Private.fold_local
-      ~f:(fun acc_astate one_source -> add_edge ~node ~kind ~src:one_source ~dst acc_astate)
+      ~f:(fun acc_astate one_source -> add_flow_edge ~node ~kind ~src:one_source ~dst acc_astate)
       ~init:astate node astate src
 
 
@@ -1374,28 +1379,22 @@ end = struct
   let add_flow_from_path_f ~shapes ~node ~kind_f ~src ~dst_f astate =
     Shapes.fold_cells
       ~f:(fun acc src_cell ->
-        let source_field_path = Cell.field_path src_cell in
-        add_flow_from_local ~node ~kind:(kind_f source_field_path) ~src:(Cell src_cell)
-          ~dst:(dst_f source_field_path) acc )
+        let source_sub_path = Cell.path_from_origin ~origin:src src_cell in
+        add_flow_from_local ~node ~kind:(kind_f source_sub_path) ~src:(Cell src_cell)
+          ~dst:(dst_f source_sub_path) acc )
       ~init:astate shapes src
 
 
   let add_cell_write ~node ~kind ~src ~dst astate =
-    astate
-    |> add_edge ~node ~kind ~src ~dst:(Dst.Private.cell node dst)
-    |> update_write ~node ~cell:dst
+    add_flow_edge ~node ~kind ~src ~dst:(Dst.Private.cell node dst) astate
 
 
   let add_cell_write_from_local ~node ~kind ~src ~dst astate =
-    astate
-    |> add_flow_from_local ~node ~kind ~src ~dst:(Dst.Private.cell node dst)
-    |> update_write ~node ~cell:dst
+    add_flow_from_local ~node ~kind ~src ~dst:(Dst.Private.cell node dst) astate
 
 
   let add_cell_write_from_local_set ~node ~kind ~src ~dst astate =
-    astate
-    |> add_flow_from_local_set ~node ~kind ~src ~dst:(Dst.Private.cell node dst)
-    |> update_write ~node ~cell:dst
+    add_flow_from_local_set ~node ~kind ~src ~dst:(Dst.Private.cell node dst) astate
 
 
   (* Update all the cells under a path, as obtained from the shapes information. *)
@@ -1408,8 +1407,8 @@ end = struct
   let add_write_f ~shapes ~node ~kind_f ~src_f ~dst astate =
     Shapes.fold_cells
       ~f:(fun acc_astate dst_cell ->
-        let dst_field_path = Cell.field_path dst_cell in
-        add_cell_write ~node ~kind:(kind_f dst_field_path) ~src:(src_f dst_field_path) ~dst:dst_cell
+        let dst_sub_path = Cell.path_from_origin ~origin:dst dst_cell in
+        add_cell_write ~node ~kind:(kind_f dst_sub_path) ~src:(src_f dst_sub_path) ~dst:dst_cell
           acc_astate )
       ~init:astate shapes dst
 
@@ -1430,18 +1429,16 @@ end = struct
       ~init:astate shapes dst
 
 
-  (* Update all the cells under a destination path, as obtained from the shapes information, as being
-     written in parallel from the corresponding cells under a source path. *)
   let add_write_parallel ~shapes ~node ~kind ~src ~dst
-      ?(exclude = fun ~src_field_path:_ ~dst_field_path:_ -> false) astate =
-    Shapes.fold_cell_pairs
-      ~f:(fun acc_astate src_cell dst_cell ->
-        if
-          exclude ~src_field_path:(Cell.field_path src_cell)
-            ~dst_field_path:(Cell.field_path dst_cell)
-        then acc_astate
-        else add_cell_write_from_local ~node ~kind ~src:(Cell src_cell) ~dst:dst_cell acc_astate )
-      ~init:astate shapes src dst
+      ?(exclude = fun ~src_sub_path:_ ~dst_sub_path:_ -> false) astate =
+    Shapes.assert_equal_shapes shapes src dst ;
+    Shapes.fold_cells shapes src ~init:astate ~f:(fun acc src_cell ->
+        let src_sub_path = Cell.path_from_origin ~origin:src src_cell in
+        let dst_matching_path = VarPath.sub_path dst src_sub_path in
+        Shapes.fold_cells shapes dst_matching_path ~init:acc ~f:(fun acc_astate dst_cell ->
+            if exclude ~src_sub_path ~dst_sub_path:(Cell.path_from_origin ~origin:dst dst_cell) then
+              acc_astate
+            else add_cell_write_from_local ~node ~kind ~src:(Cell src_cell) ~dst:dst_cell acc_astate ) )
 
 
   let add_write_product ~shapes ~node ~kind ~src ~dst astate =
@@ -1860,7 +1857,7 @@ module TransferFunctions = struct
           let value_path = exp_as_single_var_path_exn value_exp in
           let map_path = exp_as_single_var_path_exn map_exp in
           (* First copy the argument map into the returned map. *)
-          let exclude_new_key ~src_field_path ~dst_field_path =
+          let exclude_new_key ~src_sub_path ~dst_sub_path =
             (* Precision optimisation: if the newly put key is statically known to be a single label,
                then the corresponding field from the source map does not flow into the resulting
                map.
@@ -1872,8 +1869,8 @@ module TransferFunctions = struct
             | Some field_label ->
                 (* Since abstraction may truncate either the copied path or the returned one, we
                    check that both are separate from the newly put key. *)
-                [%equal: FieldLabel.t option] (List.hd src_field_path) (Some field_label)
-                || [%equal: FieldLabel.t option] (List.hd dst_field_path) (Some field_label)
+                [%equal: FieldLabel.t option] (List.hd src_sub_path) (Some field_label)
+                || [%equal: FieldLabel.t option] (List.hd dst_sub_path) (Some field_label)
             | None ->
                 false
           in

@@ -15,6 +15,21 @@ let string_of_visibility = function User -> "User" | Developer -> "Developer" | 
 
 type severity = Info | Advice | Warning | Error [@@deriving compare, equal, enumerate]
 
+type category =
+  | Data_corruption
+  | Data_race
+  | Deadlock
+  | Incorrect_program_semantics
+  | Memory_error
+  | Memory_leak
+  | Null_pointer_dereference
+  | Perf_regression
+  | Privacy_violation
+  | Resource_leak
+  | Runtime_exception
+  | Ungated_code
+[@@deriving compare, equal, enumerate]
+
 let string_of_severity = function
   | Advice ->
       "ADVICE"
@@ -26,12 +41,44 @@ let string_of_severity = function
       "WARNING"
 
 
+let string_of_category category =
+  Option.map
+    ~f:(fun category ->
+      match category with
+      | Deadlock ->
+          "Deadlock"
+      | Data_corruption ->
+          "Data corruption"
+      | Data_race ->
+          "Data race"
+      | Incorrect_program_semantics ->
+          "Incorrect program semantics"
+      | Memory_leak ->
+          "Memory leak"
+      | Memory_error ->
+          "Memory error"
+      | Null_pointer_dereference ->
+          "Null pointer dereference"
+      | Resource_leak ->
+          "Resource leak"
+      | Runtime_exception ->
+          "Runtime exception"
+      | Perf_regression ->
+          "Perf regression"
+      | Privacy_violation ->
+          "Privacy violation"
+      | Ungated_code ->
+          "Ungated code" )
+    category
+
+
 (* Make sure we cannot create new issue types other than by calling [register_from_string]. This is because
      we want to keep track of the list of all the issues ever declared. *)
 module Unsafe : sig
   type t = private
     { unique_id: string
     ; checker: Checker.t
+    ; category: category option
     ; visibility: visibility
     ; user_documentation: string option
     ; mutable default_severity: severity
@@ -46,6 +93,7 @@ module Unsafe : sig
   val register :
        ?enabled:bool
     -> ?hum:string
+    -> ?category:category
     -> id:string
     -> user_documentation:string
     -> severity
@@ -81,6 +129,7 @@ module Unsafe : sig
   val register_with_latent :
        ?enabled:bool
     -> ?hum:string
+    -> ?category:category
     -> id:string
     -> user_documentation:string
     -> severity
@@ -96,6 +145,7 @@ end = struct
     type t =
       { unique_id: string
       ; checker: Checker.t
+      ; category: category option
       ; visibility: visibility
       ; user_documentation: string option
       ; mutable default_severity: severity
@@ -148,11 +198,12 @@ end = struct
         definitely. The [hum]an-readable description can be updated when we encounter the definition
         of the issue type. *)
   let register_static_or_dynamic ?(enabled = true) ~is_cost_issue ?hum:hum0 ~id:unique_id
-      ~visibility ~user_documentation default_severity checker =
+      ~visibility ~user_documentation ?category default_severity checker =
     match find_from_string ~id:unique_id with
     | ((Some
          ( { unique_id= _ (* we know it has to be the same *)
            ; checker= checker_old
+           ; category= _
            ; visibility= visibility_old
            ; user_documentation= _ (* new one must be [None] for dynamic issue types *)
            ; default_severity= _ (* mutable field to update *)
@@ -186,14 +237,21 @@ end = struct
     | None ->
         let hum = match hum0 with Some str -> str | _ -> prettify unique_id in
         let issue =
-          {unique_id; visibility; user_documentation; default_severity; checker; enabled; hum}
+          { unique_id
+          ; visibility
+          ; user_documentation
+          ; default_severity
+          ; checker
+          ; enabled
+          ; hum
+          ; category }
         in
         all_issues := IssueSet.add !all_issues issue ;
         issue
 
 
-  let register ?enabled ?hum ~id ~user_documentation default_severity checker =
-    register_static_or_dynamic ?enabled ~is_cost_issue:false ?hum ~id ~visibility:User
+  let register ?enabled ?hum ?category ~id ~user_documentation default_severity checker =
+    register_static_or_dynamic ?enabled ?category ~is_cost_issue:false ?hum ~id ~visibility:User
       ~user_documentation:(Some user_documentation) default_severity checker
 
 
@@ -236,8 +294,9 @@ end = struct
       Cost ~user_documentation:(Some user_documentation)
 
 
-  let register_with_latent ?enabled ?hum ~id ~user_documentation default_severity checker =
-    let issue = register ?enabled ?hum ~id ~user_documentation default_severity checker in
+  let register_with_latent ?enabled ?hum ?category ~id ~user_documentation default_severity checker
+      =
+    let issue = register ?enabled ?hum ?category ~id ~user_documentation default_severity checker in
     let user_documentation =
       Printf.sprintf
         "A latent [%s](#%s). See the [documentation on Pulse latent \
@@ -322,7 +381,7 @@ let biabduction_analysis_stops =
 
 
 let biabduction_retain_cycle =
-  register ~enabled:true ~id:"BIABDUCTION_RETAIN_CYCLE" Error Biabduction
+  register ~enabled:true ~category:Memory_leak ~id:"BIABDUCTION_RETAIN_CYCLE" Error Biabduction
     ~user_documentation:"See [RETAIN_CYCLE](#retain_cycle)."
 
 
@@ -364,18 +423,19 @@ let buffer_overrun_u5 =
 let cannot_star = register_hidden ~id:"Cannot_star" Error Biabduction
 
 let captured_strong_self =
-  register ~id:"CAPTURED_STRONG_SELF" ~hum:"Captured strongSelf" Error SelfInBlock
-    ~user_documentation:[%blob "./documentation/issues/CAPTURED_STRONG_SELF.md"]
+  register ~category:Memory_leak ~id:"CAPTURED_STRONG_SELF" ~hum:"Captured strongSelf" Error
+    SelfInBlock ~user_documentation:[%blob "./documentation/issues/CAPTURED_STRONG_SELF.md"]
 
 
 let checkers_allocates_memory =
-  register ~id:"CHECKERS_ALLOCATES_MEMORY" ~hum:"Allocates Memory" Error AnnotationReachability
+  register ~category:Perf_regression ~id:"CHECKERS_ALLOCATES_MEMORY" ~hum:"Allocates Memory" Error
+    AnnotationReachability
     ~user_documentation:[%blob "./documentation/issues/CHECKERS_ALLOCATES_MEMORY.md"]
 
 
 let checkers_annotation_reachability_error =
-  register ~id:"CHECKERS_ANNOTATION_REACHABILITY_ERROR" ~hum:"Annotation Reachability Error" Error
-    AnnotationReachability
+  register ~category:Perf_regression ~id:"CHECKERS_ANNOTATION_REACHABILITY_ERROR"
+    ~hum:"Annotation Reachability Error" Error AnnotationReachability
     ~user_documentation:[%blob "./documentation/issues/CHECKERS_ANNOTATION_REACHABILITY_ERROR.md"]
 
 
@@ -415,12 +475,13 @@ let condition_always_true =
 
 
 let config_impact_analysis =
-  register ~enabled:false ~id:"CONFIG_IMPACT" Advice ConfigImpactAnalysis
+  register ~enabled:false ~category:Perf_regression ~id:"CONFIG_IMPACT" Advice ConfigImpactAnalysis
     ~user_documentation:[%blob "./documentation/issues/CONFIG_IMPACT.md"]
 
 
 let config_impact_analysis_strict =
-  register ~enabled:false ~id:"CONFIG_IMPACT_STRICT" Advice ConfigImpactAnalysis
+  register ~enabled:false ~category:Ungated_code ~id:"CONFIG_IMPACT_STRICT" Advice
+    ConfigImpactAnalysis
     ~user_documentation:[%blob "./documentation/issues/CONFIG_IMPACT_STRICT.md"]
 
 
@@ -430,7 +491,8 @@ let pulse_config_usage =
 
 
 let pulse_const_refable =
-  register ~id:"PULSE_CONST_REFABLE" Error Pulse ~hum:"Const Refable Parameter"
+  register ~category:Perf_regression ~id:"PULSE_CONST_REFABLE" Error Pulse
+    ~hum:"Const Refable Parameter"
     ~user_documentation:[%blob "./documentation/issues/PULSE_CONST_REFABLE.md"]
 
 
@@ -440,7 +502,8 @@ let constant_address_dereference =
 
 
 let cxx_ref_captured_in_block =
-  register ~id:"CXX_REF_CAPTURED_IN_BLOCK" ~hum:"C++ Reference Captured in Block" Error SelfInBlock
+  register ~category:Memory_error ~id:"CXX_REF_CAPTURED_IN_BLOCK"
+    ~hum:"C++ Reference Captured in Block" Error SelfInBlock
     ~user_documentation:[%blob "./documentation/issues/CXX_REF_CAPTURED_IN_BLOCK.md"]
 
 
@@ -466,12 +529,12 @@ let dangling_pointer_dereference_maybe =
 
 
 let dead_store =
-  register ~id:"DEAD_STORE" Error Liveness
+  register ~id:"DEAD_STORE" ~category:Incorrect_program_semantics Error Liveness
     ~user_documentation:[%blob "./documentation/issues/DEAD_STORE.md"]
 
 
 let deadlock =
-  register ~id:"DEADLOCK" Error Starvation
+  register ~category:Deadlock ~id:"DEADLOCK" Error Starvation
     ~user_documentation:[%blob "./documentation/issues/DEADLOCK.md"]
 
 
@@ -495,7 +558,7 @@ let expensive_cost_call ~kind = register_cost ~enabled:false "EXPENSIVE_%s" ~kin
 let failure_exe = register_hidden ~is_silent:true ~id:"Failure_exe" Info Biabduction
 
 let guardedby_violation =
-  register Warning ~id:"GUARDEDBY_VIOLATION" ~hum:"GuardedBy Violation" RacerD
+  register Warning ~id:"GUARDEDBY_VIOLATION" ~category:Data_race ~hum:"GuardedBy Violation" RacerD
     ~user_documentation:[%blob "./documentation/issues/GUARDEDBY_VIOLATION.md"]
 
 
@@ -505,7 +568,8 @@ let impure_function =
 
 
 let inefficient_keyset_iterator =
-  register ~id:"INEFFICIENT_KEYSET_ITERATOR" Warning InefficientKeysetIterator
+  register ~category:Perf_regression ~id:"INEFFICIENT_KEYSET_ITERATOR" Warning
+    InefficientKeysetIterator
     ~user_documentation:[%blob "./documentation/issues/INEFFICIENT_KEYSET_ITERATOR.md"]
 
 
@@ -581,7 +645,7 @@ let integer_overflow_u5 =
 
 
 let interface_not_thread_safe =
-  register Warning ~id:"INTERFACE_NOT_THREAD_SAFE" RacerD
+  register Warning ~category:Data_race ~id:"INTERFACE_NOT_THREAD_SAFE" RacerD
     ~user_documentation:[%blob "./documentation/issues/INTERFACE_NOT_THREAD_SAFE.md"]
 
 
@@ -620,7 +684,7 @@ let leak_in_footprint = register_hidden ~id:"Leak_in_footprint" Error Biabductio
 let leak_unknown_origin = register_hidden ~enabled:false ~id:"Leak_unknown_origin" Error Biabduction
 
 let lock_consistency_violation =
-  register Warning ~id:"LOCK_CONSISTENCY_VIOLATION" RacerD
+  register Warning ~id:"LOCK_CONSISTENCY_VIOLATION" ~category:Data_race RacerD
     ~user_documentation:[%blob "./documentation/issues/LOCK_CONSISTENCY_VIOLATION.md"]
 
 
@@ -639,20 +703,21 @@ let expensive_loop_invariant_call =
 
 
 let memory_leak =
-  register ~enabled:false ~id:"BIABDUCTION_MEMORY_LEAK" ~hum:"Memory Leak" Error Biabduction
-    ~user_documentation:"See [MEMORY_LEAK](#memory_leak)."
+  register ~enabled:false ~category:Memory_leak ~id:"BIABDUCTION_MEMORY_LEAK" ~hum:"Memory Leak"
+    Error Biabduction ~user_documentation:"See [MEMORY_LEAK](#memory_leak)."
 
 
 let missing_fld = register_hidden ~id:"Missing_fld" ~hum:"Missing Field" Error Biabduction
 
 let missing_required_prop =
-  register ~id:"MISSING_REQUIRED_PROP" ~hum:"Missing Required Prop" Error LithoRequiredProps
+  register ~category:Runtime_exception ~id:"MISSING_REQUIRED_PROP" ~hum:"Missing Required Prop"
+    Error LithoRequiredProps
     ~user_documentation:[%blob "./documentation/issues/MISSING_REQUIRED_PROP.md"]
 
 
 let mixed_self_weakself =
-  register ~id:"MIXED_SELF_WEAKSELF" ~hum:"Mixed Self WeakSelf" Error SelfInBlock
-    ~user_documentation:[%blob "./documentation/issues/MIXED_SELF_WEAKSELF.md"]
+  register ~category:Memory_leak ~id:"MIXED_SELF_WEAKSELF" ~hum:"Mixed Self WeakSelf" Error
+    SelfInBlock ~user_documentation:[%blob "./documentation/issues/MIXED_SELF_WEAKSELF.md"]
 
 
 let modifies_immutable =
@@ -666,12 +731,12 @@ let multiple_weakself =
 
 
 let nil_block_call =
-  register_with_latent ~id:"NIL_BLOCK_CALL" Error Pulse
+  register_with_latent ~category:Null_pointer_dereference ~id:"NIL_BLOCK_CALL" Error Pulse
     ~user_documentation:[%blob "./documentation/issues/NIL_BLOCK_CALL.md"]
 
 
 let nil_insertion_into_collection =
-  register_with_latent ~id:"NIL_INSERTION_INTO_COLLECTION" Error Pulse
+  register_with_latent ~category:Runtime_exception ~id:"NIL_INSERTION_INTO_COLLECTION" Error Pulse
     ~hum:"Nil Insertion Into Collection"
     ~user_documentation:[%blob "./documentation/issues/NIL_INSERTION_INTO_COLLECTION.md"]
 
@@ -707,27 +772,29 @@ let no_matching_branch_in_try =
 
 
 let null_argument =
-  register_with_latent ~id:"NULL_ARGUMENT" Error Pulse
+  register_with_latent ~category:Runtime_exception ~id:"NULL_ARGUMENT" Error Pulse
     ~user_documentation:[%blob "./documentation/issues/NULL_ARGUMENT.md"]
 
 
 let null_dereference =
-  register ~id:"NULL_DEREFERENCE" Error Biabduction
+  register ~category:Null_pointer_dereference ~id:"NULL_DEREFERENCE" Error Biabduction
     ~user_documentation:"See [NULLPTR_DEREFERENCE](#nullptr_dereference)."
 
 
 let nullptr_dereference =
-  register_with_latent ~id:"NULLPTR_DEREFERENCE" ~hum:"Null Dereference" Error Pulse
+  register_with_latent ~category:Null_pointer_dereference ~id:"NULLPTR_DEREFERENCE"
+    ~hum:"Null Dereference" Error Pulse
     ~user_documentation:[%blob "./documentation/issues/NULLPTR_DEREFERENCE.md"]
 
 
 let nullptr_dereference_in_nullsafe_class =
-  register_with_latent ~id:"NULLPTR_DEREFERENCE_IN_NULLSAFE_CLASS" ~hum:"Null Dereference" Error
-    Pulse ~user_documentation:[%blob "./documentation/issues/NULLPTR_DEREFERENCE.md"]
+  register_with_latent ~category:Null_pointer_dereference
+    ~id:"NULLPTR_DEREFERENCE_IN_NULLSAFE_CLASS" ~hum:"Null Dereference" Error Pulse
+    ~user_documentation:[%blob "./documentation/issues/NULLPTR_DEREFERENCE.md"]
 
 
 let optional_empty_access =
-  register_with_latent ~id:"OPTIONAL_EMPTY_ACCESS" Error Pulse
+  register_with_latent ~category:Runtime_exception ~id:"OPTIONAL_EMPTY_ACCESS" Error Pulse
     ~user_documentation:[%blob "./documentation/issues/OPTIONAL_EMPTY_ACCESS.md"]
 
 
@@ -746,32 +813,34 @@ let pulse_dict_missing_key =
 
 
 let pulse_transitive_access =
-  register ~enabled:true ~id:"PULSE_TRANSITIVE_ACCESS" Error Pulse
-    ~user_documentation:[%blob "./documentation/issues/PULSE_TRANSITIVE_ACCESS.md"]
+  register ~enabled:true ~category:Incorrect_program_semantics ~id:"PULSE_TRANSITIVE_ACCESS" Error
+    Pulse ~user_documentation:[%blob "./documentation/issues/PULSE_TRANSITIVE_ACCESS.md"]
 
 
 let pulse_memory_leak_c =
-  register ~id:"MEMORY_LEAK_C" ~hum:"Memory Leak" Error Pulse
+  register ~category:Memory_leak ~id:"MEMORY_LEAK_C" ~hum:"Memory Leak" Error Pulse
     ~user_documentation:[%blob "./documentation/issues/MEMORY_LEAK_C.md"]
 
 
 let pulse_memory_leak_cpp =
-  register ~id:"MEMORY_LEAK_CPP" ~hum:"Memory Leak" ~enabled:false Error Pulse
+  register ~category:Memory_leak ~id:"MEMORY_LEAK_CPP" ~hum:"Memory Leak" ~enabled:false Error Pulse
     ~user_documentation:"See [MEMORY_LEAK_C](#memory_leak_c)"
 
 
 let pulse_resource_leak =
-  register ~enabled:true ~id:"PULSE_RESOURCE_LEAK" Error Pulse
+  register ~enabled:true ~category:Resource_leak ~id:"PULSE_RESOURCE_LEAK" Error Pulse
     ~user_documentation:"See [RESOURCE_LEAK](#resource_leak)"
 
 
 let pulse_unawaited_awaitable =
-  register ~enabled:true ~id:"PULSE_UNAWAITED_AWAITABLE" Error Pulse ~hum:"Unawaited Awaitable"
+  register ~enabled:true ~category:Data_corruption ~id:"PULSE_UNAWAITED_AWAITABLE" Error Pulse
+    ~hum:"Unawaited Awaitable"
     ~user_documentation:[%blob "./documentation/issues/PULSE_UNAWAITED_AWAITABLE.md"]
 
 
 let pulse_uninitialized_const =
-  register ~enabled:false ~id:"PULSE_UNINITIALIZED_CONST" Error Pulse ~hum:"Uninitialized Const"
+  register ~category:Runtime_exception ~enabled:false ~id:"PULSE_UNINITIALIZED_CONST" Error Pulse
+    ~hum:"Uninitialized Const"
     ~user_documentation:[%blob "./documentation/issues/PULSE_UNINITIALIZED_CONST.md"]
 
 
@@ -789,22 +858,25 @@ let quandary_taint_error =
 
 
 let readonly_shared_ptr_param =
-  register ~id:"PULSE_READONLY_SHARED_PTR_PARAM" Error Pulse ~hum:"Read-only Shared Parameter"
+  register ~category:Perf_regression ~id:"PULSE_READONLY_SHARED_PTR_PARAM" Error Pulse
+    ~hum:"Read-only Shared Parameter"
     ~user_documentation:[%blob "./documentation/issues/PULSE_READONLY_SHARED_PTR_PARAM.md"]
 
 
 let taint_error =
-  register ~hum:"Taint Error" ~id:"TAINT_ERROR" Error Pulse
+  register ~hum:"Taint Error" ~category:Privacy_violation ~id:"TAINT_ERROR" Error Pulse
     ~user_documentation:"A taint flow was detected from a source to a sink"
 
 
 let sensitive_data_flow =
-  register ~enabled:false ~hum:"Sensitive Data Flow" ~id:"SENSITIVE_DATA_FLOW" Advice Pulse
+  register ~enabled:false ~hum:"Sensitive Data Flow" ~category:Privacy_violation
+    ~id:"SENSITIVE_DATA_FLOW" Advice Pulse
     ~user_documentation:"A flow of sensitive data was detected from a source."
 
 
 let data_flow_to_sink =
-  register ~enabled:false ~hum:"Data Flow to Sink" ~id:"DATA_FLOW_TO_SINK" Advice Pulse
+  register ~enabled:false ~hum:"Data Flow to Sink" ~category:Privacy_violation
+    ~id:"DATA_FLOW_TO_SINK" Advice Pulse
     ~user_documentation:"A flow of data was detected to a sink."
 
 
@@ -820,17 +892,17 @@ let regex_op_on_ui_thread =
 
 
 let resource_leak =
-  register ~id:"RESOURCE_LEAK" Error Biabduction
+  register ~category:Resource_leak ~id:"RESOURCE_LEAK" Error Biabduction
     ~user_documentation:[%blob "./documentation/issues/RESOURCE_LEAK.md"]
 
 
 let retain_cycle =
-  register ~enabled:true ~id:"RETAIN_CYCLE" Error Pulse
+  register ~enabled:true ~category:Memory_leak ~id:"RETAIN_CYCLE" Error Pulse
     ~user_documentation:[%blob "./documentation/issues/RETAIN_CYCLE.md"]
 
 
 let scope_leakage =
-  register ~enabled:true ~id:"SCOPE_LEAKAGE" Error ScopeLeakage
+  register ~category:Privacy_violation ~enabled:true ~id:"SCOPE_LEAKAGE" Error ScopeLeakage
     ~user_documentation:[%blob "./documentation/issues/SCOPE_LEAKAGE.md"]
 
 
@@ -857,7 +929,7 @@ let sql_injection_risk =
 
 
 let stack_variable_address_escape =
-  register ~id:"STACK_VARIABLE_ADDRESS_ESCAPE" Error Pulse
+  register ~category:Memory_error ~id:"STACK_VARIABLE_ADDRESS_ESCAPE" Error Pulse
     ~user_documentation:[%blob "./documentation/issues/STACK_VARIABLE_ADDRESS_ESCAPE.md"]
 
 
@@ -877,8 +949,8 @@ let strict_mode_violation =
 
 
 let strong_self_not_checked =
-  register ~id:"STRONG_SELF_NOT_CHECKED" ~hum:"StrongSelf Not Checked" Error SelfInBlock
-    ~user_documentation:[%blob "./documentation/issues/STRONG_SELF_NOT_CHECKED.md"]
+  register ~category:Memory_error ~id:"STRONG_SELF_NOT_CHECKED" ~hum:"StrongSelf Not Checked" Error
+    SelfInBlock ~user_documentation:[%blob "./documentation/issues/STRONG_SELF_NOT_CHECKED.md"]
 
 
 let symexec_memory_error =
@@ -887,7 +959,7 @@ let symexec_memory_error =
 
 
 let thread_safety_violation =
-  register Warning ~id:"THREAD_SAFETY_VIOLATION" RacerD
+  register Warning ~category:Data_race ~id:"THREAD_SAFETY_VIOLATION" RacerD
     ~user_documentation:[%blob "./documentation/issues/THREAD_SAFETY_VIOLATION.md"]
 
 
@@ -901,62 +973,67 @@ let topl_error =
 
 
 let uninitialized_value_pulse =
-  register_with_latent ~id:"PULSE_UNINITIALIZED_VALUE" Error Pulse ~hum:"Uninitialized Value"
+  register ~category:Memory_error ~id:"PULSE_UNINITIALIZED_VALUE" Error Pulse
+    ~hum:"Uninitialized Value"
     ~user_documentation:[%blob "./documentation/issues/PULSE_UNINITIALIZED_VALUE.md"]
 
 
 let unnecessary_copy_pulse =
-  register ~id:"PULSE_UNNECESSARY_COPY" Error Pulse ~hum:"Unnecessary Copy"
+  register ~category:Perf_regression ~id:"PULSE_UNNECESSARY_COPY" Error Pulse
+    ~hum:"Unnecessary Copy"
     ~user_documentation:[%blob "./documentation/issues/PULSE_UNNECESSARY_COPY.md"]
 
 
 let unnecessary_copy_assignment_pulse =
-  register ~id:"PULSE_UNNECESSARY_COPY_ASSIGNMENT" Error Pulse ~hum:"Unnecessary Copy Assignment"
+  register ~category:Perf_regression ~id:"PULSE_UNNECESSARY_COPY_ASSIGNMENT" Error Pulse
+    ~hum:"Unnecessary Copy Assignment"
     ~user_documentation:"See [PULSE_UNNECESSARY_COPY](#pulse_unnecessary_copy)."
 
 
 let unnecessary_copy_assignment_const_pulse =
-  register ~enabled:false ~id:"PULSE_UNNECESSARY_COPY_ASSIGNMENT_CONST" Error Pulse
-    ~hum:"Unnecessary Copy Assignment from Const"
+  register ~enabled:false ~category:Perf_regression ~id:"PULSE_UNNECESSARY_COPY_ASSIGNMENT_CONST"
+    Error Pulse ~hum:"Unnecessary Copy Assignment from Const"
     ~user_documentation:"See [PULSE_UNNECESSARY_COPY](#pulse_unnecessary_copy)."
 
 
 let unnecessary_copy_assignment_movable_pulse =
-  register ~id:"PULSE_UNNECESSARY_COPY_ASSIGNMENT_MOVABLE" Error Pulse
+  register ~category:Perf_regression ~id:"PULSE_UNNECESSARY_COPY_ASSIGNMENT_MOVABLE" Error Pulse
     ~hum:"Unnecessary Copy Assignment Movable"
     ~user_documentation:"See [PULSE_UNNECESSARY_COPY_MOVABLE](#pulse_unnecessary_copy_movable)."
 
 
 let unnecessary_copy_intermediate_pulse =
-  register ~id:"PULSE_UNNECESSARY_COPY_INTERMEDIATE" Error Pulse
+  register ~category:Perf_regression ~id:"PULSE_UNNECESSARY_COPY_INTERMEDIATE" Error Pulse
     ~hum:"Unnecessary Copy Intermediate"
     ~user_documentation:[%blob "./documentation/issues/PULSE_UNNECESSARY_COPY_INTERMEDIATE.md"]
 
 
 let unnecessary_copy_intermediate_const_pulse =
-  register ~enabled:false ~id:"PULSE_UNNECESSARY_COPY_INTERMEDIATE_CONST" Error Pulse
-    ~hum:"Unnecessary Copy Intermediate from Const"
+  register ~enabled:false ~category:Perf_regression ~id:"PULSE_UNNECESSARY_COPY_INTERMEDIATE_CONST"
+    Error Pulse ~hum:"Unnecessary Copy Intermediate from Const"
     ~user_documentation:"See [PULSE_UNNECESSARY_COPY](#pulse_unnecessary_copy)."
 
 
 let unnecessary_copy_movable_pulse =
-  register ~id:"PULSE_UNNECESSARY_COPY_MOVABLE" Error Pulse ~hum:"Unnecessary Copy Movable"
+  register ~category:Perf_regression ~id:"PULSE_UNNECESSARY_COPY_MOVABLE" Error Pulse
+    ~hum:"Unnecessary Copy Movable"
     ~user_documentation:[%blob "./documentation/issues/PULSE_UNNECESSARY_COPY_MOVABLE.md"]
 
 
 let unnecessary_copy_optional_pulse =
-  register ~id:"PULSE_UNNECESSARY_COPY_OPTIONAL" Error Pulse ~hum:"Unnecessary Copy to Optional"
+  register ~category:Perf_regression ~id:"PULSE_UNNECESSARY_COPY_OPTIONAL" Error Pulse
+    ~hum:"Unnecessary Copy to Optional"
     ~user_documentation:[%blob "./documentation/issues/PULSE_UNNECESSARY_COPY_OPTIONAL.md"]
 
 
 let unnecessary_copy_optional_const_pulse =
-  register ~enabled:false ~id:"PULSE_UNNECESSARY_COPY_OPTIONAL_CONST" Error Pulse
-    ~hum:"Unnecessary Copy to Optional from Const"
+  register ~enabled:false ~category:Perf_regression ~id:"PULSE_UNNECESSARY_COPY_OPTIONAL_CONST"
+    Error Pulse ~hum:"Unnecessary Copy to Optional from Const"
     ~user_documentation:"See [PULSE_UNNECESSARY_COPY_OPTIONAL](#pulse_unnecessary_copy_optional)."
 
 
 let unnecessary_copy_return_pulse =
-  register ~enabled:false ~id:"PULSE_UNNECESSARY_COPY_RETURN" Error Pulse
+  register ~enabled:false ~category:Perf_regression ~id:"PULSE_UNNECESSARY_COPY_RETURN" Error Pulse
     ~hum:"Unnecessary Copy Return"
     ~user_documentation:[%blob "./documentation/issues/PULSE_UNNECESSARY_COPY_RETURN.md"]
 
@@ -964,17 +1041,17 @@ let unnecessary_copy_return_pulse =
 let unreachable_code_after = register_hidden ~id:"UNREACHABLE_CODE" Error BufferOverrunChecker
 
 let use_after_delete =
-  register_with_latent ~id:"USE_AFTER_DELETE" Error Pulse
+  register_with_latent ~category:Memory_error ~id:"USE_AFTER_DELETE" Error Pulse
     ~user_documentation:[%blob "./documentation/issues/USE_AFTER_DELETE.md"]
 
 
 let use_after_free =
-  register_with_latent ~id:"USE_AFTER_FREE" Error Pulse
+  register_with_latent ~category:Memory_error ~id:"USE_AFTER_FREE" Error Pulse
     ~user_documentation:[%blob "./documentation/issues/USE_AFTER_FREE.md"]
 
 
 let use_after_lifetime =
-  register_with_latent ~id:"USE_AFTER_LIFETIME" Error Pulse
+  register_with_latent ~category:Memory_error ~id:"USE_AFTER_LIFETIME" Error Pulse
     ~user_documentation:[%blob "./documentation/issues/USE_AFTER_LIFETIME.md"]
 
 

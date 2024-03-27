@@ -7,7 +7,22 @@
 open! IStd
 module F = Format
 module L = Logging
-module PulseSumCountMap = Caml.Map.Make (Int)
+
+module type Stat = sig
+  type t
+
+  val init : t
+
+  val merge : t -> t -> t
+end
+
+module PulseSumCountMap = struct
+  include IntMap
+
+  let init = empty
+
+  let merge = merge (fun _ i j -> Some (Option.value ~default:0 i + Option.value ~default:0 j))
+end
 
 module DurationItem = struct
   type t = {duration_us: int; file: string; pname: string} [@@deriving equal]
@@ -42,81 +57,91 @@ module LongestProcDurationHeap = struct
     F.fprintf f "%a" (F.pp_print_list ~pp_sep:(fun f () -> F.fprintf f "@;") DurationItem.pp) heap
 
 
+  let init = Heap.create ~dummy:DurationItem.dummy 10
+
   include Heap
 end
 
 (** Type for fields that contain non-[Marshal]-serializable data. These need to be serialized by
     [get ()] so they can safely be sent over the pipe to the orchestrator process, where these stats
     end up. *)
-type ('t, 'serialized) serialize_before_marshal = T of 't | Serialized of 'serialized
+module type UnserializableStat = sig
+  include Stat
 
-let serialize serializer = function
-  | T x ->
-      Serialized (serializer x)
-  | Serialized _ as serialized ->
-      serialized
+  type serialized
+
+  val serialize : t -> serialized
+
+  val deserialize : serialized -> t
+end
+
+module OfUnserializable (S : UnserializableStat) = struct
+  type t = T of S.t | Serialized of S.serialized
+
+  let init = T S.init
+
+  let serialize = function
+    | T x ->
+        Serialized (S.serialize x)
+    | Serialized _ as serialized ->
+        serialized
 
 
-let deserialize deserializer = function T x -> x | Serialized s -> deserializer s
+  let deserialize = function T x -> x | Serialized s -> S.deserialize s
+
+  let merge x y = T (S.merge (deserialize x) (deserialize y))
+end
+
+module TimingsStat = OfUnserializable (Timings)
+
+module AdditiveIntCounter = struct
+  type t = int
+
+  let init = 0
+
+  let merge = ( + )
+end
+
+module ExecutionDuration = struct
+  include ExecutionDuration
+
+  let init = zero
+
+  let merge = add
+end
 
 include struct
   (* ignore dead modules added by @@deriving fields *)
   [@@@warning "-unused-module"]
 
+  (* NOTE: there is a custom ppx for this data structure to generate boilerplate, see
+     src/inferppx/StatsPpx.mli *)
   type t =
-    { mutable summary_file_try_load: int
-    ; mutable summary_read_from_disk: int
-    ; mutable summary_cache_hits: int
-    ; mutable summary_cache_misses: int
-    ; mutable ondemand_procs_analyzed: int
+    { mutable summary_file_try_load: AdditiveIntCounter.t
+    ; mutable summary_read_from_disk: AdditiveIntCounter.t
+    ; mutable summary_cache_hits: AdditiveIntCounter.t
+    ; mutable summary_cache_misses: AdditiveIntCounter.t
+    ; mutable ondemand_procs_analyzed: AdditiveIntCounter.t
     ; mutable proc_locker_lock_time: ExecutionDuration.t
     ; mutable proc_locker_unlock_time: ExecutionDuration.t
     ; mutable restart_scheduler_useful_time: ExecutionDuration.t
     ; mutable restart_scheduler_total_time: ExecutionDuration.t
-    ; mutable pulse_aliasing_contradictions: int
-    ; mutable pulse_args_length_contradictions: int
-    ; mutable pulse_captured_vars_length_contradictions: int
-    ; mutable pulse_disjuncts_dropped: int
-    ; mutable pulse_interrupted_loops: int
-    ; mutable pulse_summaries_contradictions: int
-    ; mutable pulse_summaries_count: int PulseSumCountMap.t
-    ; mutable topl_reachable_calls: int
-    ; mutable timeouts: int
-    ; mutable timings: (Timings.t, Timings.serialized) serialize_before_marshal
+    ; mutable pulse_aliasing_contradictions: AdditiveIntCounter.t
+    ; mutable pulse_args_length_contradictions: AdditiveIntCounter.t
+    ; mutable pulse_captured_vars_length_contradictions: AdditiveIntCounter.t
+    ; mutable pulse_disjuncts_dropped: AdditiveIntCounter.t
+    ; mutable pulse_interrupted_loops: AdditiveIntCounter.t
+    ; mutable pulse_summaries_contradictions: AdditiveIntCounter.t
+    ; mutable pulse_summaries_count: AdditiveIntCounter.t PulseSumCountMap.t
+    ; mutable topl_reachable_calls: AdditiveIntCounter.t
+    ; mutable timeouts: AdditiveIntCounter.t
+    ; mutable timings: TimingsStat.t
     ; mutable longest_proc_duration_heap: LongestProcDurationHeap.t
     ; mutable process_times: ExecutionDuration.t
     ; mutable useful_times: ExecutionDuration.t
     ; mutable spec_store_times: ExecutionDuration.t }
-  [@@deriving fields]
+  [@@deriving fields, infer_stats]
 end
-
-let empty_duration_map = LongestProcDurationHeap.create ~dummy:DurationItem.dummy 10
-
-let global_stats =
-  { useful_times= ExecutionDuration.zero
-  ; longest_proc_duration_heap= empty_duration_map
-  ; summary_file_try_load= 0
-  ; summary_read_from_disk= 0
-  ; summary_cache_hits= 0
-  ; summary_cache_misses= 0
-  ; ondemand_procs_analyzed= 0
-  ; proc_locker_lock_time= ExecutionDuration.zero
-  ; proc_locker_unlock_time= ExecutionDuration.zero
-  ; restart_scheduler_useful_time= ExecutionDuration.zero
-  ; restart_scheduler_total_time= ExecutionDuration.zero
-  ; process_times= ExecutionDuration.zero
-  ; pulse_aliasing_contradictions= 0
-  ; pulse_args_length_contradictions= 0
-  ; pulse_captured_vars_length_contradictions= 0
-  ; pulse_disjuncts_dropped= 0
-  ; pulse_interrupted_loops= 0
-  ; pulse_summaries_contradictions= 0
-  ; pulse_summaries_count= PulseSumCountMap.empty
-  ; spec_store_times= ExecutionDuration.zero
-  ; topl_reachable_calls= 0
-  ; timeouts= 0
-  ; timings= T Timings.init }
-
 
 let update_with field ~f =
   match Field.setter field with
@@ -190,7 +215,7 @@ let incr_timeouts () = incr Fields.timeouts
 
 let add_timing timeable t =
   update_with Fields.timings ~f:(function timings ->
-      T (Timings.add timeable t (deserialize Timings.deserialize timings)) )
+      TimingsStat.T (Timings.add timeable t (TimingsStat.deserialize timings)) )
 
 
 let set_process_times execution_duration =
@@ -205,113 +230,6 @@ let incr_spec_store_times counter =
   update_with Fields.spec_store_times ~f:(fun t -> ExecutionDuration.add_duration_since t counter)
 
 
-let copy from ~into : unit =
-  let ({ useful_times
-       ; longest_proc_duration_heap
-       ; summary_file_try_load
-       ; summary_read_from_disk
-       ; summary_cache_hits
-       ; summary_cache_misses
-       ; ondemand_procs_analyzed
-       ; proc_locker_lock_time
-       ; proc_locker_unlock_time
-       ; restart_scheduler_useful_time
-       ; restart_scheduler_total_time
-       ; process_times
-       ; pulse_aliasing_contradictions
-       ; pulse_args_length_contradictions
-       ; pulse_captured_vars_length_contradictions
-       ; pulse_disjuncts_dropped
-       ; pulse_interrupted_loops
-       ; pulse_summaries_contradictions
-       ; pulse_summaries_count
-       ; spec_store_times
-       ; topl_reachable_calls
-       ; timeouts
-       ; timings } [@warning "+9"] ) =
-    from
-  in
-  Fields.Direct.set_all_mutable_fields into ~useful_times ~longest_proc_duration_heap
-    ~summary_file_try_load ~summary_read_from_disk ~summary_cache_hits ~summary_cache_misses
-    ~ondemand_procs_analyzed ~proc_locker_lock_time ~proc_locker_unlock_time
-    ~restart_scheduler_useful_time ~restart_scheduler_total_time ~process_times
-    ~pulse_aliasing_contradictions ~pulse_args_length_contradictions
-    ~pulse_captured_vars_length_contradictions ~pulse_disjuncts_dropped ~pulse_interrupted_loops
-    ~pulse_summaries_contradictions ~pulse_summaries_count ~topl_reachable_calls ~timeouts ~timings
-    ~spec_store_times
-
-
-let merge stats1 stats2 =
-  { useful_times= ExecutionDuration.add stats1.useful_times stats2.useful_times
-  ; longest_proc_duration_heap=
-      LongestProcDurationHeap.merge stats1.longest_proc_duration_heap
-        stats2.longest_proc_duration_heap
-  ; summary_file_try_load= stats1.summary_file_try_load + stats2.summary_file_try_load
-  ; summary_read_from_disk= stats1.summary_read_from_disk + stats2.summary_read_from_disk
-  ; summary_cache_hits= stats1.summary_cache_hits + stats2.summary_cache_hits
-  ; summary_cache_misses= stats1.summary_cache_misses + stats2.summary_cache_misses
-  ; ondemand_procs_analyzed= stats1.ondemand_procs_analyzed + stats2.ondemand_procs_analyzed
-  ; proc_locker_lock_time=
-      ExecutionDuration.add stats1.proc_locker_lock_time stats2.proc_locker_lock_time
-  ; proc_locker_unlock_time=
-      ExecutionDuration.add stats1.proc_locker_unlock_time stats2.proc_locker_unlock_time
-  ; process_times= ExecutionDuration.add stats1.process_times stats2.process_times
-  ; pulse_aliasing_contradictions=
-      stats1.pulse_aliasing_contradictions + stats2.pulse_aliasing_contradictions
-  ; pulse_args_length_contradictions=
-      stats1.pulse_args_length_contradictions + stats2.pulse_args_length_contradictions
-  ; pulse_captured_vars_length_contradictions=
-      stats1.pulse_captured_vars_length_contradictions
-      + stats2.pulse_captured_vars_length_contradictions
-  ; pulse_disjuncts_dropped= stats1.pulse_disjuncts_dropped + stats2.pulse_disjuncts_dropped
-  ; pulse_interrupted_loops= stats1.pulse_interrupted_loops + stats2.pulse_interrupted_loops
-  ; pulse_summaries_contradictions=
-      stats1.pulse_summaries_contradictions + stats2.pulse_summaries_contradictions
-  ; pulse_summaries_count=
-      PulseSumCountMap.merge
-        (fun _ i j -> Some (Option.value ~default:0 i + Option.value ~default:0 j))
-        stats1.pulse_summaries_count stats2.pulse_summaries_count
-  ; restart_scheduler_useful_time=
-      ExecutionDuration.add stats1.restart_scheduler_useful_time
-        stats2.restart_scheduler_useful_time
-  ; restart_scheduler_total_time=
-      ExecutionDuration.add stats1.restart_scheduler_total_time stats2.restart_scheduler_total_time
-  ; spec_store_times= ExecutionDuration.add stats1.spec_store_times stats2.spec_store_times
-  ; topl_reachable_calls= stats1.topl_reachable_calls + stats2.topl_reachable_calls
-  ; timeouts= stats1.timeouts + stats2.timeouts
-  ; timings=
-      T
-        (Timings.merge
-           (deserialize Timings.deserialize stats1.timings)
-           (deserialize Timings.deserialize stats2.timings) ) }
-
-
-let initial =
-  { useful_times= ExecutionDuration.zero
-  ; longest_proc_duration_heap= empty_duration_map
-  ; summary_file_try_load= 0
-  ; summary_read_from_disk= 0
-  ; summary_cache_hits= 0
-  ; summary_cache_misses= 0
-  ; ondemand_procs_analyzed= 0
-  ; proc_locker_lock_time= ExecutionDuration.zero
-  ; proc_locker_unlock_time= ExecutionDuration.zero
-  ; process_times= ExecutionDuration.zero
-  ; pulse_aliasing_contradictions= 0
-  ; pulse_args_length_contradictions= 0
-  ; pulse_captured_vars_length_contradictions= 0
-  ; pulse_disjuncts_dropped= 0
-  ; pulse_interrupted_loops= 0
-  ; pulse_summaries_contradictions= 0
-  ; pulse_summaries_count= PulseSumCountMap.empty
-  ; restart_scheduler_useful_time= ExecutionDuration.zero
-  ; restart_scheduler_total_time= ExecutionDuration.zero
-  ; spec_store_times= ExecutionDuration.zero
-  ; topl_reachable_calls= 0
-  ; timeouts= 0
-  ; timings= T Timings.init }
-
-
 let reset () = copy initial ~into:global_stats
 
 let pp fmt stats =
@@ -319,7 +237,7 @@ let pp fmt stats =
     F.fprintf fmt "%s= %a@;" (Field.name field) pp_value (Field.get field stats)
   in
   let pp_serialized_field deserializer pp_value fmt field =
-    pp_field (fun fmt v -> pp_value fmt (deserialize deserializer v)) fmt field
+    pp_field (fun fmt v -> pp_value fmt (deserializer v)) fmt field
   in
   let pp_hit_percent hit miss fmt =
     let total = hit + miss in
@@ -373,7 +291,7 @@ let pp fmt stats =
       ~restart_scheduler_useful_time:(pp_execution_duration_field fmt)
       ~restart_scheduler_total_time:(pp_execution_duration_field fmt)
       ~spec_store_times:(pp_execution_duration_field fmt) ~topl_reachable_calls:(pp_int_field fmt)
-      ~timings:(pp_serialized_field Timings.deserialize Timings.pp fmt)
+      ~timings:(pp_serialized_field TimingsStat.deserialize Timings.pp fmt)
   in
   F.fprintf fmt "@[Backend stats:@\n@[<v2>  %t@]@]@." pp_stats
 
@@ -409,7 +327,7 @@ let log_to_scuba stats =
     LogEntry.mk_count ~label:"backend_stats.pulse_summaries_total" ~value:total :: counts
   in
   let create_timings_entry field =
-    Field.get field stats |> deserialize Timings.deserialize |> Timings.to_scuba
+    Field.get field stats |> TimingsStat.deserialize |> Timings.to_scuba
   in
   let entries =
     Fields.to_list ~useful_times:create_time_entry
@@ -441,4 +359,4 @@ let log_aggregate stats_list =
       log_to_scuba stats
 
 
-let get () = {global_stats with timings= serialize Timings.serialize global_stats.timings}
+let get () = {global_stats with timings= TimingsStat.serialize global_stats.timings}

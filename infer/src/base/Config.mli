@@ -211,6 +211,8 @@ val buck2_bxl_target : string option
 
 val buck2_inferconfig_target : string option
 
+val buck2_infertoolchain_target : string option
+
 val buck2_isolation_dir : string option
 
 val buck2_query_deps : bool
@@ -669,6 +671,8 @@ val pulse_taint_short_traces : bool
 val pulse_taint_skip_sources : bool
 
 val pulse_transitive_access_config : string list
+
+val pulse_transitive_access_enabled : bool
 
 val pulse_transitive_access_verbose : bool
 

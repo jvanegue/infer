@@ -43,7 +43,7 @@ module Syntax : sig
     -> init:'accum
     -> f:('accum -> AbstractValue.t -> 'accum model_monad)
     -> 'accum model_monad
-    [@@warning "-unused-value-declaration"]
+  [@@warning "-unused-value-declaration"]
 
   val absvalue_set_iter :
     AbstractValue.Set.t -> f:(AbstractValue.t -> unit model_monad) -> unit model_monad
@@ -109,6 +109,8 @@ module Syntax : sig
   val eval_const_int : int -> aval model_monad
 
   val eval_const_string : string -> aval model_monad
+
+  val eval_string_concat : aval -> aval -> aval model_monad
 
   val eval_to_value_origin : Exp.t -> ValueOrigin.t model_monad
 

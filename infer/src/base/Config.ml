@@ -870,6 +870,12 @@ and buck2_inferconfig_target =
     "Buck2 target representing the inferconfig file; used in BXL capture."
 
 
+and buck2_infertoolchain_target =
+  CLOpt.mk_string_opt ~long:"buck2-infertoolchain-target"
+    ~in_help:InferCommand.[(Capture, manual_buck)]
+    "Buck2 target representing the infer toolchain; used in BXL capture."
+
+
 and buck2_isolation_dir =
   CLOpt.mk_string_opt ~long:"buck2-isolation-dir" ~deprecated:["-bxl-isolation-dir"]
     ~in_help:InferCommand.[(Capture, manual_buck)]
@@ -3843,6 +3849,8 @@ and buck2_bxl_target = !buck2_bxl_target
 
 and buck2_inferconfig_target = !buck2_inferconfig_target
 
+and buck2_infertoolchain_target = !buck2_infertoolchain_target
+
 and buck2_isolation_dir = !buck2_isolation_dir
 
 and buck2_use_bxl = !buck2_use_bxl
@@ -4470,6 +4478,8 @@ and pulse_taint_short_traces = !pulse_taint_short_traces
 and pulse_taint_skip_sources = !pulse_taint_skip_sources
 
 and pulse_transitive_access_config = RevList.to_list !pulse_transitive_access_config
+
+and pulse_transitive_access_enabled = not (RevList.is_empty !pulse_transitive_access_config)
 
 and pulse_transitive_access_verbose = !pulse_transitive_access_verbose
 
