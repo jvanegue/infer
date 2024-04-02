@@ -911,6 +911,10 @@ module PulseTransferFunctions = struct
               ; ret }
               astate non_disj
           in
+          if Config.log_pulse_disjunct_increase_after_model_call && List.length astates > 1 then
+            L.debug Analysis Quiet "[disjunct-increase] from %a, model %a has added %d disjuncts\n"
+              Location.pp_file_pos call_loc Procname.pp callee_procname
+              (List.length astates - 1) ;
           (astates, non_disj, `KnownCall)
       | NoModel ->
           PerfEvent.(log (fun logger -> log_begin_event logger ~name:"pulse interproc call" ())) ;
@@ -1647,6 +1651,18 @@ let set_uninitialize_prop path tenv ({ProcAttributes.loc} as proc_attrs) astate 
   else astate
 
 
+let assume_notnull_params {ProcAttributes.proc_name; formals} astate =
+  List.fold formals ~init:astate ~f:(fun astate (mangled, _typ, anno) ->
+      if Annot.Item.is_notnull anno then
+        (let open IOption.Let_syntax in
+         let var = Pvar.mk mangled proc_name |> Var.of_pvar in
+         let* addr_var = Stack.find_opt var astate in
+         let astate, (addr, _) = Memory.eval_edge addr_var Dereference astate in
+         PulseArithmetic.and_positive addr astate |> PulseOperationResult.sat_ok )
+        |> Option.value ~default:astate
+      else astate )
+
+
 let initial tenv proc_attrs specialization =
   let path = PathContext.initial in
   let initial_astate =
@@ -1655,6 +1671,7 @@ let initial tenv proc_attrs specialization =
     |> PulseSummary.initial_with_positive_self proc_attrs
     |> PulseTaintOperations.taint_initial tenv proc_attrs
     |> set_uninitialize_prop path tenv proc_attrs
+    |> assume_notnull_params proc_attrs
   in
   [(ContinueProgram initial_astate, path)]
 
