@@ -71,11 +71,12 @@ OPTIONS
            See also infer-analyze(1).
 
        --annotation-reachability-custom-pairs json
-           Specify custom sources/sinks for the annotation reachability
-           checker
+           Specify custom sources/sinks, and optionally sanitizers for the
+           annotation reachability checker
            Example format: for custom annotations
-           com.my.annotation.{Source1,Source2,Sink1}
-           { "sources" : ["Source1", "Source2"], "sinks" : ["Sink1"] }
+           com.my.annotation.{Source1,Source2,Sink1,Sanitizer1}
+           { "sources" : ["Source1", "Source2"], "sinks" : ["Sink1"],
+           "sanitizers": ["Sanitizer1"] }
            See also infer-analyze(1).
 
        --annotation-reachability-cxx json
@@ -2138,6 +2139,17 @@ OPTIONS
            Activates: Enable starvation and disable all other checkers
            (Conversely: --no-starvation-only)
            See also infer-analyze(1).
+
+       --stats-dir-current path
+           The infer-out/stats from the current run. Together with
+           --stats-dir-previous, make infer reportdiff compute the difference
+           between two stats directories and output the results in
+           infer-out/differential/stats_*.json files.
+           See also infer-reportdiff(1).
+
+       --stats-dir-previous path
+           The infer-out/stats from a previous run. See --stats-dir-current.
+           See also infer-reportdiff(1).
 
        --store-analysis-schedule
            Activates: Store the analysis schedule for later replay, honoring

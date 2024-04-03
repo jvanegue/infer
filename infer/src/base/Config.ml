@@ -604,9 +604,9 @@ and analysis_schedule_file =
 and annotation_reachability_custom_pairs =
   CLOpt.mk_json ~long:"annotation-reachability-custom-pairs"
     ~in_help:InferCommand.[(Analyze, manual_java)]
-    {|Specify custom sources/sinks for the annotation reachability checker
-Example format: for custom annotations com.my.annotation.{Source1,Source2,Sink1}
-{ "sources" : ["Source1", "Source2"], "sinks" : ["Sink1"] }|}
+    {|Specify custom sources/sinks, and optionally sanitizers for the annotation reachability checker
+Example format: for custom annotations com.my.annotation.{Source1,Source2,Sink1,Sanitizer1}
+{ "sources" : ["Source1", "Source2"], "sinks" : ["Sink1"], "sanitizers": ["Sanitizer1"] }|}
 
 
 and annotation_reachability_cxx =
@@ -3403,6 +3403,20 @@ and starvation_whole_program =
     "Run whole-program starvation analysis"
 
 
+and stats_dir_current =
+  CLOpt.mk_path_opt ~long:"stats-dir-current"
+    ~in_help:InferCommand.[(ReportDiff, manual_generic)]
+    "The infer-out/stats from the current run. Together with $(b,--stats-dir-previous), make \
+     $(i,infer reportdiff) compute the difference between two stats directories and output the \
+     results in infer-out/differential/stats_*.json files."
+
+
+and stats_dir_previous =
+  CLOpt.mk_path_opt ~long:"stats-dir-previous"
+    ~in_help:InferCommand.[(ReportDiff, manual_generic)]
+    "The infer-out/stats from a previous run. See $(b,--stats-dir-current)."
+
+
 and store_analysis_schedule =
   CLOpt.mk_bool ~long:"store-analysis-schedule"
     ~in_help:InferCommand.[(Analyze, manual_scheduler)]
@@ -4672,6 +4686,10 @@ and starvation_skip_analysis = !starvation_skip_analysis
 and starvation_strict_mode = !starvation_strict_mode
 
 and starvation_whole_program = !starvation_whole_program
+
+and stats_dir_current = !stats_dir_current
+
+and stats_dir_previous = !stats_dir_previous
 
 and store_analysis_schedule = !store_analysis_schedule
 
