@@ -276,13 +276,16 @@ module PulseTransferFunctions = struct
         Sat (Ok exec_state)
 
 
-  let topl_small_step loc procname arguments (return, _typ) exec_state_res =
+  let topl_small_step loc procname arguments (return, return_type) exec_state_res =
     let arguments =
-      List.map arguments ~f:(fun {ProcnameDispatcher.Call.FuncArg.arg_payload} -> fst arg_payload)
+      List.map arguments ~f:(fun {ProcnameDispatcher.Call.FuncArg.arg_payload; typ} ->
+          (ValueOrigin.value arg_payload, typ) )
     in
     let return = Var.of_id return in
     let do_astate astate =
-      let return = Option.map ~f:fst (Stack.find_opt return astate) in
+      let return =
+        Option.map ~f:(fun (value, _history) -> (value, return_type)) (Stack.find_opt return astate)
+      in
       let topl_event = PulseTopl.Call {return; arguments; procname} in
       AbductiveDomain.Topl.small_step loc topl_event astate
     in
@@ -309,7 +312,8 @@ module PulseTransferFunctions = struct
          let topl_event = PulseTopl.ArrayWrite {aw_array; aw_index} in
          AbductiveDomain.Topl.small_step loc topl_event astate )
         |> PulseOperationResult.sat_ok
-        |> (* don't emit Topl event if evals fail *) Option.value ~default:astate
+        |> (* don't emit Topl event if evals fail *)
+        Option.value ~default:astate
     | _ ->
         astate
 
@@ -829,7 +833,7 @@ module PulseTransferFunctions = struct
     in
     let callee_pname = Option.map ~f:Tenv.MethodInfo.get_procname method_info in
     let astate =
-      if Language.curr_language_is Hack then
+      if Config.pulse_transitive_access_enabled then
         PulseTransitiveAccessChecker.record_call tenv callee_pname call_loc astate
       else astate
     in
@@ -907,6 +911,10 @@ module PulseTransferFunctions = struct
               ; ret }
               astate non_disj
           in
+          if Config.log_pulse_disjunct_increase_after_model_call && List.length astates > 1 then
+            L.debug Analysis Quiet "[disjunct-increase] from %a, model %a has added %d disjuncts\n"
+              Location.pp_file_pos call_loc Procname.pp callee_procname
+              (List.length astates - 1) ;
           (astates, non_disj, `KnownCall)
       | NoModel ->
           PerfEvent.(log (fun logger -> log_begin_event logger ~name:"pulse interproc call" ())) ;
@@ -969,8 +977,8 @@ module PulseTransferFunctions = struct
                     astate
               in
               let* astate =
-                PulseRetainCycleChecker.check_retain_cycles_call tenv call_loc func_args ret_opt
-                  astate_after_call
+                PulseRetainCycleChecker.check_retain_cycles_call path tenv call_loc func_args
+                  ret_opt astate_after_call
               in
               PulseTaintOperations.call tenv path call_loc ret ~call_was_unknown call_event
                 func_args astate
@@ -990,9 +998,7 @@ module PulseTransferFunctions = struct
       if Topl.is_active () then
         match callee_pname with
         | Some callee_pname ->
-            topl_small_step call_loc callee_pname
-              (ValueOrigin.addr_hist_args func_args)
-              ret exec_states_res
+            topl_small_step call_loc callee_pname func_args ret exec_states_res
         | None ->
             (* skip, as above for non-topl *) exec_states_res
       else exec_states_res
@@ -1385,7 +1391,7 @@ module PulseTransferFunctions = struct
                     [astate] )
           in
           let astates =
-            if Language.curr_language_is Hack then
+            if Config.pulse_transitive_access_enabled then
               PulseTransitiveAccessChecker.record_load rhs_exp loc astates
             else astates
           in
@@ -1425,7 +1431,8 @@ module PulseTransferFunctions = struct
               PulseOperations.write_deref path loc ~ref:lhs_addr_hist ~obj:(rhs_addr, hist) astate
             in
             let* astate =
-              PulseRetainCycleChecker.check_retain_cycles_store tenv loc (rhs_addr, hist) astate
+              PulseRetainCycleChecker.check_retain_cycles_store path tenv loc (rhs_addr, hist)
+                astate
             in
             let astate =
               if Topl.is_active () then topl_store_step path loc ~lhs:lhs_exp ~rhs:rhs_exp astate
@@ -1648,6 +1655,18 @@ let set_uninitialize_prop path tenv ({ProcAttributes.loc} as proc_attrs) astate 
   else astate
 
 
+let assume_notnull_params {ProcAttributes.proc_name; formals} astate =
+  List.fold formals ~init:astate ~f:(fun astate (mangled, _typ, anno) ->
+      if Annot.Item.is_notnull anno then
+        (let open IOption.Let_syntax in
+         let var = Pvar.mk mangled proc_name |> Var.of_pvar in
+         let* addr_var = Stack.find_opt var astate in
+         let astate, (addr, _) = Memory.eval_edge addr_var Dereference astate in
+         PulseArithmetic.and_positive addr astate |> PulseOperationResult.sat_ok )
+        |> Option.value ~default:astate
+      else astate )
+
+
 let initial tenv proc_attrs specialization =
   let path = PathContext.initial in
   let initial_astate =
@@ -1656,6 +1675,7 @@ let initial tenv proc_attrs specialization =
     |> PulseSummary.initial_with_positive_self proc_attrs
     |> PulseTaintOperations.taint_initial tenv proc_attrs
     |> set_uninitialize_prop path tenv proc_attrs
+    |> assume_notnull_params proc_attrs
   in
   [(ContinueProgram initial_astate, path)]
 
@@ -1762,7 +1782,8 @@ let analyze specialization
                 PulseSummary.add_disjunctive_pre_post objc_nil_summary summary )
           else summary
         in
-        PulseTransitiveAccessChecker.report_errors tenv proc_desc err_log summary ;
+        if Config.pulse_transitive_access_enabled then
+          PulseTransitiveAccessChecker.report_errors tenv proc_desc err_log summary ;
         report_topl_errors proc_desc err_log summary.pre_post_list ;
         report_unnecessary_copies tenv proc_desc err_log non_disj_astate ;
         report_unnecessary_parameter_copies tenv proc_desc err_log non_disj_astate ;
@@ -1777,8 +1798,6 @@ let analyze specialization
         Procname.pp_unique_id
         (Procdesc.get_proc_name proc_desc) ;
     let summary_count = List.length summary.PulseSummary.pre_post_list in
-    if Config.pulse_scuba_logging then
-      ScubaLogging.log_count ~label:"pulse_summary" ~value:summary_count ;
     Stats.add_pulse_summaries_count summary_count ;
     if Config.pulse_log_summary_count then
       log_summary_count proc_name summary.PulseSummary.pre_post_list ;

@@ -166,11 +166,11 @@ module Internal = struct
   let downcast_fst pair = (pair : CanonValue.t * _ :> AbstractValue.t * _) [@@inline always]
 
   let downcast_snd_fst pair_pair = (pair_pair : _ * (CanonValue.t * _) :> _ * (AbstractValue.t * _))
-    [@@inline always]
+  [@@inline always]
 
 
   let downcast_access access = (access : BaseMemory.Access.t :> RawMemory.Access.t)
-    [@@inline always]
+  [@@inline always]
 
 
   module SafeBaseMemory = struct
@@ -632,6 +632,10 @@ module Internal = struct
       abduce_one addr
         (MustBeValid (path.PathContext.timestamp, access_trace, must_be_valid_reason))
         astate
+
+
+    let has_unknown_effect addr astate =
+      BaseAddressAttributes.has_unknown_effect addr (astate.post :> base_domain).attrs
   end
 
   module SafeMemory = struct
@@ -1336,14 +1340,14 @@ module Internal = struct
 
   let reachable_addresses ?(var_filter = fun _ -> true) ?edge_filter astate pre_or_post =
     GraphVisit.fold astate pre_or_post ~var_filter ?edge_filter ~init:() ~finish:Fn.id
-      ~f:(fun _ () _ _ -> Continue ())
+      ~f:(fun _ () _ _ -> Continue () )
     |> fst
 
 
   let reachable_addresses_from ?(already_visited = CanonValue.Set.empty) ?edge_filter addresses
       astate pre_or_post =
     GraphVisit.fold_from_addresses ?edge_filter addresses astate pre_or_post ~init:()
-      ~already_visited ~finish:Fn.id ~f:(fun () _ _ -> Continue ())
+      ~already_visited ~finish:Fn.id ~f:(fun () _ _ -> Continue () )
     |> fst
 end
 
@@ -1420,7 +1424,7 @@ let mk_initial tenv (proc_attrs : ProcAttributes.t) =
   let formals_and_captured = captured @ formals in
   let initial_stack =
     List.fold formals_and_captured ~init:(PreDomain.empty :> BaseDomain.t).stack
-      ~f:(fun stack (formal, _, _, addr_loc) -> BaseStack.add formal addr_loc stack)
+      ~f:(fun stack (formal, _, _, addr_loc) -> BaseStack.add formal addr_loc stack )
   in
   let initial_heap =
     let register heap (_, _, _, (addr, _)) =
@@ -1443,9 +1447,12 @@ let mk_initial tenv (proc_attrs : ProcAttributes.t) =
   in
   let post =
     List.fold proc_attrs.locals ~init:post
-      ~f:(fun (acc : PostDomain.t) {ProcAttributes.name; typ; modify_in_block; is_constexpr; tmp_id}
-         ->
-        if modify_in_block || is_constexpr || Option.is_some tmp_id then acc
+      ~f:(fun
+          (acc : PostDomain.t) {ProcAttributes.name; typ; modify_in_block; is_constexpr; tmp_id} ->
+        if
+          modify_in_block || is_constexpr || Option.is_some tmp_id
+          || not (Language.curr_language_is Clang)
+        then acc
         else
           SafeAttributes.set_uninitialized_post tenv Timestamp.t0
             (`LocalDecl (Pvar.mk name proc_name, None))
@@ -2215,15 +2222,17 @@ module AddressAttributes = struct
   let initialize v astate = SafeAttributes.initialize (CanonValue.canon' astate v) astate
 
   let set_uninitialized tenv {PathContext.timestamp} src typ location astate =
-    let src =
-      match src with
-      | `LocalDecl (pvar, v_opt) ->
-          `LocalDecl (pvar, CanonValue.canon_opt' astate v_opt)
-      | `Malloc v ->
-          `Malloc (CanonValue.canon' astate v)
-    in
-    { astate with
-      post= SafeAttributes.set_uninitialized_post tenv timestamp src typ location astate.post }
+    if Language.curr_language_is Clang then
+      let src =
+        match src with
+        | `LocalDecl (pvar, v_opt) ->
+            `LocalDecl (pvar, CanonValue.canon_opt' astate v_opt)
+        | `Malloc v ->
+            `Malloc (CanonValue.canon' astate v)
+      in
+      { astate with
+        post= SafeAttributes.set_uninitialized_post tenv timestamp src typ location astate.post }
+    else astate
 
 
   let always_reachable v astate =
@@ -2373,6 +2382,10 @@ module AddressAttributes = struct
 
   let get_address_of_stack_variable v astate =
     SafeAttributes.get_address_of_stack_variable (CanonValue.canon' astate v) astate
+
+
+  let has_unknown_effect v astate =
+    SafeAttributes.has_unknown_effect (CanonValue.canon' astate v) astate
 end
 
 module CanonValue = struct

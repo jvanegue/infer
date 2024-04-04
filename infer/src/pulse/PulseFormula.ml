@@ -71,7 +71,10 @@ module LinArith : sig
      we resolve the circular dependency further down this file *)
   type 'term_t subst_target =
     | QSubst of Q.t
-    | ConstantSubst of 'term_t
+    | ConstantSubst of 'term_t * Var.t option
+        (** the constant term to substitute and, optionally, a fallback variable to substitute with
+            (eg if a variable is equal to a constant string but also to a new canonical
+            representative, the linear arithmetic domain needs to use the latter *)
     | VarSubst of Var.t
     | LinSubst of t
     | NonLinearTermSubst of 'term_t
@@ -178,7 +181,7 @@ end = struct
 
   type 'term_t subst_target =
     | QSubst of Q.t
-    | ConstantSubst of 'term_t
+    | ConstantSubst of 'term_t * Var.t option
     | VarSubst of Var.t
     | LinSubst of t
     | NonLinearTermSubst of 'term_t
@@ -295,11 +298,11 @@ end = struct
   let of_subst_target v0 = function
     | QSubst q ->
         of_q q
-    | VarSubst v ->
+    | VarSubst v | ConstantSubst (_, Some v) ->
         of_var v
     | LinSubst l ->
         l
-    | NonLinearTermSubst _ | ConstantSubst _ ->
+    | NonLinearTermSubst _ | ConstantSubst (_, None) ->
         of_var v0
 
 
@@ -471,7 +474,7 @@ module Tableau = struct
                    let gain = Q.(-(q_c / coeff)) in
                    if
                      Container.for_all ~iter:(Container.iter ~fold:LinArith.fold) l
-                       ~f:(fun (_, coeff') -> Q.(coeff' >= zero || -(q_c / coeff') >= gain))
+                       ~f:(fun (_, coeff') -> Q.(coeff' >= zero || -(q_c / coeff') >= gain) )
                    then Some (u, (v, coeff))
                    else None
                  else None ) )
@@ -493,7 +496,7 @@ end
 
 type 'term_t subst_target = 'term_t LinArith.subst_target =
   | QSubst of Q.t
-  | ConstantSubst of 'term_t
+  | ConstantSubst of 'term_t * Var.t option
   | VarSubst of Var.t
   | LinSubst of LinArith.t
   | NonLinearTermSubst of 'term_t
@@ -686,7 +689,7 @@ module Term = struct
         Var v
     | LinSubst l ->
         Linear l
-    | ConstantSubst t | NonLinearTermSubst t ->
+    | ConstantSubst (t, _) | NonLinearTermSubst t ->
         t
 
 
@@ -912,7 +915,7 @@ module Term = struct
         let acc, op = f_subst init v in
         let t' =
           match op with
-          | VarSubst v' when not (Var.equal v v') ->
+          | (VarSubst v' | ConstantSubst (_, Some v')) when not (Var.equal v v') ->
               IsInstanceOf (v', typ)
           | QSubst q when Q.is_zero q ->
               zero
@@ -1421,7 +1424,7 @@ module Term = struct
     | Some q ->
         QSubst q
     | None -> (
-        if is_non_numeric_constant t then ConstantSubst t
+        if is_non_numeric_constant t then ConstantSubst (t, None)
         else
           match get_as_var t with
           | Some v ->
@@ -1556,10 +1559,10 @@ module Atom = struct
 
   let nnot_if b atom = if b then nnot atom else atom
 
-  (** [atoms_of_term ~negated t] is [Some \[atom1; ..; atomN\]] if [t] (or [¬t] if [negated]) is
+  (** [atoms_of_term ~negated t] is [Some [atom1; ..; atomN]] if [t] (or [¬t] if [negated]) is
       (mostly syntactically) equivalent to [atom1 ∧ .. ∧ atomN]. For example
       [atoms_of_term ~negated:false (Equal (Or (x, Not y), 0))] should be
-      [\[Equal (x, 0); NotEqual (y, 0)\]]. When the term [y] is known as a boolean, it generates a
+      [[Equal (x, 0); NotEqual (y, 0)]]. When the term [y] is known as a boolean, it generates a
       preciser atom [Equal (y, 1)].
 
       [is_neq_zero] is a function that can tell if a term is known to be [≠0], and [force_to_atom]
@@ -2043,8 +2046,8 @@ module Formula = struct
 
                 INVARIANT: see {!Tableau} *)
       ; intervals: (intervals[@yojson.opaque])
-            (** A simple, non-relational domain of concrete integer intervals of the form
-                [x∈\[i,j\]] or [x∉\[i,j\]].
+            (** A simple, non-relational domain of concrete integer intervals of the form [x∈[i,j]]
+                or [x∉[i,j]].
 
                 This is used to recover a little bit of completeness on integer reasoning at no
                 great cost. *)
@@ -2099,6 +2102,8 @@ module Formula = struct
     val add_const_eq : Var.t -> Term.t -> t -> t SatUnsat.t
     (** [add_const_eq v t phi] adds [v=t] to [const_eqs]; [Unsat] if [v] was already bound to a
         different constant *)
+
+    val remove_const_eq : Var.t -> t -> t
 
     val add_linear_eq : Var.t -> LinArith.t -> t -> t * Var.t option
     (** [add_linear_eq v l phi] adds [v=l] to [linear_eqs] and updates the occurrences maps and
@@ -2353,6 +2358,11 @@ module Formula = struct
           Sat {phi with const_eqs= Var.Map.add v t phi.const_eqs}
       | Some t' ->
           if Term.equal_syntax t t' then Sat phi else Unsat
+
+
+    let remove_const_eq v phi =
+      Debug.p "remove_const_eq for %a@\n" Var.pp v ;
+      {phi with const_eqs= Var.Map.remove v phi.const_eqs}
 
 
     let remove_term_eq t v phi =
@@ -2681,8 +2691,12 @@ module Formula = struct
       Term.subst_variables t ~f:(fun v ->
           let v_canon = (get_repr phi v :> Var.t) in
           match Var.Map.find_opt v_canon phi.linear_eqs with
-          | None ->
-              VarSubst v_canon
+          | None -> (
+            match Var.Map.find_opt v_canon phi.const_eqs with
+            | None ->
+                VarSubst v_canon
+            | Some c ->
+                ConstantSubst (c, Some v_canon) )
           | Some l -> (
             match LinArith.get_as_const l with
             | None ->
@@ -2939,12 +2953,13 @@ module Formula = struct
         | None ->
             Sat (phi, new_eqs)
         | Some c -> (
-          match Var.Map.find_opt y phi.const_eqs with
-          | None ->
-              let+ phi = add_const_eq y c phi in
-              (phi, new_eqs)
-          | Some c' ->
-              if Term.equal_syntax c c' then Sat (phi, new_eqs) else Unsat )
+            let phi = remove_const_eq x phi in
+            match Var.Map.find_opt y phi.const_eqs with
+            | None ->
+                let+ phi = add_const_eq y c phi in
+                (phi, new_eqs)
+            | Some c' ->
+                if Term.equal_syntax c c' then Sat (phi, new_eqs) else Unsat )
       in
       Debug.p "@]end [propagate_in_const_eqs] %a=%a@\n" Var.pp x Var.pp y ;
       r
@@ -4190,6 +4205,9 @@ let is_known_non_pointer formula v = Formula.is_non_pointer formula.phi v
 let is_manifest ~is_allocated formula =
   Atom.Set.for_all
     (fun atom ->
+      let is_ground = not @@ Term.has_var_notin Var.Set.empty @@ Atom.to_term atom in
+      is_ground
+      ||
       match Atom.get_as_var_neq_zero atom with
       | Some x ->
           (* ignore [x≠0] when [x] is known to be allocated: pointers being allocated doesn't make

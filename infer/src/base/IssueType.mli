@@ -19,11 +19,29 @@ val string_of_visibility : visibility -> string
 (** severity of the report *)
 type severity = Info | Advice | Warning | Error [@@deriving compare, equal, enumerate]
 
+type category =
+  | Data_corruption
+  | Data_race
+  | Deadlock
+  | Incorrect_program_semantics
+  | Memory_error
+  | Memory_leak
+  | Null_pointer_dereference
+  | Perf_regression
+  | Privacy_violation
+  | Resource_leak
+  | Runtime_exception
+  | Ungated_code
+[@@deriving compare, equal, enumerate]
+
 val string_of_severity : severity -> string
+
+val string_of_category : category option -> string option
 
 type t = private
   { unique_id: string
   ; checker: Checker.t
+  ; category: category option
   ; visibility: visibility
   ; user_documentation: string option
   ; mutable default_severity: severity
@@ -342,7 +360,7 @@ val thread_safety_violation : t
 
 val topl_error : latent:bool -> t
 
-val uninitialized_value_pulse : latent:bool -> t
+val uninitialized_value_pulse : t
 
 val unnecessary_copy_pulse : t
 

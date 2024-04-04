@@ -103,7 +103,7 @@ val set_is_empty : Atom.Set.t -> bool
 val pp : F.formatter -> t -> unit
 
 val pp_with_pp_var : (F.formatter -> Var.t -> unit) -> F.formatter -> t -> unit
-  [@@warning "-unused-value-declaration"]
+[@@warning "-unused-value-declaration"]
 (** only used for unit tests *)
 
 type function_symbol = Unknown of Var.t | Procname of Procname.t [@@deriving compare, equal]
@@ -155,7 +155,6 @@ val and_equal_unop : Var.t -> Unop.t -> operand -> t -> (t * new_eqs) SatUnsat.t
 val and_equal_binop : Var.t -> Binop.t -> operand -> operand -> t -> (t * new_eqs) SatUnsat.t
 
 val and_equal_string_concat : Var.t -> operand -> operand -> t -> (t * new_eqs) SatUnsat.t
-  [@@warning "-unused-value-declaration"]
 
 val and_is_int : Var.t -> t -> (t * new_eqs) SatUnsat.t
 

@@ -640,7 +640,8 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
       | DeclRefExpr ->
           {empty_control with instrs= this_instrs}
     in
-    mk_trans_result ~is_cpp_call_virtual ~method_name:pname this_exp_typ context_control_with_this
+    mk_trans_result ~is_cpp_call_virtual ~method_name:pname ?method_signature:ms_opt this_exp_typ
+      context_control_with_this
 
 
   let get_destructor_decl_ref class_type_ptr =
@@ -1452,11 +1453,14 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
               sil_loc Sil.Ik_compexch
           in
           let instrs =
+            (* NOTE: Added dummy loads to avoid dead store false positives. *)
             if branch then
               [ Sil.Store {e1= ptr_exp; e2= desired_exp; typ; loc= sil_loc}
+              ; Sil.Load {id= Ident.create_fresh Ident.knormal; e= ptr_exp; typ; loc= sil_loc}
               ; Sil.Store {e1= exp_to_init; e2= Exp.one; typ= ret_typ; loc= sil_loc} ]
             else
               [ Sil.Store {e1= expected_exp; e2= Exp.Var ptr_id; typ; loc= sil_loc}
+              ; Sil.Load {id= Ident.create_fresh Ident.knormal; e= expected_exp; typ; loc= sil_loc}
               ; Sil.Store {e1= exp_to_init; e2= Exp.zero; typ= ret_typ; loc= sil_loc} ]
           in
           let return = (exp_to_init, ret_typ) in
@@ -1613,12 +1617,23 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
     let context = trans_state_pri.context in
     let sil_loc = CLocation.location_of_stmt_info context.translation_unit_context.source_file si in
     let callee_pname = Option.value_exn result_trans_callee.method_name in
+    let callee_ms_opt = result_trans_callee.method_signature in
     (* As we may have nodes coming from different parameters we need to call instruction for each
        parameter and collect the results afterwards. The 'instructions' function does not do that *)
     let result_trans_params =
       let trans_state_param = {trans_state_pri with succ_nodes= []; var_exp_typ= None} in
       let instruction' = exec_with_glvalue_as_reference instruction in
-      let res_trans_p = List.map ~f:(instruction' trans_state_param) params_stmt in
+      let res_trans_p =
+        List.mapi
+          ~f:(fun i param_stmt ->
+            let trans_state_param =
+              (* We don't need to check the `this` parameter *)
+              if i > 0 then add_block_as_arg_attributes trans_state_param callee_ms_opt i
+              else trans_state_param
+            in
+            instruction' trans_state_param param_stmt )
+          params_stmt
+      in
       result_trans_callee :: res_trans_p
     in
     (* params including 'this' parameter *)
@@ -2262,8 +2277,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
       in
       List.iter
         ~f:(fun n ->
-          Procdesc.node_set_succs context.procdesc n ~normal:res_trans_s2.control.root_nodes ~exn:[]
-          )
+          Procdesc.node_set_succs context.procdesc n ~normal:res_trans_s2.control.root_nodes ~exn:[] )
         prune_to_s2 ;
       let root_nodes_to_parent =
         if List.is_empty res_trans_s1.control.root_nodes then res_trans_s1.control.leaf_nodes
@@ -2582,13 +2596,21 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
           Procdesc.create_node procdesc try_loc (Stmt_node CXXTry)
             [Metadata (CatchEntry {try_id; loc= try_loc})]
         in
-        Procdesc.set_succs try_exit_node ~normal:(Some trans_state.succ_nodes)
-          ~exn:(Some [catch_entry_node]) ;
-        Procdesc.set_succs catch_entry_node ~normal:(Some catch_start_nodes) ~exn:None ;
         (* add catch block as exceptional successor to end of try block. not ideal, but we will at
            least reach the code in the catch block this way *)
         (* TODO (T28898377): instead, we should extend trans_state with a list of maybe-throwing
            blocks, and add transitions from those to the catch block instead *)
+        if List.is_empty (Procdesc.Node.get_preds try_exit_node) then (
+          (* Add exception edges forcibly when [try_exit_node] does not have a predecessor.  This
+             can happen when the [try_body_stmt] ends with [return] always.  Note that [TryEntry]
+             and [TryExit] may mismatch in this case. *)
+          List.iter try_trans_result.control.leaf_nodes ~f:(fun leaf ->
+              Procdesc.set_succs leaf ~normal:None ~exn:(Some [catch_entry_node]) ) ;
+          Procdesc.remove_node procdesc try_exit_node )
+        else
+          Procdesc.set_succs try_exit_node ~normal:(Some trans_state.succ_nodes)
+            ~exn:(Some [catch_entry_node]) ;
+        Procdesc.set_succs catch_entry_node ~normal:(Some catch_start_nodes) ~exn:None ;
         let try_control = try_trans_result.control in
         {try_trans_result with control= {try_control with leaf_nodes= [try_exit_node]}}
     | _ ->
@@ -2892,6 +2914,10 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
         res_super @ List.map2_exn field_exps stmts ~f:init_field
     | [], stmts when Int.equal (List.length field_exps) (List.length stmts) ->
         List.map2_exn field_exps stmts ~f:init_field
+    | [], [stmt] ->
+        (* This handles the case when a single element with a reference type is given.  In that
+           case, it loads/store the argument. *)
+        [init_expr_trans trans_state (var_exp, var_typ) stmt_info (Some stmt)]
     | _, _ ->
         (* This happens with some braced-init-list for instance; translate each sub-statement so
            as not to lose instructions (we might even get the translation right) *)
@@ -3123,8 +3149,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
             | _ ->
                 None )
           ~mk_second:(fun trans_state stmt_info ->
-            init_expr_trans_aux ~is_structured_binding trans_state var_exp_typ stmt_info init_expr
-            )
+            init_expr_trans_aux ~is_structured_binding trans_state var_exp_typ stmt_info init_expr )
           ~mk_return:(fun ~fst:_ ~snd -> snd.return)
 
 
@@ -3561,7 +3586,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
         objCArrayDictLiteral_trans trans_state expr_info stmt_info stmts method_pointer
 
 
-  (** Translates an array literal [NSArray* a = @\[ @2, @3 \];] to
+  (** Translates an array literal [NSArray* a = @[ @2, @3 ];] to
 
       {[
         n$1=NSNumber.numberWithInt:(2:int)
@@ -3670,7 +3695,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
         objCArrayDictLiteral_trans trans_state expr_info stmt_info stmts method_pointer
 
 
-  (** Translates an dictionary literal [@\[ @"firstName": @"Foo", @"lastName":@"Bar" \]] to
+  (** Translates an dictionary literal [@[ @"firstName": @"Foo", @"lastName":@"Bar" ]] to
 
       {[
         n$1=NSString.stringWithUTF8:(@"firstName")
