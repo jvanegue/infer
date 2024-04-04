@@ -113,13 +113,13 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
   (* let print_warning _ _ _ = () in *)
 
   let print_warning s cnt state =
-    (* let _ = state in *)
-    L.debug Analysis Quiet "JV: BACK-EDGE FOUND infinite state from %s at iter %i with cnt %i) \n" s num_iters cnt; 
+    let _ = state in 
+    L.debug Analysis Quiet "JV: BACK-EDGE FOUND infinite state from %s with cnt %i) \n" s cnt; 
     (* To prints the whole state where the bug was found. This is useful but verbose *)
-    L.debug Analysis Quiet "JV: Begin Infinite State numiter %d \n" num_iters;
+    (* L.debug Analysis Quiet "JV: Begin Infinite State numiter %d \n" num_iters; *)
     pp_ AbductiveDomain.pp Format.std_formatter state; 
-    L.debug Analysis Quiet "JV: End infinite state numiter %d \n" num_iters; 
-  in
+    (* L.debug Analysis Quiet "JV: End infinite state numiter %d \n" num_iters; *)
+  in 
   
   let rec detect_elem e lst curi : bool * int =
     match lst with
@@ -147,12 +147,9 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
   let worklen = List.length(workset) in
 
   (* L.debug Analysis Quiet "PULSEINF: BACKEDGE prevlen %d nextlen %d diff %d worklen %d \n" prevlen nextlen (nextlen - prevlen) worklen; *)
-
   (* Do-nothing version to avoid debug output *)
-  let print_workset _ = L.debug Analysis Quiet "JV: Computing Workset at numiter %i \n" num_iters; true in 
-  
+  (* let print_workset _ = L.debug Analysis Quiet "JV: Computing Workset at numiter %i \n" num_iters; true in *)  
   (* Pulse-inf debug output: useful but verbose *)
-(*
   let rec print_workset ws =
     match ws with
     | [] -> true
@@ -163,7 +160,7 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
        L.debug Analysis Quiet "JV: End Workset State numiter %d \n" num_iters;
        print_workset tl
   in
- *)
+
   
   let extract_pathcond hd : Formula.t =
    match hd with

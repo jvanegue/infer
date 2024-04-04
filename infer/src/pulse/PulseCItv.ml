@@ -221,6 +221,7 @@ let flip_abduced = function
 let rec abduce_eq (a1 : t) (a2 : t) =
   match (a1, a2) with
   | Between (lower1, upper1), Between (lower2, upper2) ->
+     L.debug Analysis Quiet "JV: [abduce_eq] B B \n";
       (* ∃x. l1≤x≤u1 ∧ l2≤x≤u2 *)
       (* ⇔ ∃x. max(l1,l2)≤x≤min(u1,u2) *)
       let lower = Bound.max lower1 lower2 in
@@ -228,8 +229,10 @@ let rec abduce_eq (a1 : t) (a2 : t) =
       if Bound.lt upper lower then Unsatisfiable
       else
         let tighter = Some (between lower upper) in
+        L.debug Analysis Quiet "JV: [abduce_eq] B B Satisfiable \n";
         Satisfiable (tighter, tighter)
   | Outside (l1, u1), Outside (l2, u2) ->
+     L.debug Analysis Quiet "JV: [abduce_eq] O O \n";
       (* ∃x. (x<l1 ∨ x>u1) ∧ (x<l2 ∨ x>u2) ∧ li<=ui*)
       (* all the possible cases:
          x: --------\[   \]---------
@@ -259,8 +262,10 @@ let rec abduce_eq (a1 : t) (a2 : t) =
         Satisfiable (tighter, tighter)
       else Satisfiable (None, None)
   | Outside _, Between _ ->
+     L.debug Analysis Quiet "JV: [abduce_eq] O B \n";
       abduce_eq a2 a1 |> flip_abduced
   | Between (lower1, upper1), Outside (l2, u2) ->
+     L.debug Analysis Quiet "JV: [abduce_eq] B O \n";
       (* ∃x. l1≤x≤u1 ∧ (x<l2 ∨ x>u2) *)
       (* all the possible cases:
 
@@ -324,24 +329,30 @@ let intersection a1 a2 =
 let has_empty_intersection a1 a2 = Option.is_none (intersection a1 a2)
 
 let abduce_ne (a1 : t) (a2 : t) =
-  if has_empty_intersection a1 a2 then Satisfiable (None, None)
+  if has_empty_intersection a1 a2 then let () = L.debug Analysis Quiet "JV: [abduce_ne] Empty Inter \n" in Satisfiable (None, None)
   else
     match (to_singleton a1, to_singleton a2) with
     | Some _, Some _ ->
+       L.debug Analysis Quiet "JV: [abduce_ne] Some Some \n";
         (* non-empty intersection between 2 singletons => they are the same singleton and hence the
            same integer and have the same value, so cannot be disequal *)
         Unsatisfiable
     | None, None ->
+       L.debug Analysis Quiet "JV: [abduce_ne] None None \n";
         (* non-empty intersection and each predicate can be satisfied by ≥2 elements => we cannot
            know if they are disequal or not *)
         Satisfiable (None, None)
-    | Some e1, None -> (
+    | Some e1, None ->
+       L.debug Analysis Quiet "JV: [abduce_ne] Some None \n";
+       (
       match remove_element e1 a2 with
       | Some _ as abduced2 ->
           Satisfiable (None, abduced2)
       | None ->
           Satisfiable (None, None) )
-    | None, Some e2 -> (
+    | None, Some e2 ->
+       L.debug Analysis Quiet "JV: [abduce_ne] None Some \n";
+       (
       match remove_element e2 a1 with
       | Some _ as abduced1 ->
           Satisfiable (abduced1, None)
@@ -424,7 +435,7 @@ let abduce_binop_constraints ~negated (bop : Binop.t) (a1 : t) (a2 : t) =
 
 
 let abduce_binop_is_true ~negated bop v1 v2 =
-  Logging.d_printfln "abduce_binop_is_true ~negated:%b %s (%a) (%a)" negated (Binop.str Pp.text bop)
+  Logging.debug Analysis Quiet "JV: abduce_binop_is_true ~negated:%b %s (%a) (%a)" negated (Binop.str Pp.text bop)
     (Pp.option pp) v1 (Pp.option pp) v2 ;
   match (v1, v2) with
   | None, None ->

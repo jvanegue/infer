@@ -1889,7 +1889,7 @@ module Summary = struct
           |> Option.map ~f:(fun dynamic_type_data -> dynamic_type_data.Attribute.typ) )
         astate.path_condition
     in
-    let astate = {astate with path_condition} in
+    let astate = {astate with path_condition=path_condition} in
     let* astate, error = incorporate_new_eqs astate new_eqs in
     let astate_before_filter = astate in
     (* do not store the decompiler in the summary and make sure we only use the original one by

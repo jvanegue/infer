@@ -82,7 +82,10 @@ type t =
             them so normalization w.r.t. [phi] would make them trivially true most of the time. *)
   ; phi: Formula.t
         (** the arithmetic constraints of the current symbolic state; true in both the pre and post
-            since abstract values [Var.t] have immutable semantics *) }
+            since abstract values [Var.t] have immutable semantics *)
+  ; term_conds: Atom.Set.t
+        (** Termination conditions: currently set to the unpruned version of the path conditions *)
+  }
 [@@deriving compare, equal, yojson_of]
 
 val extract_cond : t -> Atom.Set.t

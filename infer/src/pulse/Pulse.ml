@@ -1492,16 +1492,20 @@ module PulseTransferFunctions = struct
           let path =
             match PulseOperationResult.sat_ok prune_result with
             | None ->
+                L.debug Analysis Quiet "JV: PRUNE PulseOpResult = NONE \n";
                 path
             | Some (_, hist) ->
                 if Sil.is_terminated_if_kind if_kind then
+                  let () = (L.debug Analysis Quiet "JV: PRUNE PulseOpResult = SOME IfTerminatedIfKind \n") in
                   let hist =
                     ValueHistory.sequence
                       (ConditionPassed {if_kind; is_then_branch; location= loc; timestamp})
                       hist
                   in
                   {path with conditions= hist :: path.conditions}
-                else path
+                else
+                  let () = (L.debug Analysis Quiet "JV: PRUNE PulseOpResult = SOME OTHER Kind \n") in
+                  path
           in
           let results =
             let<++> astate, _ = prune_result in
