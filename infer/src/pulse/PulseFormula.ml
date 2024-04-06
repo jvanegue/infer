@@ -3538,7 +3538,7 @@ module Intervals = struct
     >>| update_formula formula
 
 
-  let and_binop ~negated binop op1 op2 (formula, new_eqs) =
+  let and_binop ~negated binop op1 op2 ?(ifk=false) (formula, new_eqs) =
     L.debug Analysis Quiet "JV: Intervals.and_binop ~negated:%b %a %a %a@\n" negated Binop.pp binop pp_operand op1
       pp_operand op2 ;
     let v1_opt, i1_opt = interval_and_var_of_operand formula.phi op1 in
@@ -3567,22 +3567,35 @@ module Intervals = struct
                  (formula, new_eqs) )
         in
 
-        
-        (* insert something here to create + add atom to term_conds *)
-        (* to use: binop il_opt i2_opt *)
-        L.debug Analysis Quiet "JV: Intervals.and_binop : Calling refine [will add code here] \n";
-        let mk_atom_of_binop (binop : Binop.t) =
-          match binop with
-          | Eq -> Atom.equal
-          | Ne -> Atom.not_equal
-          | Le -> Atom.less_equal
-          | Lt -> Atom.less_than
-          | _ ->  L.die InternalError "JV: and_binop: Wrong argument to [mk_atom_of_binop]: %a" Binop.pp binop
+        L.debug Analysis Quiet "JV: Intervals.and_binop : Creating Atom \n";
+
+        let need_atom =
+          match ifk with
+          | true -> true
+          | false -> false
         in
-        let atom = (mk_atom_of_binop binop) (Term.of_operand op1) (Term.of_operand op2) in
+        
+        let atom_to_binop (binop : Binop.t) =
+          match binop with
+          | Eq -> false,Atom.equal
+          | Ne -> false,Atom.not_equal
+          | Le -> false,Atom.less_equal
+          | Lt -> false,Atom.less_than
+          | Gt -> true,Atom.less_than
+          | Ge -> true,Atom.less_equal
+          | _  ->  L.die InternalError "JV: and_binop: Wrong argument to [mk_atom_of_binop]: %a" Binop.pp binop
+        in
+        let (inv,op) = (atom_to_binop binop) in
+        let atom = (if inv then (op (Term.of_operand op1) (Term.of_operand op2))
+                    else (op (Term.of_operand op2) (Term.of_operand op1)))
+        in
         let newphi = (Formula.and_termcond_atoms formula.phi [atom]) in
-        let nformula = {formula with phi=newphi} in
-      
+        let nformula =
+          if (need_atom) then
+            {formula with phi=newphi}
+          else
+            formula
+        in
         refine v1_opt i1_better_opt (nformula, new_eqs) >>= refine v2_opt i2_better_opt
 
 
@@ -3710,7 +3723,7 @@ let prune_atoms atoms formula_new_eqs =
       prune_atom atom formula_new_eqs )
 
 
-let prune_binop ~negated (bop : Binop.t) x y formula =
+let prune_binop ~negated (bop:Binop.t) ?(ifk=false) x y formula =
   let tx = Term.of_operand x in
   let ty = Term.of_operand y in
   let t = Term.of_binop bop tx ty in
@@ -3724,7 +3737,7 @@ let prune_binop ~negated (bop : Binop.t) x y formula =
      important to do [prune_atoms] *first* otherwise it might become trivial. For instance adding [x
      = 4] would prune [4 = 4] and so not add anything to [formula.conditions] instead of adding [x =
      4]. *)
-  prune_atoms atoms (formula, RevList.empty) >>= Intervals.and_binop ~negated bop x y
+  prune_atoms atoms (formula, RevList.empty) >>= Intervals.and_binop ~negated bop x y ~ifk
 
 
 module DynamicTypes = struct

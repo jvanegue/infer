@@ -77,9 +77,9 @@ let eval_unop ret unop v astate =
   map_path_condition_with_ret astate ret ~f:(fun phi ->
       Formula.and_equal_unop ret unop (AbstractValueOperand v) phi )
 
-
-let prune_binop ~negated binop lhs rhs astate =
-  map_path_condition astate ~f:(fun phi -> Formula.prune_binop ~negated binop lhs rhs phi)
+let prune_binop binop ?ifkind:(ifk=false) lhs rhs astate ~negated =
+  (* let _ = ifk in *)
+  map_path_condition astate ~f:(fun phi -> Formula.prune_binop ~negated binop ~ifk lhs rhs phi)
 
 
 let and_equal_string_concat ret lhs rhs astate =

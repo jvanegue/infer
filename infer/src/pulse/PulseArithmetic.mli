@@ -68,13 +68,14 @@ val eval_unop :
   -> (AbductiveDomain.t * AbstractValue.t) AccessResult.t SatUnsat.t
 
 val prune_binop :
-     negated:bool
-  -> Binop.t
+   Binop.t
+  -> ?ifkind:bool
   -> operand
   -> operand
   -> AbductiveDomain.t
+  -> negated:bool
   -> AbductiveDomain.t AccessResult.t SatUnsat.t
-
+  
 val prune_eq_zero :
   AbstractValue.t -> AbductiveDomain.t -> AbductiveDomain.t AccessResult.t SatUnsat.t
 (** helper function wrapping [prune_binop] *)

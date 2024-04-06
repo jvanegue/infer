@@ -158,7 +158,7 @@ val and_equal_string_concat : Var.t -> operand -> operand -> t -> (t * new_eqs) 
 
 val and_is_int : Var.t -> t -> (t * new_eqs) SatUnsat.t
 
-val prune_binop : negated:bool -> Binop.t -> operand -> operand -> t -> (t * new_eqs) SatUnsat.t
+val prune_binop : negated:bool -> Binop.t -> ?ifk:bool -> operand -> operand -> t -> (t * new_eqs) SatUnsat.t
 
 (** {3 Operations} *)
 

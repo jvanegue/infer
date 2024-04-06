@@ -5,9 +5,10 @@
 # You can disable this if you build infer from your real home folder
 HOME=/huge/jvanegue/PUBLIC_GITHUB/infer
 
-rm -fr infer-out/ infinite.o infer-run.log pulseinf-svcomp-logs
-mkdir pulseinf-svcomp-logs
+rm -fr infer-out/ infinite.o infer-run.log
 
+#rm -fr pulseinf-svcomp-logs
+#mkdir pulseinf-svcomp-logs
 #for i in `ls pulseinf/svcomp-nla/*.c`; do
 #    echo Running infer on $i
 #    NEWNAME=`echo $i | sed s/pulseinf.svcomp.nla.//g`

@@ -336,7 +336,7 @@ let prune path location ~condition astate =
     | BinOp (bop, exp_lhs, exp_rhs) ->
         let** astate, lhs_op, lhs_hist = eval_to_operand path location exp_lhs astate in
         let** astate, rhs_op, rhs_hist = eval_to_operand path location exp_rhs astate in
-        let++ astate = PulseArithmetic.prune_binop ~negated bop lhs_op rhs_op astate in
+        let++ astate = PulseArithmetic.prune_binop bop ~ifkind:true lhs_op rhs_op astate ~negated in
         let hist =
           match (lhs_hist, rhs_hist) with
           | ValueHistory.Epoch, hist | hist, ValueHistory.Epoch ->
