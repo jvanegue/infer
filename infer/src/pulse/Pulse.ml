@@ -1356,6 +1356,9 @@ module PulseTransferFunctions = struct
                    model {path; location= loc} astate
              in
              let rhs_addr, _ = rhs_addr_hist in
+
+             L.debug Analysis Quiet "JV: Calling and_is_int_if_integer_type from deref_rhs/Pulse.ml \n";
+             
              and_is_int_if_integer_type typ rhs_addr astate
              >>|| PulseOperations.hack_python_propagates_type_on_load tenv path loc rhs_exp rhs_addr
              >>|| PulseOperations.add_static_type_objc_class tenv typ rhs_addr
@@ -1419,6 +1422,9 @@ module PulseTransferFunctions = struct
             let rhs_addr, rhs_history = ValueOrigin.addr_hist rhs_value_origin in
             let** astate, lhs_addr_hist = PulseOperations.eval path Write loc lhs_exp astate in
             let hist = ValueHistory.sequence ~context:path.conditions event rhs_history in
+
+            L.debug Analysis Quiet "JV: Calling and_is_int_if_integer_type from exec_instr/STORE \n";
+            
             let** astate = and_is_int_if_integer_type typ rhs_addr astate in
             let** astate =
               PulseOperations.cleanup_attribute_store proc_desc path loc astate ~lhs_exp ~rhs_exp

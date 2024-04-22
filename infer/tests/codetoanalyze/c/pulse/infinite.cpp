@@ -804,5 +804,3 @@ void	png_palette_terminate(int *p, int val)
     *p = val;
   
 }
-
-

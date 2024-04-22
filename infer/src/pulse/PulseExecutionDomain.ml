@@ -90,6 +90,8 @@ let () = AnalysisGlobalState.register_ref ~init:(fun () -> Some (Caml.Hashtbl.cr
 
 let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
 
+  let _ = num_iters in
+  
   (* Instead of this, we want to stop reporting at current and next widening iteration 
      if we already have had an alert at a previous widening iteration *)
   (* if (num_iters <= 0) then next,-1 else *)
@@ -110,16 +112,16 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
    *)
 
   (* Use this when disabling debug output *)
-  (* let print_warning _ _ _ = () in *)
+  let print_warning _ _ _ = () in 
 
-  let print_warning s cnt state =
+  (* let print_warning s cnt state =
     let _ = state in 
-    L.debug Analysis Quiet "JV: BACK-EDGE FOUND infinite state from %s with cnt %i) \n" s cnt; 
+    L.debug Analysis Quiet "JV: BACK-EDGE FOUND infinite state from %s with cnt %i) \n" s cnt; *)
     (* To prints the whole state where the bug was found. This is useful but verbose *)
     (* L.debug Analysis Quiet "JV: Begin Infinite State numiter %d \n" num_iters; *)
-    pp_ AbductiveDomain.pp Format.std_formatter state; 
+  (* pp_ AbductiveDomain.pp Format.std_formatter state; *)
     (* L.debug Analysis Quiet "JV: End infinite state numiter %d \n" num_iters; *)
-  in 
+  (* in *)
   
   let rec detect_elem e lst curi : bool * int =
     match lst with
@@ -148,7 +150,7 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
 
   (* L.debug Analysis Quiet "PULSEINF: BACKEDGE prevlen %d nextlen %d diff %d worklen %d \n" prevlen nextlen (nextlen - prevlen) worklen; *)
   (* Do-nothing version to avoid debug output *)
-  (* let print_workset _ = L.debug Analysis Quiet "JV: Computing Workset at numiter %i \n" num_iters; true in *)  
+  (* let print_workset _ = true in *) (** L.debug Analysis Quiet "JV: Computing Workset at numiter %i \n" num_iters; true in *)  
   (* Pulse-inf debug output: useful but verbose *)
   let rec print_workset ws =
     match ws with
@@ -160,7 +162,6 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
        L.debug Analysis Quiet "JV: End Workset State numiter %d \n" num_iters;
        print_workset tl
   in
-
   
   let extract_pathcond hd : Formula.t =
    match hd with
@@ -171,7 +172,21 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
     | InfiniteProgram astate -> AbductiveDomain.get_path_condition astate
     | ExceptionRaised astate -> AbductiveDomain.get_path_condition astate
     | ContinueProgram astate -> AbductiveDomain.get_path_condition astate
+  in 
+
+  (* change for extract_terminal_conditions
+
+  let extract_pathcond hd : Formula.t =
+   match hd with
+    | AbortProgram summary -> AbductiveDomain.Summary.get_path_condition summary
+    | ExitProgram summary -> AbductiveDomain.Summary.get_path_condition summary
+    | LatentAbortProgram a -> AbductiveDomain.Summary.get_path_condition a.astate
+    | LatentInvalidAccess a -> AbductiveDomain.Summary.get_path_condition a.astate
+    | InfiniteProgram astate -> AbductiveDomain.get_path_condition astate
+    | ExceptionRaised astate -> AbductiveDomain.get_path_condition astate
+    | ContinueProgram astate -> AbductiveDomain.get_path_condition astate
   in
+  *) 
   
   let rec record_pathcond ws : int =
     match ws with
