@@ -21,7 +21,7 @@ rm -fr infer-out/ infinite.o infer-run.log
 # Individual test suite as expected by Infer
 # In the process of moving all tests to their own files, commented for now.
 #$HOME/infer/bin/infer run --pulse-only --print-logs -g -- clang++ -c pulseinf/simple_loop_terminate.cpp 2> infer-run.log
-$HOME/infer/bin/infer run --pulse-only --print-logs -g -- clang++ -c pulseinf/simple_loop_break.cpp 2> infer-run.log
+#$HOME/infer/bin/infer run --pulse-only --print-logs -g -- clang++ -c pulseinf/simple_loop_break.cpp 2> infer-run.log
 #$HOME/infer/bin/infer run --pulse-only --print-logs -g -- clang++ -c pulseinf/simple_goto_nonterminate.cpp 2> infer-run.log
 #$HOME/infer/bin/infer run --pulse-only --print-logs -g -- clang++ -c pulseinf/two_liner_terminate.cpp 2> infer-run.log
 #$HOME/infer/bin/infer run --pulse-only --print-logs -g -- clang++ -c pulseinf/simple_loop_equal.cpp 2> infer-run.log

@@ -1446,7 +1446,6 @@ module Term = struct
         ~pp_item:(fun fmt (term, var) -> F.fprintf fmt "%a=%a" (pp pp_var) term pp_var var)
         fmt m
 
-
     let yojson_of_t_ m = `List (List.map (bindings m) ~f:[%yojson_of: t * Var.t])
   end
 end
@@ -3169,6 +3168,7 @@ module Formula = struct
                               Debug.p "Found new atoms %a@\n"
                                 (Pp.seq ~sep:"," (Atom.pp_with_pp_var Var.pp))
                                 atoms ;
+                                  L.debug Analysis Quiet "JV: Calling and_normalized_atoms from propagate_in_term_eqs (RANGE case) \n"; 
                               and_normalized_atoms (phi, new_eqs) atoms ~orig_atom:atoms ~add_term:true >>| snd )
                       | Domain | DomainAndRange -> (
                           let* phi, new_eqs = phi_new_eqs_sat in
@@ -3223,6 +3223,7 @@ module Formula = struct
                                   Debug.p "adding atoms %a instead of term_eq@\n"
                                     (Pp.seq ~sep:"," (Atom.pp_with_pp_var Var.pp))
                                     atoms ;
+                                  L.debug Analysis Quiet "JV: Calling and_normalized_atoms from propagate_in_term_eqs (DOMAIN case) \n"; 
                                   and_normalized_atoms (phi, new_eqs) atoms ~orig_atom:atoms ~add_term:true >>| snd
                               | None -> (
                                 match get_term_eq phi t' with
@@ -3319,6 +3320,7 @@ module Formula = struct
                         Debug.p "Found new atoms thanks to %a≠0: [%a]@\n" Var.pp v
                           (Pp.seq ~sep:"," (Atom.pp_with_pp_var Var.pp))
                           atoms ;
+                        L.debug Analysis Quiet "JV: Calling and_normalized_atoms from propagate_atom \n"; 
                         and_normalized_atoms (phi, new_eqs) atoms ~orig_atom:atoms ~add_term:true >>| snd ) )
               in_term_eqs (Sat phi_new_eqs) )
 
@@ -3407,11 +3409,12 @@ module Formula = struct
            
     and and_normalized_atoms (phi, new_eqs) atoms ~orig_atom ~add_term =
 
-      (* here test if atoms in orig_atom are already present in term_conds - if so, collect their constraints *)
+      (* JV: We should test if variables in orig_atom are present in term_conds: if so, collect atom as well for term conds even if add_term is false *)
+      (* May not be necessary thanks to Pulse fresh name creation, which witness the existence of a change without having to track all constraints *)
       
       let upd_phi =
         let str = (if add_term then "TRUE - adding atom" else "FALSE - not adding atom") in
-        L.debug Analysis Quiet "JV: and_normalized_atoms: add_term is %s \n" str;
+        L.debug Analysis Quiet "JV: and_normalized_atoms: add termination cond is %s \n" str;
         if add_term then
           (and_termcond_atoms phi orig_atom)
         else
@@ -3425,6 +3428,7 @@ module Formula = struct
 
 
     and and_atom atom (phi, new_eqs) add_term =
+      L.debug Analysis Quiet "JV: Calling and_normalized_atoms from and_atom \n"; 
       normalize_atom phi atom >>= and_normalized_atoms (phi, new_eqs) ~orig_atom:[atom] ~add_term:add_term
 
     let and_var_term ~fuel v t (phi, new_eqs) =
@@ -3446,6 +3450,7 @@ module Formula = struct
         | None ->
             Sat (phi, new_eqs)
         | Some atoms ->
+           L.debug Analysis Quiet "JV: Calling and_normalized_atoms from and_var_term \n"; 
             and_normalized_atoms (phi, new_eqs) atoms ~orig_atom:atoms ~add_term:true >>| snd
       in
       solve_normalized_term_eq ~fuel new_eqs t' v' phi
@@ -3548,56 +3553,57 @@ module Intervals = struct
 
 
   let and_binop ~negated binop op1 op2 ?(ifk=false) (formula, new_eqs) =
-    L.debug Analysis Quiet "JV: Intervals.and_binop ~negated:%b %a %a %a@\n" negated Binop.pp binop pp_operand op1
+    L.debug Analysis Quiet "JV: Intervals.and_binop ~negated:%b %a %a %a \n" negated Binop.pp binop pp_operand op1
       pp_operand op2 ;
     let v1_opt, i1_opt = interval_and_var_of_operand formula.phi op1 in
     let v2_opt, i2_opt = interval_and_var_of_operand formula.phi op2 in
     match CItv.abduce_binop_is_true ~negated binop i1_opt i2_opt with
     | Unsatisfiable ->
+       L.debug Analysis Quiet "JV: Intervals.and_binop : UNSAT case \n";
         Unsat
     | Satisfiable (i1_better_opt, i2_better_opt) ->
        L.debug Analysis Quiet "JV: Intervals.and_binop : Satisfiable case \n";
-        let refine v_opt i_better_opt formula_new_eqs =
-          Option.both v_opt i_better_opt
-          |> Option.fold ~init:(Sat formula_new_eqs) ~f:(fun formula_new_eqs (v, i_better) ->
-                 L.debug Analysis Quiet "JV: Intervals.and_binop : refining interval for %a to %a@\n" Var.pp v CItv.pp i_better ;
-                 let* formula, new_eqs = formula_new_eqs in
-                 let* phi = Formula.add_interval v i_better formula.phi in
-                 let* phi, new_eqs =
-                   match Var.Map.find v phi.Formula.intervals |> CItv.to_singleton with
-                   | None ->
+       let refine v_opt i_better_opt formula_new_eqs =
+         Option.both v_opt i_better_opt
+         |> Option.fold ~init:(Sat formula_new_eqs) ~f:(fun formula_new_eqs (v, i_better) ->
+                L.debug Analysis Quiet "JV: Intervals.and_binop : refining interval for %a to %a@\n" Var.pp v CItv.pp i_better ;
+                let* formula, new_eqs = formula_new_eqs in
+                let* phi = Formula.add_interval v i_better formula.phi in
+                let* phi, new_eqs =
+                  match Var.Map.find v phi.Formula.intervals |> CItv.to_singleton with
+                  | None ->
                       L.debug Analysis Quiet "JV: Intervals.and_binop : NONE case NOT entering and_var_term! \n";
-                       Sat (phi, new_eqs)
-                   | Some i ->
-                      L.debug Analysis Quiet "JV: Intervals.and_binop : SOME case Entering var_term! \n";
-                       Formula.Normalizer.and_var_term v (Term.of_intlit i) (phi, new_eqs)
-                 in
-                 let+ formula = incorporate_new_eqs new_eqs {formula with phi} in
-                 (formula, new_eqs) )
-        in
-
-        L.debug Analysis Quiet "JV: Intervals.and_binop : Creating Atom \n";
-
-        let need_atom =
-          match ifk with
-          | true ->
-             L.debug Analysis Quiet "JV: IFK TRUE - NEED ATOM FROM PRUNE \n"; 
-             true
-          | false ->
-             L.debug Analysis Quiet "JV: IFK FALSE - NOT NEEDED ATOM (not from prune) \n"; 
-             false
-        in
-
-        let binop_unknown (binop : Binop.t) = 
-          match binop with
-          | Eq | Ne | Le | Lt | Gt | Ge -> false
-          | _ -> L.debug Analysis Quiet "JV Found Binop Unknown %a : skipping insertion -- FIXME \n" Binop.pp binop; true
-        in
-        
-        let nformula = (if (phys_equal need_atom false || (binop_unknown binop)) then
-                          formula
-                        else
-        
+                      Sat (phi, new_eqs)
+                  | Some i ->
+                     L.debug Analysis Quiet "JV: Intervals.and_binop : SOME case Entering var_term! \n";
+                     Formula.Normalizer.and_var_term v (Term.of_intlit i) (phi, new_eqs)
+                in
+                let+ formula = incorporate_new_eqs new_eqs {formula with phi} in
+                (formula, new_eqs) )
+       in
+       
+       L.debug Analysis Quiet "JV: Intervals.and_binop : Creating Atom \n";
+       
+       let need_atom =
+         match ifk with
+         | true ->
+            L.debug Analysis Quiet "JV: IFK TRUE - NEED ATOM FROM PRUNE \n"; 
+            true
+         | false ->
+            L.debug Analysis Quiet "JV: IFK FALSE - NOT NEEDED ATOM (not from prune) \n"; 
+            false
+       in
+       
+       let binop_unknown (binop : Binop.t) = 
+         match binop with
+         | Eq | Ne | Le | Lt | Gt | Ge -> false
+         | _ -> L.debug Analysis Quiet "JV Found Binop Unknown %a : skipping insertion -- FIXME \n" Binop.pp binop; true
+       in
+       
+       let nformula = (if (phys_equal need_atom false || (binop_unknown binop)) then
+                         formula
+                       else
+                         
         let atom_to_binop (binop : Binop.t) =
           match binop with
           | Eq -> false,Atom.equal
@@ -3609,14 +3615,21 @@ module Intervals = struct
           | _  ->  L.die InternalError "JV: and_binop: Wrong argument to [mk_atom_of_binop]: %a -- FIXME " Binop.pp binop
         in
         let (inv,op) = (atom_to_binop binop) in
-        let atom = (if inv then (op (Term.of_operand op2) (Term.of_operand op1))
+
+        (* let cond = ((phys_equal inv true) && (phys_equal negated false)) || ((phys_equal inv false) && (phys_equal negated true)) in *)
+        let cond = inv in
+        
+        L.debug Analysis Quiet "JV: Inversion %b for termination constraint with binop %a \n" cond Binop.pp binop;
+        let atom = (if cond
+                    then (op (Term.of_operand op2) (Term.of_operand op1))
                     else (op (Term.of_operand op1) (Term.of_operand op2)))
         in
+        L.debug Analysis Quiet "JV: Added term_cond from binop %a \n" Binop.pp binop; 
         let newphi = (Formula.and_termcond_atoms formula.phi [atom]) in
         {formula with phi=newphi})
-
-        in
-        refine v1_opt i1_better_opt (nformula, new_eqs) >>= refine v2_opt i2_better_opt
+                    
+       in
+       refine v1_opt i1_better_opt (nformula, new_eqs) >>= refine v2_opt i2_better_opt
 
 
   let binop v bop op_lhs op_rhs formula =
@@ -3729,6 +3742,7 @@ let prune_atom atom (formula, new_eqs) ifk =
   (* Use [phi] to normalize [atom] here to take previous [prune]s into account. *)
   let* normalized_atoms = Formula.Normalizer.normalize_atom formula.phi atom in
   let* phi, new_eqs =
+    L.debug Analysis Quiet "JV: Calling and_normalized_atoms from prune_atom \n"; 
     Formula.Normalizer.and_normalized_atoms (formula.phi, new_eqs) normalized_atoms ~orig_atom:[atom] ~add_term:ifk
   in
   let conditions =
@@ -3741,8 +3755,11 @@ let prune_atom atom (formula, new_eqs) ifk =
 
 
 let prune_atoms atoms formula_new_eqs ifk =
+  (* dont add atom on that path as it would be doubly added by prune_binop/and_binop then *)
+  let _ = ifk in
   SatUnsat.list_fold atoms ~init:formula_new_eqs ~f:(fun formula_new_eqs atom ->
-      prune_atom atom formula_new_eqs ifk)
+      L.debug Analysis Quiet "JV: Called prune_atom from prune_atoms \n";
+      prune_atom atom formula_new_eqs false)
 
 let prune_binop ~negated (bop:Binop.t) ?(ifk=false) x y formula =
   let tx = Term.of_operand x in
@@ -3758,6 +3775,7 @@ let prune_binop ~negated (bop:Binop.t) ?(ifk=false) x y formula =
      important to do [prune_atoms] *first* otherwise it might become trivial. For instance adding [x
      = 4] would prune [4 = 4] and so not add anything to [formula.conditions] instead of adding [x =
      4]. *)
+  L.debug Analysis Quiet "JV: Calling prune_atoms + and_binop from prune_binop \n";
   prune_atoms atoms (formula, RevList.empty) ifk >>= Intervals.and_binop ~negated bop x y ~ifk
 
 
@@ -3922,6 +3940,7 @@ let and_conditions_fold_subst_variables phi0 ~up_to_f:phi_foreign ~init ~f:f_var
     IContainer.fold_of_pervasives_set_fold Atom.Set.fold conditions_foreign ~init
       ~f:(fun (acc_f, phi_new_eqs) atom_foreign ->
         let acc_f, atom = Atom.fold_subst_variables atom_foreign ~init:acc_f ~f_subst in
+        L.debug Analysis Quiet "JV: Calling prune_atom from add_conditions \n";
         let phi_new_eqs = prune_atom atom phi_new_eqs true |> sat_value_exn in
         (acc_f, phi_new_eqs) )
   in
