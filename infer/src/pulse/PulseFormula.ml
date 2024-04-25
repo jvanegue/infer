@@ -1477,7 +1477,6 @@ module Atom = struct
     | NotEqual (t1, t2) ->
         F.fprintf fmt "%a ≠ %a" pp_term t1 pp_term t2
 
-
   let get_terms atom =
     let (LessEqual (t1, t2) | LessThan (t1, t2) | Equal (t1, t2) | NotEqual (t1, t2)) = atom in
     (t1, t2)
@@ -3605,8 +3604,8 @@ module Intervals = struct
           | Ne -> false,Atom.not_equal
           | Le -> false,Atom.less_equal
           | Lt -> false,Atom.less_than
-          | Gt -> true,Atom.less_equal
-          | Ge -> true,Atom.less_than
+          | Gt -> true,Atom.less_than
+          | Ge -> true,Atom.less_equal
           | _  ->  L.die InternalError "JV: and_binop: Wrong argument to [mk_atom_of_binop]: %a -- FIXME " Binop.pp binop
         in
         let (inv,op) = (atom_to_binop binop) in
