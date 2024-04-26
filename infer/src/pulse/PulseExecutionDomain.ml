@@ -162,19 +162,6 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
        L.debug Analysis Quiet "JV: End Workset State numiter %d \n" num_iters;
        print_workset tl
   in
-  
-  let extract_pathcond hd : Formula.t =
-   match hd with
-    | AbortProgram summary -> AbductiveDomain.Summary.get_path_condition summary
-    | ExitProgram summary -> AbductiveDomain.Summary.get_path_condition summary
-    | LatentAbortProgram a -> AbductiveDomain.Summary.get_path_condition a.astate
-    | LatentInvalidAccess a -> AbductiveDomain.Summary.get_path_condition a.astate
-    | InfiniteProgram astate -> AbductiveDomain.get_path_condition astate
-    | ExceptionRaised astate -> AbductiveDomain.get_path_condition astate
-    | ContinueProgram astate -> AbductiveDomain.get_path_condition astate
-  in 
-
-  (* change for extract_terminal_conditions
 
   let extract_pathcond hd : Formula.t =
    match hd with
@@ -186,7 +173,6 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
     | ExceptionRaised astate -> AbductiveDomain.get_path_condition astate
     | ContinueProgram astate -> AbductiveDomain.get_path_condition astate
   in
-  *) 
   
   let rec record_pathcond ws : int =
     match ws with

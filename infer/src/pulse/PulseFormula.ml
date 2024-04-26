@@ -3499,8 +3499,11 @@ type t =
 let ttrue = {conditions= Atom.Set.empty; phi= Formula.ttrue; term_conds= Atom.Set.empty}
 
 (* added pulse-infinite *)
-let extract_cond (var:t) = var.conditions
-
+(* this is to extract path cond instead of term cond *)
+(* let extract_cond (var:t) = var.conditions *)
+let extract_cond (var:t) = var.term_conds
+(* end pulse-infinite *)
+                         
 let set_is_empty (conds: Atom.Set.t) = (Atom.Set.is_empty conds)
 (* end pulse-infinite *)
           
@@ -3615,14 +3618,23 @@ module Intervals = struct
           | _  ->  L.die InternalError "JV: and_binop: Wrong argument to [mk_atom_of_binop]: %a -- FIXME " Binop.pp binop
         in
         let (inv,op) = (atom_to_binop binop) in
+        let invcond = inv in
+        let opcond =
+          match (Term.of_operand op1, Term.of_operand op2) with
+          | Term.Var v1, Term.Var v2 -> (phys_equal v1 v2)
+          | _,_ -> false
+        in
+        let swapcond = (match (binop: Binop.t) with | Eq -> true | _ -> false) in
 
-        (* let cond = ((phys_equal inv true) && (phys_equal negated false)) || ((phys_equal inv false) && (phys_equal negated true)) in *)
-        let cond = inv in
+        L.debug Analysis Quiet "JV: Inversion %b OpCond %b SwapCond %b for termination constraint with binop %a \n" invcond opcond swapcond Binop.pp binop;
         
-        L.debug Analysis Quiet "JV: Inversion %b for termination constraint with binop %a \n" cond Binop.pp binop;
-        let atom = (if cond
-                    then (op (Term.of_operand op2) (Term.of_operand op1))
-                    else (op (Term.of_operand op1) (Term.of_operand op2)))
+        let swapterm = (Atom.equal Term.zero Term.zero) in
+        let atom = 
+          if (opcond && swapcond) then swapterm else
+            (if invcond
+             then (op (Term.of_operand op2) (Term.of_operand op1))
+             else (op (Term.of_operand op1) (Term.of_operand op2)))
+          
         in
         L.debug Analysis Quiet "JV: Added term_cond from binop %a \n" Binop.pp binop; 
         let newphi = (Formula.and_termcond_atoms formula.phi [atom]) in

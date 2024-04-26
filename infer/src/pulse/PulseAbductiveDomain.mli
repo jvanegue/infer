@@ -292,6 +292,8 @@ val mark_potential_leaks : Location.t -> dead_roots:Var.t list -> t -> t
 val add_skipped_call : Procname.t -> Trace.t -> t -> t
 
 val get_path_condition : t -> Formula.t
+
+(* val get_termination_condition : t -> Formula.t *)
   
 val add_skipped_calls : SkippedCalls.t -> t -> t
 
@@ -372,6 +374,8 @@ module Summary : sig
   val get_post : summary -> BaseDomain.t
 
   val get_path_condition : summary -> Formula.t
+
+  (* val get_termination_condition : summary -> Formula.t *)
 
   val get_topl : summary -> PulseTopl.state
 
