@@ -83,7 +83,7 @@ type t =
   ; phi: Formula.t
         (** the arithmetic constraints of the current symbolic state; true in both the pre and post
             since abstract values [Var.t] have immutable semantics *)
-  ; term_conds: Atom.Set.t
+           (* ; term_conds: Atom.Set.t *)
         (** Termination conditions: currently set to the unpruned version of the path conditions *)
   }
 [@@deriving compare, equal, yojson_of]

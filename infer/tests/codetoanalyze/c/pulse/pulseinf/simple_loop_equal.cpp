@@ -4,3 +4,4 @@ void simple_loop_equal_notterminate()
   while (x == x)
     x = x + 1;
 }
+

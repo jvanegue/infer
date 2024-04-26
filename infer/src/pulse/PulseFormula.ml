@@ -3490,28 +3490,37 @@ type t =
   ; phi: Formula.t
         (** the arithmetic constraints of the current symbolic state; true in both the pre and post
             since abstract values [Var.t] have immutable semantics *)
-  ; term_conds: Atom.Set.t
+           (* ; term_conds: Atom.Set.t *)
     (** Termination conditions used to detect recurring set of states. This is the same as the path
         conditions above without  pruning *)  
   }
 [@@deriving compare, equal, yojson_of]
 
-let ttrue = {conditions= Atom.Set.empty; phi= Formula.ttrue; term_conds= Atom.Set.empty}
+(* let ttrue = {conditions= Atom.Set.empty; phi= Formula.ttrue; term_conds= Atom.Set.empty} *)
+let ttrue = {conditions= Atom.Set.empty; phi= Formula.ttrue}
 
 (* added pulse-infinite *)
 (* this is to extract path cond instead of term cond *)
 (* let extract_cond (var:t) = var.conditions *)
-let extract_cond (var:t) = var.term_conds
+(* let extract_cond (var:t) = var.term_conds *)
+let extract_cond (var:t) = (Formula.get_terminal_conds var.phi)
 (* end pulse-infinite *)
                          
 let set_is_empty (conds: Atom.Set.t) = (Atom.Set.is_empty conds)
 (* end pulse-infinite *)
           
-let pp_with_pp_var pp_var fmt {conditions; phi; term_conds} =
+(* let pp_with_pp_var pp_var fmt {conditions; phi; term_conds} = *)
+(*
   F.fprintf fmt "@[<hv>conditions: %a@;phi: %a@;term_conds: %a]"
     (Atom.Set.pp_with_pp_var pp_var) conditions
     (Formula.pp_with_pp_var pp_var) phi
     (Atom.Set.pp_with_pp_var pp_var) term_conds
+*)
+
+let pp_with_pp_var pp_var fmt {conditions; phi} =
+  F.fprintf fmt "@[<hv>conditions: %a@;phi: %a@] \n"
+    (Atom.Set.pp_with_pp_var pp_var) conditions
+    (Formula.pp_with_pp_var pp_var) phi
 
 
 let pp = pp_with_pp_var Var.pp
@@ -3683,8 +3692,10 @@ let and_atom atom formula add_term =
   let* updphi, new_eqs = Formula.Normalizer.and_atom atom (formula.phi, RevList.empty) add_term in
 
   (** Here need to get term_conditions via accessor since updphi type is private? *)
-  let (termcond: Atom.Set.t) = (Formula.get_terminal_conds updphi) in
-  let newphi = {formula with phi=updphi; term_conds=termcond} in
+  (* let (termcond: Atom.Set.t) = (Formula.get_terminal_conds updphi) in *)
+  (* let newphi = {formula with phi=updphi; term_conds=termcond} in *)
+  let newphi = {formula with phi=updphi} in 
+  
   let+ (formula:t) = Intervals.incorporate_new_eqs new_eqs newphi in
   (formula, new_eqs)
 
@@ -3761,8 +3772,9 @@ let prune_atom atom (formula, new_eqs) ifk =
     List.fold normalized_atoms ~init:formula.conditions ~f:(fun conditions atom ->
         Atom.Set.add atom conditions )
   in
-  let orig_tconds = (Formula.get_terminal_conds phi) in
-  let+ formula = Intervals.incorporate_new_eqs new_eqs {phi; conditions; term_conds=orig_tconds} in
+  (* let orig_tconds = (Formula.get_terminal_conds phi) in *)
+  (* let+ formula = Intervals.incorporate_new_eqs new_eqs {phi; conditions; term_conds=orig_tconds} in *)
+  let+ formula = Intervals.incorporate_new_eqs new_eqs {phi; conditions} in 
   (formula, new_eqs)
 
 
@@ -3872,6 +3884,7 @@ let normalize ~get_dynamic_type formula =
 (** translate each variable in [formula_foreign] according to [f] then incorporate each fact into
     [formula0] *)
 let and_fold_subst_variables formula0 ~up_to_f:formula_foreign ~init ~f:f_var =
+  L.debug Analysis Quiet "JV: and_fold_subst_variables: INSERT FOREIGN EQUATIONS! \n";
   let f_subst acc v =
     let acc', v' = f_var acc v in
     (acc', VarSubst v')
@@ -4065,13 +4078,13 @@ end = struct
        [keep] accordingly. *)
     let keep = extend_with_restricted_reps_of keep formula in
     let subst = VarUF.reorient formula.phi.var_eqs ~should_keep:(fun x -> Var.Set.mem x keep) in
-    let termconds = (Formula.get_terminal_conds formula.phi) in    
+    (* let termconds = (Formula.get_terminal_conds formula.phi) in *)
     try
       Sat
         { conditions=
             subst_var_atoms_for_conditions ~precondition_vocabulary subst formula.conditions
-        ; phi= subst_var_phi subst formula.phi
-        ; term_conds= termconds}
+        ; phi= subst_var_phi subst formula.phi}
+        (* ; term_conds= termconds} *)
     with Contradiction -> Unsat
 end
 
@@ -4231,6 +4244,7 @@ module DeadVariables = struct
         ~term_eqs_occurrences:Var.Map.empty ~atoms_occurrences:Var.Map.empty
         ~term_conditions:Atom.Set.empty
     in
+    (* let termcond = (Formula.get_terminal_conds formula.phi) in *)
     let phi = simplify_phi formula.phi in
     let conditions =
       (* discard atoms that callers have no way of influencing, i.e. more or less those that do not
@@ -4240,12 +4254,15 @@ module DeadVariables = struct
         (fun atom -> not (Atom.has_var_notin closed_prunable_vars atom))
         formula.conditions
     in
-    let termcond = (Formula.get_terminal_conds formula.phi) in    
-    Sat ({conditions; phi; term_conds=termcond}, vars_to_keep)
+    (* Sat ({conditions; phi; term_conds=termcond}, vars_to_keep) *)
+    Sat ({conditions; phi}, vars_to_keep) 
 end
 
 let simplify ~get_dynamic_type ~precondition_vocabulary ~keep formula =
   let open SatUnsat.Import in
+
+  (* let termcond = (Formula.get_terminal_conds formula.phi) in *)
+  
   let* formula, new_eqs = normalize ~get_dynamic_type formula in
   L.d_printfln_escaped "@[Simplifying %a@ wrt %a (keep),@ with prunables=%a@]" pp formula Var.Set.pp
     keep Var.Set.pp precondition_vocabulary ;
@@ -4254,8 +4271,9 @@ let simplify ~get_dynamic_type ~precondition_vocabulary ~keep formula =
   (* TODO: doing [QuantifierElimination.eliminate_vars; DeadVariables.eliminate] a few times may
      eliminate even more variables *)
   let+ formula, live_vars = DeadVariables.eliminate ~precondition_vocabulary ~keep formula in
-  let termcond = (Formula.get_terminal_conds formula.phi) in
-  ({formula with term_conds=termcond}, live_vars, new_eqs)
+  
+  (* ({formula with term_conds=termcond}, live_vars, new_eqs) *)
+  (formula, live_vars, new_eqs)
 
 
 let is_known_zero formula v =

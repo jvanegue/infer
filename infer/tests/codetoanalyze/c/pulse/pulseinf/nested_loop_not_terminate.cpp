@@ -7,7 +7,7 @@ void nested_loop_not_terminate(int y) {
 	x = 1;
       else
 	x++;
-      y++;
     }
+    y++;
   }
 }

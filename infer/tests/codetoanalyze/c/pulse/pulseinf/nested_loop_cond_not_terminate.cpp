@@ -4,10 +4,7 @@ void nested_loop_cond_not_terminate(int y) {
   while (y < 100) {
     while (x <= 100) {
       if (x == 10)
-	{
-	  x = 1;
-	  //y = y * 2;
-	}
+	x = 1;
       else
 	x++;
     }

@@ -140,17 +140,15 @@ void loop_alternating_not_terminate(int y, int x) {
 
 /* pulse-inf: works good */
 void nested_loop_not_terminate(int y) {
-  int x = 42;
+  int x = 1;
   while (y < 100) {
     while (x <= 100) {
-      if (x == 100)
-	{
-	  x = 1;
-	  y = 0;
-	}
+      if (x == 10)
+	x = 1;
       else
 	x++;
     }
+    y++;
   }
 }
 
@@ -201,11 +199,8 @@ void nested_loop_cond_not_terminate(int y) {
   int x = 42;
   while (y < 100) {
     while (x <= 100) {
-      if (x == 100)
-	{
-	  x = 1;
-	  y = y * 2;
-	}
+      if (x == 10)
+	x = 1;
       else
 	x++;
     }
@@ -215,8 +210,8 @@ void nested_loop_cond_not_terminate(int y) {
 
 
 /* pulse inf works */
-void simple_loop_not_terminate(int y, int x) {
-  //int x = 1;
+void simple_loop_not_terminate(int y) {
+  int x = 1;
   while (x != 3)
     y++;
 }
@@ -790,17 +785,27 @@ void iterate_crc_terminate()
 
 /* From: libpng */
 /* Test from libpng with typedefs */
-void	png_palette_terminate(int *p, int val)
+void	png_palette_terminate(int val)
 {
   int	num;
   int	i;
-
+  int   p = 0;
+  
   if (val == 0)
     num = 1;
   else
     num = 256;
 
   for (i = 0; i < num; i++)
-    *p = val;
+    p += val;
   
+}
+
+/* Peter O'Hearn's test - not terminate */
+/* Pulse-Inf: OK! */
+void simple_loop_equal_notterminate()
+{
+  int x = 42;
+  while (x == x)
+    x = x + 1;
 }
