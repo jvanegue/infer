@@ -223,6 +223,8 @@ let unsafe_unret = "<\"Unsafe_unretained\">"
 
 let weak = "<\"Weak\">"
 
+let copy = "<\"Copy\">"
+
 (* Allow lists for C++ library functions *)
 
 let std_allow_listed_cpp_methods =
@@ -601,6 +603,29 @@ and analysis_schedule_file =
     ^ ResultsDirEntryName.get_path ~results_dir:"infer-out" AnalysisDependencyGraph )
 
 
+and _annotation_reachability_apply_class_annotations =
+  CLOpt.mk_bool ~long:""
+    ~deprecated:["-annotation-reachability-apply-class-annotations"]
+    ~deprecated_no:["-no-annotation-reachability-apply-class-annotations"]
+    ~in_help:InferCommand.[(Analyze, manual_java)]
+    "Applies annotations of a class/interface to all its methods" ~default:true
+
+
+and annotation_reachability_apply_superclass_annotations =
+  CLOpt.mk_bool ~long:"annotation-reachability-apply-superclass-annotations"
+    ~in_help:InferCommand.[(Analyze, manual_java)]
+    "Applies annotations from superclasses and interfaces also on methods that are not overridden \
+     from the superclass or interface."
+    ~default:true
+
+
+and annotation_reachability_custom_models =
+  CLOpt.mk_json ~long:"annotation-reachability-custom-models"
+    ~in_help:InferCommand.[(Analyze, manual_java)]
+    {|Specify a map from annotations to lists of regexps to treat matching methods as if they had the annotation.
+Example format: {"Annotation": ["com\\\\.Myclass\\\\.foo.*"]}|}
+
+
 and annotation_reachability_custom_pairs =
   CLOpt.mk_json ~long:"annotation-reachability-custom-pairs"
     ~in_help:InferCommand.[(Analyze, manual_java)]
@@ -789,6 +814,7 @@ and ( biabduction_write_dotty
     , debug_exceptions
     , debug_level_analysis
     , debug_level_capture
+    , debug_level_report
     , debug_level_test_determinator
     , deduplicate
     , developer_mode
@@ -832,6 +858,9 @@ and ( biabduction_write_dotty
   and debug_level_capture =
     CLOpt.mk_int ~long:"debug-level-capture" ~default:0 ~in_help:all_generic_manuals
       "Debug level for the capture. See $(b,--debug-level) for accepted values."
+  and debug_level_report =
+    CLOpt.mk_int ~long:"debug-level-report" ~default:0 ~in_help:all_generic_manuals
+      "Debug level for the report. See $(b,--debug-level) for accepted values."
   and debug_level_test_determinator =
     CLOpt.mk_int ~long:"debug-level-test-determinator" ~default:0
       "Debug level for the test determinator. See $(b,--debug-level) for accepted values."
@@ -876,6 +905,7 @@ and ( biabduction_write_dotty
     bo_debug := level ;
     debug_level_analysis := level ;
     debug_level_capture := level ;
+    debug_level_report := level ;
     debug_level_test_determinator := level
   in
   let debug =
@@ -928,6 +958,7 @@ and ( biabduction_write_dotty
   , debug_exceptions
   , debug_level_analysis
   , debug_level_capture
+  , debug_level_report
   , debug_level_test_determinator
   , deduplicate
   , developer_mode
@@ -1172,13 +1203,6 @@ and buck_targets_block_list =
   CLOpt.mk_string_list ~long:"buck-targets-block-list" ~deprecated:["-buck-targets-blacklist"]
     ~in_help:InferCommand.[(Run, manual_buck); (Capture, manual_buck)]
     ~meta:"regex" "Skip capture of buck targets matched by the specified regular expression."
-
-
-and bxl_file_capture =
-  CLOpt.mk_bool ~long:"bxl-file-capture" ~default:false
-    ~in_help:InferCommand.[(Capture, manual_buck)]
-    "Given an $(b, --changed-file-index) file, capture the owning buck2 targets and their \
-     dependencies using the BXL script specified by $(b, --buck2_bxl_target)."
 
 
 and capture =
@@ -2135,6 +2159,12 @@ and log_pulse_disjunct_increase_after_model_call =
     "Log which model did increase the current number of Pulse disjuncts."
 
 
+and log_pulse_unreachable_nodes =
+  CLOpt.mk_bool ~long:"log-pulse-unreachable-nodes" ~default:false
+    ~in_help:InferCommand.[(Analyze, manual_generic)]
+    "Log for each function and each summary, the ratio of unreached nodes."
+
+
 and log_missing_deps =
   CLOpt.mk_bool ~long:"log-missing-deps" ~default:false
     ~in_help:InferCommand.[(Analyze, manual_generic)]
@@ -2577,6 +2607,12 @@ and pulse_model_skip_pattern =
     "Regex of methods that should be modelled as \"skip\" in Pulse"
 
 
+and pulse_model_skip_pattern_list =
+  CLOpt.mk_string_list ~long:"pulse-model-skip-pattern-list"
+    ~in_help:InferCommand.[(Analyze, manual_pulse)]
+    "Regex of methods that should be modelled as \"skip\" in Pulse"
+
+
 and pulse_models_for_erlang =
   CLOpt.mk_path_list ~long:"pulse-models-for-erlang"
     ~in_help:InferCommand.[(Analyze, manual_pulse)]
@@ -2928,6 +2964,12 @@ and pyc_file = CLOpt.mk_path_list ~long:"pyc-file" "Collection of compiled Pytho
 and python_builtin_models =
   CLOpt.mk_string ~long:"python-builtin-models" ~default:default_python_builtin_models
     "Specify .sil file to use as Python builtin models (uses bundled models by default)"
+
+
+and qualified_cpp_name_block_list =
+  CLOpt.mk_string_list ~long:"qualified-cpp-name-block-list" ~meta:"string"
+    ~in_help:InferCommand.[(Analyze, manual_generic)]
+    "Skip analyzing the procedures under the qualified cpp type name."
 
 
 and quandary_endpoints =
@@ -3774,6 +3816,11 @@ let post_parsing_initialization command_opt =
   Option.value ~default:InferCommand.Run command_opt
 
 
+let join_patterns ~pattern_opt ~pattern_list =
+  let patterns = Option.to_list !pattern_opt @ RevList.to_list !pattern_list in
+  if List.is_empty patterns then None else Some (String.concat ~sep:"\\|" patterns |> Str.regexp)
+
+
 let command =
   let command_opt, _usage_exit =
     CLOpt.parse ?config_file:inferconfig_file ~usage:exe_usage startup_action initial_command
@@ -3788,6 +3835,12 @@ let rest = !rest
 and abstract_pulse_models_for_erlang = !abstract_pulse_models_for_erlang
 
 and analysis_schedule_file = !analysis_schedule_file
+
+and annotation_reachability_apply_superclass_annotations =
+  !annotation_reachability_apply_superclass_annotations
+
+
+and annotation_reachability_custom_models = !annotation_reachability_custom_models
 
 and annotation_reachability_custom_pairs = !annotation_reachability_custom_pairs
 
@@ -3917,8 +3970,6 @@ and buck_mode : BuckMode.t option =
 
 and buck_targets_block_list = RevList.to_list !buck_targets_block_list
 
-and bxl_file_capture = !bxl_file_capture
-
 and capture = !capture
 
 and capture_block_list = match capture_block_list with k, r -> (k, !r)
@@ -4041,6 +4092,8 @@ and debug_exceptions = !debug_exceptions
 and debug_level_analysis = !debug_level_analysis
 
 and debug_level_capture = !debug_level_capture
+
+and debug_level_report = !debug_level_report
 
 and debug_level_test_determinator = !debug_level_test_determinator
 
@@ -4237,6 +4290,8 @@ and lock_model = !lock_model
 
 and log_pulse_disjunct_increase_after_model_call = !log_pulse_disjunct_increase_after_model_call
 
+and log_pulse_unreachable_nodes = !log_pulse_unreachable_nodes
+
 and log_missing_deps = !log_missing_deps
 
 and margin_html = !margin_html
@@ -4376,11 +4431,8 @@ and pulse_model_abort = RevList.to_list !pulse_model_abort
 and pulse_model_alloc_pattern = Option.map ~f:Str.regexp !pulse_model_alloc_pattern
 
 and pulse_model_cheap_copy_type =
-  let pulse_model_cheap_copy_type_list =
-    Option.to_list !pulse_model_cheap_copy_type @ RevList.to_list !pulse_model_cheap_copy_type_list
-  in
-  if List.is_empty pulse_model_cheap_copy_type_list then None
-  else Some (String.concat ~sep:"\\|" pulse_model_cheap_copy_type_list |> Str.regexp)
+  join_patterns ~pattern_opt:pulse_model_cheap_copy_type
+    ~pattern_list:pulse_model_cheap_copy_type_list
 
 
 and pulse_model_free_pattern = Option.map ~f:Str.regexp !pulse_model_free_pattern
@@ -4399,7 +4451,9 @@ and pulse_model_return_this = Option.map ~f:Str.regexp !pulse_model_return_this
 
 and pulse_model_returns_copy_pattern = Option.map ~f:Str.regexp !pulse_model_returns_copy_pattern
 
-and pulse_model_skip_pattern = Option.map ~f:Str.regexp !pulse_model_skip_pattern
+and pulse_model_skip_pattern =
+  join_patterns ~pattern_opt:pulse_model_skip_pattern ~pattern_list:pulse_model_skip_pattern_list
+
 
 and pulse_model_transfer_ownership_namespace, pulse_model_transfer_ownership =
   let models =
@@ -4540,6 +4594,8 @@ and pure_by_default = !pure_by_default
 and pyc_file = RevList.to_list !pyc_file
 
 and python_builtin_models = !python_builtin_models
+
+and qualified_cpp_name_block_list = RevList.to_list !qualified_cpp_name_block_list
 
 and quandary_endpoints = !quandary_endpoints
 

@@ -12,23 +12,23 @@ import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
-@Target({ElementType.METHOD})
+@Target({ElementType.METHOD, ElementType.TYPE})
 @Retention(RetentionPolicy.CLASS)
 @interface UserDefinedSource1 {}
 
-@Target({ElementType.METHOD})
+@Target({ElementType.METHOD, ElementType.TYPE})
 @Retention(RetentionPolicy.CLASS)
 @interface UserDefinedSource2 {}
 
-@Target({ElementType.METHOD})
+@Target({ElementType.METHOD, ElementType.TYPE})
 @Retention(RetentionPolicy.CLASS)
 @interface UserDefinedSink1 {}
 
-@Target({ElementType.METHOD})
+@Target({ElementType.METHOD, ElementType.TYPE})
 @Retention(RetentionPolicy.CLASS)
 @interface UserDefinedSink2 {}
 
-@Target({ElementType.METHOD})
+@Target({ElementType.METHOD, ElementType.TYPE})
 @Retention(RetentionPolicy.CLASS)
 @interface UserDefinedSanitizer {}
 
@@ -82,6 +82,25 @@ class CustomAnnotations {
     sink1();
   }
 
+  @UserDefinedSink1
+  @UserDefinedSanitizer
+  void sinkAndSanitizer1() {}
+
+  // Order of annotations should not matter
+  @UserDefinedSanitizer
+  @UserDefinedSink1
+  void sinkAndSanitizer2() {}
+
+  @UserDefinedSource1
+  void sourceWithSinkAndSanitizer1Ok() {
+    sinkAndSanitizer1();
+  }
+
+  @UserDefinedSource1
+  void sourceWithSinkAndSanitizer2Ok() {
+    sinkAndSanitizer2();
+  }
+
   interface Callback {
     public void call();
   }
@@ -110,5 +129,104 @@ class CustomAnnotations {
   @UserDefinedSource1
   void sourceWithLambda4Ok() {
     caller(() -> safeMethod());
+  }
+
+  void sourceDefinedInConfigOk() {
+    safeMethod();
+  }
+
+  void sinkDefinedInConfig() {}
+
+  void sourceDefinedInConfigBad() {
+    sinkDefinedInConfig();
+  }
+
+  void sanitizerDefinedInConfig() {
+    sink1();
+  }
+
+  @UserDefinedSource1
+  void sourceWithSanitizerDefinedInConfigOk() {
+    sanitizerDefinedInConfig();
+  }
+
+  abstract class Base {
+    @UserDefinedSource1
+    abstract void sourceBad();
+
+    @UserDefinedSink1
+    abstract void sink();
+
+    void safe() {}
+
+    abstract void sourceDefinedInConfigBad();
+
+    abstract void sinkDefinedInConfig();
+  }
+
+  class Derived extends Base {
+    // Inherits source annotation from base class, should be reported
+    @Override
+    void sourceBad() {
+      sink();
+    }
+
+    // Inherits sink annotation from base class
+    @Override
+    void sink() {}
+
+    void sourceOk() {
+      safe();
+    }
+
+    // Inherits source (defined in config) from base class, should be reported
+    @Override
+    void sourceDefinedInConfigBad() {
+      sinkDefinedInConfig();
+    }
+
+    // Inherits sink (defined in config) from base class
+    @Override
+    void sinkDefinedInConfig() {}
+  }
+
+  void sourceDefinedInConfig_1_WithRegexBad() {
+    sinkDefinedInConfig_1_WithRegex();
+  }
+
+  void sourceDefinedInConfig_2_WithRegexBad() {
+    sinkDefinedInConfig_2_WithRegex();
+  }
+
+  void sourceDefinedInConfig_3_WithRegexOk() {
+    safeMethod();
+  }
+
+  void sinkDefinedInConfig_1_WithRegex() {}
+
+  void sinkDefinedInConfig_2_WithRegex() {}
+
+  @UserDefinedSink1
+  interface SinkInterface {
+    void interfaceSink();
+  }
+
+  @UserDefinedSource1
+  class SourceClass implements SinkInterface {
+    public void interfaceSink() {}
+
+    void source1Bad() {
+      interfaceSink();
+    }
+
+    void notSink() {}
+
+    // Currently annotation reachability treats 'notSink' as if it was annotated because
+    // SourceClass implements SinkInterface which is annotated. Marking as false positive
+    // because we would like to have an option where only overridden methods are treated
+    // as annotated.
+    void source2Ok_FP() {
+      notSink();
+    }
   }
 }

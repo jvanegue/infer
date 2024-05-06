@@ -26,6 +26,7 @@ type category =
   | Incorrect_program_semantics
   | Memory_error
   | Memory_leak
+  | No_category
   | Null_pointer_dereference
   | Perf_regression
   | Privacy_violation
@@ -36,12 +37,12 @@ type category =
 
 val string_of_severity : severity -> string
 
-val string_of_category : category option -> string option
+val string_of_category : category -> string
 
 type t = private
   { unique_id: string
   ; checker: Checker.t
-  ; category: category option
+  ; category: category
   ; visibility: visibility
   ; user_documentation: string option
   ; mutable default_severity: severity
@@ -299,6 +300,8 @@ val precondition_not_found : t
 val precondition_not_met : t
 
 val premature_nil_termination : t
+
+val pulse_cannot_instantiate_abstract_class : t [@@warning "-unused-value-declaration"]
 
 val pulse_dict_missing_key : t
 

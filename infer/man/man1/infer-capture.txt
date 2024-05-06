@@ -58,6 +58,9 @@ OPTIONS
            Debug level for the capture. See --debug-level for accepted
            values.
 
+       --debug-level-report int
+           Debug level for the report. See --debug-level for accepted values.
+
        --force-delete-results-dir
            Activates: Do not refuse to delete the results directory if it
            doesn't look like an infer results directory. (Conversely:
@@ -250,12 +253,6 @@ BUCK OPTIONS
        --buck2-use-bxl
            Activates: Use BXL script when capturing with buck2. (Conversely:
            --no-buck2-use-bxl)
-
-       --bxl-file-capture
-           Activates: Given an --changed-file-index file, capture the owning
-           buck2 targets and their dependencies using the BXL script
-           specified by --buck2_bxl_target. (Conversely:
-           --no-bxl-file-capture)
 
        --Xbuck +string
            Pass values as command-line arguments to invocations of `buck

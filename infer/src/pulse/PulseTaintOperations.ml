@@ -723,7 +723,9 @@ let pulse_models_to_treat_as_unknown_for_taint =
       { class_names= ["java.lang.StringBuilder"]
       ; method_names= ["append"; "delete"; "replace"; "setLength"] }
   ; ProcedureNameRegex
-      {name_regex= Str.regexp "std::basic_string<.*>::basic_string"; exclude_in= None} ]
+      { name_regex= Str.regexp "std::basic_string<.*>::basic_string"
+      ; exclude_in= None
+      ; exclude_names= None } ]
   |> List.map ~f:dummy_matcher_of_procedure_matcher
 
 
@@ -772,13 +774,8 @@ let call tenv path location return ~call_was_unknown (call : _ Either.t)
           in
           let astate, propagator_matches = match_call propagator_matchers astate in
           let+ astate =
-            (* This is a bit of a hack to achieve the following: be able to specify taint policies
-               where the sink is 'any procedure except <these>'. <these> need to be marked as
-               propagators. *)
-            if List.is_empty propagator_matches then
-              let astate, tainted = match_call sink_procedure_matchers astate in
-              taint_sinks path location tainted astate
-            else Ok astate
+            let astate, tainted = match_call sink_procedure_matchers astate in
+            taint_sinks path location tainted astate
           in
           let astate, should_propagate_for_unknown =
             let new_state =

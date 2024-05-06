@@ -260,24 +260,42 @@ module Syntax = struct
     PulseOperations.add_dict_contain_const_keys addr |> exec_command
 
 
+  let is_dict_non_alias formals addr {AbductiveDomain.decompiler} =
+    match PulseDecompiler.find addr decompiler with
+    | SourceExpr ((PVar pvar, ([] | [Dereference])), _) ->
+        List.exists formals ~f:(fun (formal, typ) ->
+            Pvar.equal pvar formal
+            && Option.exists
+                 (Typ.name (Typ.strip_ptr typ))
+                 ~f:(Typ.Name.equal TextualSil.hack_dict_type_name) )
+    | _ ->
+        false
+
+
   let add_dict_read_const_key (addr, history) key : unit model_monad =
-    let* {path= {timestamp}; location} = get_data in
-    PulseOperations.add_dict_read_const_key timestamp (Immediate {location; history}) addr key
-    >> sat |> exec_partial_command
+    let* {analysis_data= {proc_desc}; path= {timestamp}; location} = get_data in
+    let* is_dict_non_alias =
+      let formals = Procdesc.get_pvar_formals proc_desc in
+      is_dict_non_alias formals addr |> exec_pure_operation
+    in
+    if is_dict_non_alias then
+      PulseOperations.add_dict_read_const_key timestamp (Immediate {location; history}) addr key
+      >> sat |> exec_partial_command
+    else ret ()
 
 
   let remove_dict_contain_const_keys (addr, _) : unit model_monad =
     PulseOperations.remove_dict_contain_const_keys addr |> exec_command
 
 
-  let add_dynamic_type typ (addr, _) : unit model_monad =
-    PulseOperations.add_dynamic_type typ addr |> exec_command
+  let and_dynamic_type_is (v, _) t : unit model_monad =
+    PulseArithmetic.and_dynamic_type_is v t |> exec_partial_command
 
 
-  let get_dynamic_type ~ask_specialization (addr, _) :
-      Attribute.dynamic_type_data option model_monad =
+  let get_dynamic_type ~ask_specialization (addr, _) : Formula.dynamic_type_data option model_monad
+      =
    fun data astate ->
-    let res = AbductiveDomain.AddressAttributes.get_dynamic_type addr astate in
+    let res = PulseArithmetic.get_dynamic_type addr astate in
     let astate =
       if ask_specialization && Option.is_none res then
         AbductiveDomain.add_need_dynamic_type_specialization addr astate
@@ -305,8 +323,10 @@ module Syntax = struct
 
 
   let add_static_type typ_name (addr, _) : unit model_monad =
-   fun ({analysis_data= {tenv}} as data) astate ->
-    let astate = AbductiveDomain.AddressAttributes.add_static_type tenv typ_name addr astate in
+   fun ({analysis_data= {tenv}; location} as data) astate ->
+    let astate =
+      AbductiveDomain.AddressAttributes.add_static_type tenv typ_name addr location astate
+    in
     ret () data astate
 
 
@@ -401,7 +421,15 @@ module Syntax = struct
     |> lift_model
 
 
-  let new_ type_name = lift_to_monad_and_get_result (internal_new_ type_name)
+  let new_ type_name_exp =
+    let* new_obj = lift_to_monad_and_get_result (internal_new_ type_name_exp) in
+    match type_name_exp with
+    | Exp.Sizeof {typ} ->
+        let* () = and_dynamic_type_is new_obj typ in
+        ret new_obj
+    | _ ->
+        unreachable
+
 
   let constructor type_name fields : aval model_monad =
     let exp =
@@ -517,7 +545,7 @@ module Syntax = struct
       ?(default : (unit -> 'a model_monad) option) aval : 'a model_monad =
     let* opt_dynamic_type_data = get_dynamic_type ~ask_specialization:true aval in
     match opt_dynamic_type_data with
-    | Some {Attribute.typ= {Typ.desc= Tstruct type_name}} -> (
+    | Some {Formula.typ= {Typ.desc= Tstruct type_name}} -> (
       match (List.find cases ~f:(fun case -> fst case |> Typ.Name.equal type_name), default) with
       | Some (_, case_fun), _ ->
           Logging.d_printfln

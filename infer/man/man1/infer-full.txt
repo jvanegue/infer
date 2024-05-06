@@ -70,6 +70,19 @@ OPTIONS
            --no-annotation-reachability)
            See also infer-analyze(1).
 
+       --no-annotation-reachability-apply-superclass-annotations
+           Deactivates: Applies annotations from superclasses and interfaces
+           also on methods that are not overridden from the superclass or
+           interface. (Conversely:
+           --annotation-reachability-apply-superclass-annotations)
+           See also infer-analyze(1).
+
+       --annotation-reachability-custom-models json
+           Specify a map from annotations to lists of regexps to treat
+           matching methods as if they had the annotation.
+           Example format: {"Annotation": ["com\\.Myclass\\.foo.*"]}
+           See also infer-analyze(1).
+
        --annotation-reachability-custom-pairs json
            Specify custom sources/sinks, and optionally sanitizers for the
            annotation reachability checker
@@ -321,13 +334,6 @@ OPTIONS
            (Conversely: --no-bufferoverrun-only)
            See also infer-analyze(1).
 
-       --bxl-file-capture
-           Activates: Given an --changed-file-index file, capture the owning
-           buck2 targets and their dependencies using the BXL script
-           specified by --buck2_bxl_target. (Conversely:
-           --no-bxl-file-capture)
-           See also infer-capture(1).
-
        --capture-block-list json
            Matcher or list of matchers for names of files that should not be
            captured, hence not analyzed either. Clang, Java, and Hack only.
@@ -540,6 +546,11 @@ OPTIONS
            See also infer-analyze(1), infer-capture(1), infer-compile(1),
            infer-report(1), infer-reportdiff(1), and infer-run(1).
 
+       --debug-level-report int
+           Debug level for the report. See --debug-level for accepted values.
+           See also infer-analyze(1), infer-capture(1), infer-compile(1),
+           infer-report(1), infer-reportdiff(1), and infer-run(1).
+
        --no-deduplicate
            Deactivates: Apply issue-specific deduplication during analysis
            and/or reporting. (Conversely: --deduplicate)
@@ -703,6 +714,7 @@ OPTIONS
              PRECONDITION_NOT_FOUND (enabled by default),
              PRECONDITION_NOT_MET (enabled by default),
              PREMATURE_NIL_TERMINATION_ARGUMENT (enabled by default),
+             PULSE_CANNOT_INSTANTIATE_ABSTRACT_CLASS (disabled by default),
              PULSE_CONST_REFABLE (enabled by default),
              PULSE_DICT_MISSING_KEY (disabled by default),
              PULSE_READONLY_SHARED_PTR_PARAM (enabled by default),
@@ -1197,6 +1209,11 @@ OPTIONS
            --no-log-pulse-disjunct-increase-after-model-call)
            See also infer-analyze(1).
 
+       --log-pulse-unreachable-nodes
+           Activates: Log for each function and each summary, the ratio of
+           unreached nodes. (Conversely: --no-log-pulse-unreachable-nodes)
+           See also infer-analyze(1).
+
        --loop-hoisting
            Activates: loop-hoisting checker: Detect opportunities to hoist
            function calls that are invariant outside of loop bodies for
@@ -1517,6 +1534,10 @@ OPTIONS
            Regex of methods that should be modelled as "skip" in Pulse
            See also infer-analyze(1).
 
+       --pulse-model-skip-pattern-list +string
+           Regex of methods that should be modelled as "skip" in Pulse
+           See also infer-analyze(1).
+
        --pulse-model-transfer-ownership +string
            Methods that should be modelled as transfering memory ownership in
            Pulse. Accepted formats are method or namespace::method
@@ -1793,6 +1814,10 @@ OPTIONS
        --purity-only
            Activates: Enable purity and disable all other checkers
            (Conversely: --no-purity-only)
+           See also infer-analyze(1).
+
+       --qualified-cpp-name-block-list +string
+           Skip analyzing the procedures under the qualified cpp type name.
            See also infer-analyze(1).
 
        --quandary
@@ -3007,6 +3032,9 @@ INTERNAL OPTIONS
        --pulse-model-returns-copy-pattern-reset
            Cancel the effect of --pulse-model-returns-copy-pattern.
 
+       --pulse-model-skip-pattern-list-reset
+           Set --pulse-model-skip-pattern-list to the empty list.
+
        --pulse-model-skip-pattern-reset
            Cancel the effect of --pulse-model-skip-pattern.
 
@@ -3115,6 +3143,9 @@ INTERNAL OPTIONS
        --python-builtin-models string
            Specify .sil file to use as Python builtin models (uses bundled
            models by default)
+
+       --qualified-cpp-name-block-list-reset
+           Set --qualified-cpp-name-block-list to the empty list.
 
        --quandary-show-passthroughs
            Activates: In error traces, show intermediate steps that propagate
