@@ -88,7 +88,9 @@ type t =
   }
 [@@deriving compare, equal, yojson_of]
 
-val extract_cond : t -> Atom.Set.t
+val extract_path_cond : t -> Atom.Set.t
+
+val extract_term_cond : t -> Atom.Set.t
 
 val set_is_empty : Atom.Set.t -> bool  
 (* End pulse-infinite *)

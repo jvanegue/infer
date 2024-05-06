@@ -110,18 +110,6 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
          | hd::tl -> if (substate hd e) then true else (find_equiv_elem e tl)
      in
    *)
-
-  (* Use this when disabling debug output *)
-  let print_warning _ _ _ = () in 
-
-  (* let print_warning s cnt state =
-    let _ = state in 
-    L.debug Analysis Quiet "JV: BACK-EDGE FOUND infinite state from %s with cnt %i) \n" s cnt; *)
-    (* To prints the whole state where the bug was found. This is useful but verbose *)
-    (* L.debug Analysis Quiet "JV: Begin Infinite State numiter %d \n" num_iters; *)
-  (* pp_ AbductiveDomain.pp Format.std_formatter state; *)
-    (* L.debug Analysis Quiet "JV: End infinite state numiter %d \n" num_iters; *)
-  (* in *)
   
   let rec detect_elem e lst curi : bool * int =
     match lst with
@@ -150,19 +138,32 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
 
   (* L.debug Analysis Quiet "PULSEINF: BACKEDGE prevlen %d nextlen %d diff %d worklen %d \n" prevlen nextlen (nextlen - prevlen) worklen; *)
   (* Do-nothing version to avoid debug output *)
-  (* let print_workset _ = true in *) (** L.debug Analysis Quiet "JV: Computing Workset at numiter %i \n" num_iters; true in *)  
+  (* let print_workset _ = true in  *) (* L.debug Analysis Quiet "JV: Computing Workset at numiter %i \n" num_iters; true in *)  
   (* Pulse-inf debug output: useful but verbose *)
+  (*
   let rec print_workset ws =
     match ws with
     | [] -> true
-    | (hd,idx)::tl ->                 
-       L.debug Analysis Quiet "JV: Workset at numiter %i with orig-idx %i \n" num_iters idx;
-       L.debug Analysis Quiet "JV: Begin Workset State numiter %d \n" num_iters;
+    | (hd,_)::tl ->                 
        pp_ AbductiveDomain.pp Format.err_formatter hd;
-       L.debug Analysis Quiet "JV: End Workset State numiter %d \n" num_iters;
        print_workset tl
   in
+   *)
 
+  (* Use this when disabling debug output *)
+  let print_warning _ _ _ = () in 
+
+  (*
+  let print_warning s cnt state =
+    let _ = state in 
+    L.debug Analysis Quiet "JV: FOUND infinite state from %s with cnt %i \n" s cnt; 
+    pp_ AbductiveDomain.pp Format.std_formatter state; 
+    L.debug Analysis Quiet "JV: End infinite state -- now printing workset at bug location \n";
+    let _ = print_workset workset in
+    L.debug Analysis Quiet "JV: End Printing Vulnerable Workset \n"
+  in
+   *) 
+  
   let extract_pathcond hd : Formula.t =
    match hd with
     | AbortProgram summary -> AbductiveDomain.Summary.get_path_condition summary
@@ -182,23 +183,24 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
        | None -> L.debug Analysis Quiet "PULSEINF: widenstate htable NONE - should never happen! \n"; -1
        | Some wstate ->
           let cond = extract_pathcond hd in
-          let rcond = Formula.extract_cond cond in 
-          let prevcond = Caml.Hashtbl.find_opt wstate (cfgnode,rcond) in
-          match prevcond with
+          let pathcond = Formula.extract_path_cond cond in
+          let termcond = Formula.extract_term_cond cond in 
+          let prevstate = Caml.Hashtbl.find_opt wstate (cfgnode,termcond,pathcond) in
+          match prevstate with
           | None ->
-             Caml.Hashtbl.add wstate (cfgnode,rcond) (); (* record pathcond of hd *)
-             L.debug Analysis Quiet "PULSEINF: Recorded pathcond in htable at idx %d (NO BUG) \n" idx;
+             Caml.Hashtbl.add wstate (cfgnode,termcond,pathcond) (); (* record pathcond of hd *)
+             (* L.debug Analysis Quiet "PULSEINF: Recorded pathcond in htable at idx %d (NO BUG) \n" idx; *)
              record_pathcond tl
           | Some _ ->
-             match (Formula.set_is_empty rcond) with
-             | true ->
-                L.debug Analysis Quiet "PULSEINF: Recorded pathcond ALREADY in htable! (EMPTY) idx %d \n" idx; -2
-             | false ->
-                L.debug Analysis Quiet "PULSEINF: Recorded pathcond ALREADY in htable! (NON-TERM BUG) idx %d \n" idx; idx
+             match (Formula.set_is_empty termcond),(Formula.set_is_empty pathcond) with
+             | true,true -> -2
+             (* L.debug Analysis Quiet "PULSEINF: Recorded pathcond ALREADY in htable! (EMPTY) idx %d \n" idx; -2 *)
+             | _ -> idx
+             (* L.debug Analysis Quiet "PULSEINF: Recorded pathcond ALREADY in htable! (NON-TERM BUG) idx %d \n" idx; idx *)
            
   in
-                
-  let _ = print_workset workset in
+  
+  (* let _ = print_workset workset in *)
   let (repeated_wsidx:int) = record_pathcond workset in
 
   let create_infinite_state (hd:t) (cnt:int) : t =
@@ -259,8 +261,7 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
     create_infinite_state_and_print next repeated_wsidx 3
   (* No recurring state detected, return empty *)
   else [],-1
-
-                      
+         
 type summary = AbductiveDomain.Summary.t base_t [@@deriving compare, equal, yojson_of]
              
 let pp_summary fmt exec_summary = pp_ AbductiveDomain.Summary.pp fmt exec_summary

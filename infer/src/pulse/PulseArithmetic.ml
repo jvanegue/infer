@@ -10,7 +10,7 @@ open PulseBasicInterface
 module AbductiveDomain = PulseAbductiveDomain
 module AccessResult = PulseAccessResult
 
-module L = Logging
+(* module L = Logging *)
                     
 let map_path_condition_common ~f astate =
   let open SatUnsat.Import in
@@ -126,7 +126,7 @@ let is_manifest summary =
 
 
 let and_is_int v astate =
-  L.debug Analysis Quiet "JV: Calling Arith.and_is_int \n";
+  (* L.debug Analysis Quiet "JV: Calling Arith.and_is_int \n"; *)
   map_path_condition astate ~f:(fun phi -> Formula.and_is_int v phi)
 
 let and_equal_instanceof v1 v2 t astate =

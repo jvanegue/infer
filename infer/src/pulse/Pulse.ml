@@ -1357,7 +1357,7 @@ module PulseTransferFunctions = struct
              in
              let rhs_addr, _ = rhs_addr_hist in
 
-             L.debug Analysis Quiet "JV: Calling and_is_int_if_integer_type from deref_rhs/Pulse.ml \n";
+             (* L.debug Analysis Quiet "JV: Calling and_is_int_if_integer_type from deref_rhs/Pulse.ml \n"; *)
              
              and_is_int_if_integer_type typ rhs_addr astate
              >>|| PulseOperations.hack_python_propagates_type_on_load tenv path loc rhs_exp rhs_addr
@@ -1423,7 +1423,7 @@ module PulseTransferFunctions = struct
             let** astate, lhs_addr_hist = PulseOperations.eval path Write loc lhs_exp astate in
             let hist = ValueHistory.sequence ~context:path.conditions event rhs_history in
 
-            L.debug Analysis Quiet "JV: Calling and_is_int_if_integer_type from exec_instr/STORE \n";
+            (* L.debug Analysis Quiet "JV: Calling and_is_int_if_integer_type from exec_instr/STORE \n"; *)
             
             let** astate = and_is_int_if_integer_type typ rhs_addr astate in
             let** astate =
@@ -1505,11 +1505,11 @@ module PulseTransferFunctions = struct
           let path =
             match PulseOperationResult.sat_ok prune_result with
             | None ->
-                L.debug Analysis Quiet "JV: PRUNE PulseOpResult = NONE \n";
+               (* L.debug Analysis Quiet "JV: PRUNE PulseOpResult = NONE \n"; *)
                 path
             | Some (_, hist) ->
                 if Sil.is_terminated_if_kind if_kind then
-                  let () = (L.debug Analysis Quiet "JV: PRUNE PulseOpResult = SOME IfTerminatedIfKind \n") in
+                  (* let () = (L.debug Analysis Quiet "JV: PRUNE PulseOpResult = SOME IfTerminatedIfKind \n") in *)
                   let hist =
                     ValueHistory.sequence
                       (ConditionPassed {if_kind; is_then_branch; location= loc; timestamp})
@@ -1517,7 +1517,7 @@ module PulseTransferFunctions = struct
                   in
                   {path with conditions= hist :: path.conditions}
                 else
-                  let () = (L.debug Analysis Quiet "JV: PRUNE PulseOpResult = SOME OTHER Kind \n") in
+                  (* let () = (L.debug Analysis Quiet "JV: PRUNE PulseOpResult = SOME OTHER Kind \n") in *)
                   path
           in
           let results =
