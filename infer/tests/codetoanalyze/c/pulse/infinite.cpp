@@ -65,8 +65,6 @@ void loop_call_not_terminate(int y) {
   return;
 }
 
-
-
 /* pulse-inf: FALSE NEGATIVE (no goto support) */
 void twovars_goto_not_terminate(int y) {
   int z = y;
@@ -124,7 +122,35 @@ void loop_conditional_not_terminate(int y) {
 }
 
 
+
 /* pulse-inf: works good */
+/* NEW FALSE NEG??? */
+void nested_loop_cond_not_terminate(int y) {
+  int x = 42;
+  while (y < 100) {
+    while (x <= 100) {
+      if (x == 10)
+	x = 1;
+      else
+	x++;
+    }
+    y++;
+  }
+}
+
+
+/* pulse inf works */
+/* NEW FALSE NEG??? */
+void simple_loop_not_terminate(int y) {
+  int x = 1;
+  while (x != 3)
+    y++;
+}
+
+
+
+/* pulse-inf: works good */
+/* NEW FALSE NEG??? */
 void loop_alternating_not_terminate(int y, int x) {
   int turn = 0;
   while (x < 100) {
@@ -138,9 +164,10 @@ void loop_alternating_not_terminate(int y, int x) {
 
 
 
+/* NEW FALSE NEG??? */
 /* pulse-inf: works good */
-void nested_loop_not_terminate(int y) {
-  int x = 1;
+void nested_loop_not_terminate(int y, int x) {
+  
   while (y < 100) {
     while (x <= 100) {
       if (x == 10)
@@ -151,7 +178,6 @@ void nested_loop_not_terminate(int y) {
     y++;
   }
 }
-
 
 
 /* pulse-inf: works good! */
@@ -175,6 +201,7 @@ void simple_dowhile_terminate(int y, int x) {
 
 
 /* pulse-inf: works good */
+
 int conditional_goto_terminate(int x, int y) {
  re:
   x++;
@@ -189,31 +216,6 @@ int conditional_goto_terminate(int x, int y) {
       int z2 = x + y;
       return z2;
     }
-}
-
-
-
-
-/* pulse-inf: works good */
-void nested_loop_cond_not_terminate(int y) {
-  int x = 42;
-  while (y < 100) {
-    while (x <= 100) {
-      if (x == 10)
-	x = 1;
-      else
-	x++;
-    }
-    y++;
-  }
-}
-
-
-/* pulse inf works */
-void simple_loop_not_terminate(int y) {
-  int x = 1;
-  while (x != 3)
-    y++;
 }
 
 
@@ -523,6 +525,7 @@ void	nondet_loop_non_terminate(int z)
 
 /* From: AProVE: Non-termination proving for C Programs (Hensel et al. TACAS 2022)*/
 /* pulse-inf: Works good! (flag bug) */
+/* NEW FALSE NEG??? */
 void hensel_tacas22_non_terminate(int x, int y)
 {
   y = 0;
@@ -590,20 +593,6 @@ void nondet_nonterminate_chen14(int k, int i) {
   i = 2;
 }
 
-
-/* pulse-inf: works good! finds bug */
-// TNT proves non-termination
-void nestedloop_nonterminate_chen14(int i) {
-  if (i == 10) {
-    while (i > 0) {
-      i = i - 1;
-      while (i == 0)
-	;
-    }
-  }
-}
-
-
 // TNT fails to prove non-termination
 /* pulse-inf says there is no bug */
 /* To me: this will terminate because k >= 0 will eventually be false due to integer wrap */
@@ -615,6 +604,23 @@ void nestedloop2_nonterminate_chen14(int k, int j) {
       j--;
   }
 }
+
+
+/* pulse-inf: works good! finds bug */
+// TNT proves non-termination
+/* NEW FALSE NEG??? */
+void nestedloop_nonterminate_chen14(int i) {
+  if (i == 10) {
+    while (i > 0) {
+      i = i - 1;
+      while (i == 0)
+	;
+    }
+  }
+}
+
+
+/****** Tests that reflect present in cryptographic libraries ********/
 
 
 // Example with array - no manifest bug
@@ -698,8 +704,36 @@ void iterate_bitmask_nonterminate(int array[256], unsigned int len)
   }  
 }
 
+
+
+// Simple bitshift test - will terminate as i will eventually reach 0
+void bitshift_right_loop_terminate(int i)
+{
+  while (i)
+    i = i >> 1;
+}
+
+
+// Simple bitshift test - will not terminate as multipl
+void bitshift_left_loop_not_terminate(int i)
+{
+  while (i)
+    i = i << 1;
+}
+
+
+// Simple bitmask test
+void bitmask_terminate(int i)
+{
+  while (i % 2)
+    i = (i << 1);
+}
+
+
+
 // Iterate over an array using a bitshift to compute array index leading to a non-termination
-/* Pulse-inf: false negative. Unable to reason about integer overflow */
+/* Pulse-inf: false negative. Unable to reason about bitshift */
+/* FALSE NEGATIVE */
 void iterate_bitshift_nonterminate(int array[256])
 {
   unsigned int i = 1;
@@ -733,6 +767,7 @@ void iterate_bitshift_terminate(int array[256], unsigned char i)
 
 // Integer test computing a condition that will never be true
 /* Pulse-Inf: false negative: unable to reason about integer underflow */
+/* FALSE NEGATIVE */
 void iterate_intoverflow_nonterminate(int len)
 {
   unsigned int i = 0xFFFFFFFF;
@@ -744,6 +779,7 @@ void iterate_intoverflow_nonterminate(int len)
 // Iterate over an array using a modulo arithmetic leading to a bug
 /* Pulse-infinite: false negative: unable to reason about unbounded index stuttering in the loop */
 /* To verify: this should work even with low widen threshold */
+/* FALSE NEGATIVE */
 void iterate_modulus_nonterminate(int array[256], unsigned int len, unsigned int i)
 {
   //unsigned int i = 0;
