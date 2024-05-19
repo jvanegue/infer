@@ -1,9 +1,9 @@
 /* pulse-inf: works good */
-void nested_loop_not_terminate(int y) {
-  int x = 1;
-  while (y < 100) {
-    while (x <= 100) {
-      if (x == 10)
+void nested_loop_not_terminate(int y, int x) {
+  
+  while (y < 3) {
+    while (x <= 3) {
+      if (x == 3)
 	x = 1;
       else
 	x++;

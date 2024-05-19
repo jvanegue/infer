@@ -1,6 +1,6 @@
 // Simple bitshift test - will not terminate as multipl
-void bitshift_left_loop_not_terminate(int i)
+void bitshift_left_loop_not_terminate(int i, int val)
 {
-  while (i)
-    i = i << 1;
+  while (val << 1)
+    i++;
 }

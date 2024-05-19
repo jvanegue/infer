@@ -55,7 +55,10 @@ module Term : sig
     | StringConcat of t * t
     | IsInstanceOf of Var.t * Typ.t
     | IsInt of t
-  [@@deriving compare, equal, yojson_of]
+ [@@deriving compare, equal, yojson_of]
+
+ module Set : Caml.Set.S [@@deriving compare]
+             
 end
      
 module Atom : sig
@@ -92,7 +95,11 @@ val extract_path_cond : t -> Atom.Set.t
 
 val extract_term_cond : t -> Atom.Set.t
 
-val set_is_empty : Atom.Set.t -> bool  
+val extract_term_cond2 : t -> Term.Set.t
+
+val set_is_empty : Atom.Set.t -> bool
+
+val termset_is_empty : Term.Set.t -> bool  
 (* End pulse-infinite *)
 
                

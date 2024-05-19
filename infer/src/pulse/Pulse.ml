@@ -1337,7 +1337,7 @@ module PulseTransferFunctions = struct
     | ExceptionRaised _
     (* program already exited, simply propagate the exited state upwards  *)
       | ExitProgram _ ->
-       L.debug Analysis Quiet "exec_instr: ExceptionRaised/ExitProgram \n";
+       (* L.debug Analysis Quiet "exec_instr: ExceptionRaised/ExitProgram \n"; *)
 
         ([astate], path, astate_n)
     | ContinueProgram astate -> (

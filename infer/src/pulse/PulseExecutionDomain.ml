@@ -90,6 +90,8 @@ let () = AnalysisGlobalState.register_ref ~init:(fun () -> Some (Caml.Hashtbl.cr
 
 let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
 
+  (* L.debug Analysis Quiet "PULSEINF: Entered BACK-EDGE! \n"; *)
+  
   let _ = num_iters in
   
   (* Instead of this, we want to stop reporting at current and next widening iteration 
@@ -140,7 +142,6 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
   (* Do-nothing version to avoid debug output *)
   (* let print_workset _ = true in  *) (* L.debug Analysis Quiet "JV: Computing Workset at numiter %i \n" num_iters; true in *)  
   (* Pulse-inf debug output: useful but verbose *)
-  (*
   let rec print_workset ws =
     match ws with
     | [] -> true
@@ -148,12 +149,10 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
        pp_ AbductiveDomain.pp Format.err_formatter hd;
        print_workset tl
   in
-   *)
 
   (* Use this when disabling debug output *)
-  let print_warning _ _ _ = () in 
+  (* let print_warning _ _ _ = () in *)
 
-  (*
   let print_warning s cnt state =
     let _ = state in 
     L.debug Analysis Quiet "JV: FOUND infinite state from %s with cnt %i \n" s cnt; 
@@ -162,7 +161,6 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
     let _ = print_workset workset in
     L.debug Analysis Quiet "JV: End Printing Vulnerable Workset \n"
   in
-   *) 
   
   let extract_pathcond hd : Formula.t =
    match hd with
@@ -184,20 +182,22 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
        | Some wstate ->
           let cond = extract_pathcond hd in
           let pathcond = Formula.extract_path_cond cond in
-          let termcond = Formula.extract_term_cond cond in 
-          let prevstate = Caml.Hashtbl.find_opt wstate (cfgnode,termcond,pathcond) in
+          let termcond = Formula.extract_term_cond cond in
+          let termcond2 = Formula.extract_term_cond2 cond in
+          
+          let prevstate = Caml.Hashtbl.find_opt wstate (cfgnode,termcond,pathcond,termcond2) in
           match prevstate with
           | None ->
-             Caml.Hashtbl.add wstate (cfgnode,termcond,pathcond) (); (* record pathcond of hd *)
+             Caml.Hashtbl.add wstate (cfgnode,termcond,pathcond,termcond2) (); (* record pathcond of hd *)
              (* L.debug Analysis Quiet "PULSEINF: Recorded pathcond in htable at idx %d (NO BUG) \n" idx; *)
              record_pathcond tl
           | Some _ ->
-             match (Formula.set_is_empty termcond),(Formula.set_is_empty pathcond) with
-             | true,true -> -2
-             (* L.debug Analysis Quiet "PULSEINF: Recorded pathcond ALREADY in htable! (EMPTY) idx %d \n" idx; -2 *)
-             | _ -> idx
-             (* L.debug Analysis Quiet "PULSEINF: Recorded pathcond ALREADY in htable! (NON-TERM BUG) idx %d \n" idx; idx *)
-           
+             match (Formula.set_is_empty termcond),(Formula.set_is_empty pathcond),(Formula.termset_is_empty termcond2) with
+             | true,true,true -> (* -2 *)
+                (* L.debug Analysis Quiet "PULSEINF: Recorded pathcond ALREADY in htable! (EMPTY) idx %d \n" idx; *) -2 
+             | _ -> (* idx *)
+                (* L.debug Analysis Quiet "PULSEINF: Recorded pathcond ALREADY in htable! (NON-TERM BUG) idx %d \n" idx; *) idx 
+                    
   in
   
   (* let _ = print_workset workset in *)
