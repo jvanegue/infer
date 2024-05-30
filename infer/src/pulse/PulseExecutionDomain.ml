@@ -153,6 +153,8 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
   (* Use this when disabling debug output *)
   (* let print_warning _ _ _ = () in *)
 
+  let _ = print_workset workset in
+  
   let print_warning s cnt state =
     let _ = state in 
     L.debug Analysis Quiet "JV: FOUND infinite state from %s with cnt %i \n" s cnt; 

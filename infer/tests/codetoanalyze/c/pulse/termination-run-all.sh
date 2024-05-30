@@ -31,7 +31,7 @@ rm -fr infer-out/ infinite.o infer-run.log
 #$HOME/infer/bin/infer run --pulse-only --print-logs -g -- clang++ -c pulseinf/simple_loop_equal.cpp 2> infer-run.log
 #$HOME/infer/bin/infer run --pulse-only --debug-level=2 --print-logs -g -- clang++ -c pulseinf/png_palette_terminate.cpp 2> infer-run.log
 #$HOME/infer/bin/infer run --pulse-only --print-logs -g -- clang++ -c pulseinf/loop_conditional_non_terminate.cpp 2> infer-run.log
-#$HOME/infer/bin/infer run --pulse-only --debug-level=2 --print-logs -g -- clang++ -c pulseinf/simple_loop_not_terminate.cpp 2> infer-run.log
+$HOME/infer/bin/infer run --pulse-only --debug-level=2 --print-logs -g -- clang++ -c pulseinf/simple_loop_not_terminate.cpp 2> infer-run.log
 #$HOME/infer/bin/infer run --pulse-only --debug-level=2 --print-logs -g -- clang++ -c pulseinf/loop_pointer_terminate.cpp 2> infer-run.log
 #$HOME/infer/bin/infer run --pulse-only --debug-level=2 --print-logs -g -- clang++ -c pulseinf/loop_pointer_non_terminate.cpp 2> infer-run.log
 #$HOME/infer/bin/infer run --pulse-only --debug-level=2 --print-logs -g -- clang++ -c pulseinf/loop_alternating_non_terminate.cpp 2> infer-run.log
@@ -43,13 +43,13 @@ rm -fr infer-out/ infinite.o infer-run.log
 #$HOME/infer/bin/infer run --pulse-only --debug-level=2 --print-logs -g -- clang++ -c pulseinf/interproc_terminating_harris10_cond.cpp 2> infer-run.log
 #$HOME/infer/bin/infer run --pulse-only --debug-level=2 --print-logs -g -- clang++ -c pulseinf/bitshift_right_loop_terminate.cpp 2> infer-run.log
 #$HOME/infer/bin/infer run --pulse-only --debug-level=2 --print-logs -g -- clang++ -c pulseinf/bitshift_left_loop_not_terminate.cpp 2> infer-run.log
-#$HOME/infer/bin/infer run --pulse-only --debug-level=2 --print-logs -g -- clang++ -c pulseinf/bitmask_terminate.cpp 2> infer-run.log
+#$HOME/infer/bin/infer run --pulse-only --debug-level=2 --print-logs -g -- clang++ -c pulseinf/bitshift_loop_terminate.cpp 2> infer-run.log
 
 
 # All tests in one file (Debug mode)
 #$HOME/infer/bin/infer run --debug-level=2 --pulse-widen-threshold=20 --pulse-only --print-logs -g -- clang++ -c infinite.cpp 2> infer-run.log
 # All tests in one file (No Debug mode)
-$HOME/infer/bin/infer run --pulse-only --debug-level=0 -- clang++ -c infinite.cpp 2> infer-run.log
+#$HOME/infer/bin/infer run --pulse-only --debug-level=0 -- clang++ -c infinite.cpp 2> infer-run.log
 
 # Pretty printing for the bug report
 python3 -m json.tool infer-out/report.json > pulseinf-report.json

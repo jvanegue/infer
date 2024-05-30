@@ -113,7 +113,7 @@ void var_goto_terminates(int y) {
 /* pulse-inf: works good */
 void loop_conditional_not_terminate(int y) {
   int x = 0;
-
+  //y = 0;
   while (y < 100)
     if (y < 50)
       x++;
@@ -721,14 +721,12 @@ void bitshift_left_loop_not_terminate(int i)
     i = i << 1;
 }
 
-
-// Simple bitmask test
-void bitmask_terminate(int i)
+/* To Test: This should terminate */
+void bitshift_loop_terminate(unsigned int i)
 {
   while (i % 2)
     i = (i << 1);
 }
-
 
 
 // Iterate over an array using a bitshift to compute array index leading to a non-termination

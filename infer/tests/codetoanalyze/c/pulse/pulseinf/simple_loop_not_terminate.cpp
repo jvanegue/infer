@@ -3,8 +3,9 @@
 
 //int f();
 
-void simple_loop_not_terminate(int y, int x) {
-  //int x = 1;
+void simple_loop_not_terminate() {
+  int x = 0;
+  int y = 0;
   while (x != 3)
     y++;
 }
