@@ -348,22 +348,22 @@ let assert_failure = register_hidden ~id:"Assert_failure" Error Biabduction
 let bad_footprint = register_hidden ~id:"Bad_footprint" Error Biabduction
 
 let bad_arg =
-  register_with_latent ~category:No_category ~id:"BAD_ARG" Error Pulse
+  register_with_latent ~category:Runtime_exception ~id:"BAD_ARG" Error Pulse
     ~user_documentation:[%blob "./documentation/issues/BAD_ARG.md"]
 
 
 let bad_key =
-  register_with_latent ~category:No_category ~id:"BAD_KEY" Error Pulse
+  register_with_latent ~category:Runtime_exception ~id:"BAD_KEY" Error Pulse
     ~user_documentation:[%blob "./documentation/issues/BAD_KEY.md"]
 
 
 let bad_map =
-  register_with_latent ~category:No_category ~id:"BAD_MAP" Error Pulse
+  register_with_latent ~category:Runtime_exception ~id:"BAD_MAP" Error Pulse
     ~user_documentation:[%blob "./documentation/issues/BAD_MAP.md"]
 
 
 let bad_record =
-  register_with_latent ~category:No_category ~id:"BAD_RECORD" Error Pulse
+  register_with_latent ~category:Runtime_exception ~id:"BAD_RECORD" Error Pulse
     ~user_documentation:[%blob "./documentation/issues/BAD_RECORD.md"]
 
 
@@ -454,7 +454,7 @@ let checkers_expensive_overrides_unexpensive =
 
 
 let checkers_fragment_retain_view =
-  register ~category:No_category ~id:"CHECKERS_FRAGMENT_RETAINS_VIEW" ~hum:"Fragment Retains View"
+  register ~category:Resource_leak ~id:"CHECKERS_FRAGMENT_RETAINS_VIEW" ~hum:"Fragment Retains View"
     Warning FragmentRetainsView
     ~user_documentation:[%blob "./documentation/issues/CHECKERS_FRAGMENT_RETAINS_VIEW.md"]
 
@@ -739,6 +739,11 @@ let multiple_weakself =
     SelfInBlock ~user_documentation:[%blob "./documentation/issues/MULTIPLE_WEAKSELF.md"]
 
 
+let mutual_recursion_cycle =
+  register ~enabled:false ~category:Runtime_exception ~id:"MUTUAL_RECURSION_CYCLE" Warning Pulse
+    ~user_documentation:[%blob "./documentation/issues/MUTUAL_RECURSION_CYCLE.md"]
+
+
 let nil_block_call =
   register_with_latent ~category:Null_pointer_dereference ~id:"NIL_BLOCK_CALL" Error Pulse
     ~user_documentation:[%blob "./documentation/issues/NIL_BLOCK_CALL.md"]
@@ -756,27 +761,27 @@ let nil_messaging_to_non_pod =
 
 
 let no_match_of_rhs =
-  register_with_latent ~category:No_category ~id:"NO_MATCH_OF_RHS" Error Pulse
+  register_with_latent ~category:Runtime_exception ~id:"NO_MATCH_OF_RHS" Error Pulse
     ~user_documentation:[%blob "./documentation/issues/NO_MATCH_OF_RHS.md"]
 
 
 let no_matching_case_clause =
-  register_with_latent ~category:No_category ~id:"NO_MATCHING_CASE_CLAUSE" Error Pulse
+  register_with_latent ~category:Runtime_exception ~id:"NO_MATCHING_CASE_CLAUSE" Error Pulse
     ~user_documentation:[%blob "./documentation/issues/NO_MATCHING_CASE_CLAUSE.md"]
 
 
 let no_matching_function_clause =
-  register_with_latent ~category:No_category ~id:"NO_MATCHING_FUNCTION_CLAUSE" Error Pulse
+  register_with_latent ~category:Runtime_exception ~id:"NO_MATCHING_FUNCTION_CLAUSE" Error Pulse
     ~user_documentation:[%blob "./documentation/issues/NO_MATCHING_FUNCTION_CLAUSE.md"]
 
 
 let no_true_branch_in_if =
-  register_with_latent ~category:No_category ~id:"NO_TRUE_BRANCH_IN_IF" Error Pulse
+  register_with_latent ~category:Runtime_exception ~id:"NO_TRUE_BRANCH_IN_IF" Error Pulse
     ~user_documentation:[%blob "./documentation/issues/NO_TRUE_BRANCH_IN_IF.md"]
 
 
 let no_matching_branch_in_try =
-  register_with_latent ~category:No_category ~id:"NO_MATCHING_BRANCH_IN_TRY" Error Pulse
+  register_with_latent ~category:Runtime_exception ~id:"NO_MATCHING_BRANCH_IN_TRY" Error Pulse
     ~user_documentation:[%blob "./documentation/issues/NO_MATCHING_BRANCH_IN_TRY.md"]
 
 
@@ -825,6 +830,11 @@ let pulse_cannot_instantiate_abstract_class =
 let pulse_dict_missing_key =
   register ~category:No_category ~enabled:false ~id:"PULSE_DICT_MISSING_KEY" Error Pulse
     ~user_documentation:[%blob "./documentation/issues/PULSE_DICT_MISSING_KEY.md"]
+
+
+let pulse_dynamic_type_mismatch =
+  register ~category:Runtime_exception ~enabled:false ~id:"PULSE_DYNAMIC_TYPE_MISMATCH" Error Pulse
+    ~user_documentation:[%blob "./documentation/issues/PULSE_DYNAMIC_TYPE_MISMATCH.md"]
 
 
 let pulse_transitive_access =
@@ -913,6 +923,11 @@ let resource_leak =
 
 let retain_cycle =
   register ~enabled:true ~category:Memory_leak ~id:"RETAIN_CYCLE" Error Pulse
+    ~user_documentation:[%blob "./documentation/issues/RETAIN_CYCLE.md"]
+
+
+let retain_cycle_no_weak_info =
+  register ~enabled:false ~category:Memory_leak ~id:"RETAIN_CYCLE_NO_WEAK_INFO" Error Pulse
     ~user_documentation:[%blob "./documentation/issues/RETAIN_CYCLE.md"]
 
 

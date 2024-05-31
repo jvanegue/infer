@@ -72,10 +72,6 @@ let check_attributes check tenv pname =
   class_has_attribute || proc_has_attribute
 
 
-let method_overrides is_annotated tenv pname =
-  PatternMatch.override_exists (fun pn -> is_annotated tenv pn) tenv pname
-
-
 let check_modeled_annotation models annot pname =
   let method_name = Procname.to_string ~verbosity:FullNameOnly pname in
   Option.exists (String.Map.find models annot.Annot.class_name) ~f:(fun methods ->
@@ -95,12 +91,17 @@ let method_has_annot annot models tenv pname =
   else check_attributes has_annot tenv pname || check_modeled_annotation models annot pname
 
 
+let find_override_with_annot annot models tenv pname =
+  let is_annotated = method_has_annot annot models in
+  PatternMatch.override_find (fun pn -> is_annotated tenv pn) tenv pname
+
+
 let method_overrides_annot annot models tenv pname =
-  method_overrides (method_has_annot annot models) tenv pname
+  find_override_with_annot annot models tenv pname |> Option.is_some
 
 
 let lookup_annotation_calls {InterproceduralAnalysis.analyze_dependency} annot pname =
-  analyze_dependency pname
+  analyze_dependency pname |> AnalysisResult.to_option
   |> Option.bind ~f:(Domain.find_opt annot)
   |> Option.value ~default:Domain.SinkMap.empty
 
@@ -111,6 +112,8 @@ let update_trace loc trace =
 
 
 let string_of_pname = Procname.to_simplified_string ~withclass:true
+
+let annotation_of_str annot_str = {Annot.class_name= annot_str; parameters= []}
 
 let report_allocation_stack {InterproceduralAnalysis.proc_desc; err_log} src_annot fst_call_loc
     trace constructor_pname call_loc =
@@ -127,27 +130,46 @@ let report_allocation_stack {InterproceduralAnalysis.proc_desc; err_log} src_ann
     IssueType.checkers_allocates_memory description
 
 
-let report_annotation_stack ({InterproceduralAnalysis.proc_desc; err_log} as analysis_data)
-    src_annot snk_annot loc trace snk_pname call_loc =
+let get_issue_type src_annot =
+  if
+    Config.annotation_reachability_expensive
+    && String.equal src_annot Annotations.performance_critical
+  then IssueType.checkers_calls_expensive_method
+  else IssueType.checkers_annotation_reachability_error
+
+
+let report_annotation_stack ({InterproceduralAnalysis.proc_desc; tenv; err_log} as analysis_data)
+    models src_annot snk_annot loc trace snk_pname call_loc =
   let src_pname = Procdesc.get_proc_name proc_desc in
   if String.equal snk_annot dummy_constructor_annot then
     report_allocation_stack analysis_data src_annot loc trace snk_pname call_loc
   else
+    let get_original_pname annot pname =
+      find_override_with_annot (annotation_of_str annot) models tenv pname
+      |> Option.value ~default:pname
+    in
+    (* Check if the annotation is inherited from a base class method. *)
+    let get_details annot pname =
+      let origin_pname = get_original_pname annot pname in
+      if Procname.equal origin_pname pname then ""
+      else Format.asprintf ", inherited from %a" MF.pp_monospaced (string_of_pname origin_pname)
+    in
+    (* Check if the annotation is there directly or is modeled. *)
+    let get_kind annot pname =
+      let pname = get_original_pname annot pname in
+      if check_modeled_annotation models (annotation_of_str annot) pname then "modeled as"
+      else "annotated with"
+    in
     let final_trace = List.rev (update_trace call_loc trace) in
-    let exp_pname_str = string_of_pname snk_pname in
     let description =
-      Format.asprintf "Method %a (annotated with %a) calls %a (annotated with %a)" MF.pp_monospaced
+      Format.asprintf "Method %a (%s %a%s) calls %a (%s %a%s)" MF.pp_monospaced
         (Procname.to_simplified_string src_pname)
-        MF.pp_monospaced ("@" ^ src_annot) MF.pp_monospaced exp_pname_str MF.pp_monospaced
-        ("@" ^ snk_annot)
+        (get_kind src_annot src_pname) MF.pp_monospaced ("@" ^ src_annot)
+        (get_details src_annot src_pname) MF.pp_monospaced (string_of_pname snk_pname)
+        (get_kind snk_annot snk_pname) MF.pp_monospaced ("@" ^ snk_annot)
+        (get_details snk_annot snk_pname)
     in
-    let issue_type =
-      if
-        Config.annotation_reachability_expensive
-        && String.equal src_annot Annotations.performance_critical
-      then IssueType.checkers_calls_expensive_method
-      else IssueType.checkers_annotation_reachability_error
-    in
+    let issue_type = get_issue_type src_annot in
     Reporting.log_issue proc_desc err_log ~loc ~ltr:final_trace AnnotationReachability issue_type
       description
 
@@ -188,28 +210,41 @@ let report_call_stack end_of_stack lookup_next_calls report call_site sink_map =
     sink_map
 
 
-let report_src_snk_path ({InterproceduralAnalysis.proc_desc; tenv} as analysis_data) sink_map
-    snk_annot models src_annot =
+let report_src_snk_path ({InterproceduralAnalysis.proc_desc; tenv; err_log} as analysis_data)
+    sink_map snk_annot models src_annot =
   let proc_name = Procdesc.get_proc_name proc_desc in
   let loc = Procdesc.get_loc proc_desc in
-  if method_overrides_annot src_annot models tenv proc_name then
-    let f_report =
-      report_annotation_stack analysis_data src_annot.Annot.class_name snk_annot.Annot.class_name
-    in
-    report_call_stack
-      (method_overrides_annot snk_annot models tenv)
-      (lookup_annotation_calls analysis_data snk_annot)
-      f_report (CallSite.make proc_name loc) sink_map
+  if method_overrides_annot src_annot models tenv proc_name then (
+    Option.iter sink_map ~f:(fun sink_map ->
+        let f_report =
+          report_annotation_stack analysis_data models src_annot.Annot.class_name
+            snk_annot.Annot.class_name
+        in
+        report_call_stack
+          (method_overrides_annot snk_annot models tenv)
+          (lookup_annotation_calls analysis_data snk_annot)
+          f_report (CallSite.make proc_name loc) sink_map ) ;
+    if
+      Config.annotation_reachability_report_source_and_sink
+      && method_overrides_annot snk_annot models tenv proc_name
+    then
+      let issue_type = get_issue_type src_annot.Annot.class_name in
+      let description =
+        Format.asprintf "Method %a is annotated with both %a and %a" MF.pp_monospaced
+          (Procname.to_simplified_string proc_name)
+          MF.pp_monospaced
+          ("@" ^ src_annot.Annot.class_name)
+          MF.pp_monospaced
+          ("@" ^ snk_annot.Annot.class_name)
+      in
+      Reporting.log_issue proc_desc err_log ~loc ~ltr:[] AnnotationReachability issue_type
+        description )
 
 
 let report_src_snk_paths proc_data annot_map src_annot_list snk_annot models =
-  try
-    let sink_map = Domain.find snk_annot annot_map in
-    List.iter ~f:(report_src_snk_path proc_data sink_map snk_annot models) src_annot_list
-  with Caml.Not_found -> ()
+  let sink_map = Domain.find_opt snk_annot annot_map in
+  List.iter ~f:(report_src_snk_path proc_data sink_map snk_annot models) src_annot_list
 
-
-let annotation_of_str annot_str = {Annot.class_name= annot_str; parameters= []}
 
 module AnnotationSpec = struct
   type predicate = Tenv.t -> Procname.t -> bool
@@ -524,9 +559,9 @@ module MakeTransferFunctions (CFG : ProcCfg.S) = struct
   let merge_callee_map {analysis_data= {proc_desc; tenv; analyze_dependency}; specs} call_site
       ~callee_pname astate =
     match analyze_dependency callee_pname with
-    | None ->
+    | Error _ ->
         astate
-    | Some callee_call_map ->
+    | Ok callee_call_map ->
         L.d_printf "Applying summary for `%a`@\n" Procname.pp callee_pname ;
         let add_call_site annot sink calls astate =
           if Domain.CallSites.is_empty calls then astate

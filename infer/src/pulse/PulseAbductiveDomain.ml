@@ -70,6 +70,8 @@ end
 (** represents the inferred pre-condition at each program point, biabduction style *)
 module PreDomain : BaseDomainSig_ = PostDomain
 
+module RecursiveCalls = AbstractDomain.FiniteSetOfPPSet (Trace.Set)
+
 (* see documentation in this file's .mli *)
 type t =
   { post: PostDomain.t
@@ -79,18 +81,20 @@ type t =
   ; topl: (PulseTopl.state[@yojson.opaque])
   ; need_dynamic_type_specialization: (AbstractValue.Set.t[@yojson.opaque])
   ; transitive_info: (TransitiveInfo.t[@yojson.opaque])
+  ; recursive_calls: (RecursiveCalls.t[@yojson.opaque])
   ; skipped_calls: SkippedCalls.t }
 [@@deriving compare, equal, yojson_of]
 
 let pp_ ~is_summary f
-    { post
-    ; pre
-    ; path_condition
-    ; decompiler
-    ; need_dynamic_type_specialization
-    ; transitive_info
-    ; topl
-    ; skipped_calls } =
+    ({ post
+     ; pre
+     ; path_condition
+     ; decompiler
+     ; need_dynamic_type_specialization
+     ; transitive_info
+     ; topl
+     ; recursive_calls
+     ; skipped_calls } [@warning "+missing-record-field-pattern"] ) =
   let pp_decompiler f =
     if Config.debug_level_analysis >= 3 then F.fprintf f "decompiler=%a;@;" Decompiler.pp decompiler
   in
@@ -102,15 +106,16 @@ let pp_ ~is_summary f
     else F.fprintf f "POST=@[%a@]\n @;PRE=[%a]\n" PostDomain.pp post PreDomain.pp pre
   in
   F.fprintf f
-    "@[<v>PATHCOND=%a@;\ \n
+    "@[<v>%a@;\ \n
      %t@;\ \n
      %tneed_dynamic_type_specialization=%a@;\ \n
      transitive_info=%a@;\ \n
      skipped_calls=%a@;\ \n
      Topl=%a@] \n --------------------------------------------------- \n"
     Formula.pp path_condition pp_pre_post pp_decompiler AbstractValue.Set.pp
-    need_dynamic_type_specialization TransitiveInfo.pp transitive_info SkippedCalls.pp skipped_calls
-    PulseTopl.pp_state topl
+    need_dynamic_type_specialization TransitiveInfo.pp transitive_info RecursiveCalls.pp
+    recursive_calls SkippedCalls.pp skipped_calls PulseTopl.pp_state topl
+    
 
 
 let pp = pp_ ~is_summary:false
@@ -128,14 +133,17 @@ let record_transitive_access location astate =
   {astate with transitive_info}
 
 
-let record_call_resolution ~caller_name ~caller_loc ~callsite_loc call_kind resolution astate =
+let record_call_resolution ~caller callsite_loc call_kind resolution astate =
   let {TransitiveInfo.callees} = astate.transitive_info in
-  let callees =
-    TransitiveInfo.Callees.record ~caller_name ~caller_loc ~callsite_loc call_kind resolution
-      callees
-  in
+  let callees = TransitiveInfo.Callees.record ~caller callsite_loc call_kind resolution callees in
   let transitive_info = {astate.transitive_info with callees} in
   {astate with transitive_info}
+
+
+let record_recursive_call path location callee astate =
+  let trace = PulseMutualRecursion.mk path location callee in
+  let recursive_calls = Trace.Set.add trace astate.recursive_calls in
+  ({astate with recursive_calls}, trace)
 
 
 let map_decompiler astate ~f = {astate with decompiler= f astate.decompiler}
@@ -429,7 +437,7 @@ module Internal = struct
                     ValueHistory.singleton (StructFieldAddressCreated (fields, location, timestamp))
                   in
                   let heap =
-                    BaseMemory.add_edge addr (MemoryAccess.FieldAccess field)
+                    BaseMemory.add_edge addr (FieldAccess field)
                       (downcast field_addr, history)
                       (acc :> base_domain).heap
                   in
@@ -712,13 +720,23 @@ module Internal = struct
       (astate, addr_hist_dst)
 
 
-    let fold_edges address astate ~init ~f =
-      SafeBaseMemory.fold_edges astate address (astate.post :> base_domain).heap ~init ~f
+    let fold_edges pre_or_post address astate ~init ~f =
+      let heap =
+        match pre_or_post with
+        | `Pre ->
+            (astate.pre :> base_domain).heap
+        | `Post ->
+            (astate.post :> base_domain).heap
+      in
+      SafeBaseMemory.fold_edges astate address heap ~init ~f
 
 
-    let iter_edges v astate ~f = Container.iter ~fold:(fold_edges v) astate ~f
+    let iter_edges pre_or_post v astate ~f =
+      Container.iter ~fold:(fold_edges pre_or_post v) astate ~f
 
-    let exists_edge v astate ~f = Container.exists ~iter:(iter_edges v) astate ~f
+
+    let exists_edge pre_or_post v astate ~f =
+      Container.exists ~iter:(iter_edges pre_or_post v) astate ~f
   end
 
   let add_static_type tenv typ_name addr location astate =
@@ -825,9 +843,7 @@ module Internal = struct
                     (* inlined aggregate value: just an offset, not the actual value yet; recurse *)
                     SafeMemory.map_post_heap astate ~f:(fun post_heap ->
                         BaseMemory.add_edge addr access (downcast_fst addr_hist_dest) post_heap )
-                    |> restore_pre_var_value visited ~is_value_visible_outside addr_dest
-                | TakeAddress ->
-                    assert false )
+                    |> restore_pre_var_value visited ~is_value_visible_outside addr_dest )
     in
     let restore_pre_var x addr_hist astate =
       (* the address of a variable never changes *)
@@ -1217,8 +1233,6 @@ module Internal = struct
     val fold :
          var_filter:(Var.t -> bool)
       -> ?edge_filter:(SafeMemory.Access.t -> bool)
-      -> t
-      -> [`Pre | `Post]
       -> init:'accum
       -> f:
            (   Var.t
@@ -1226,7 +1240,10 @@ module Internal = struct
             -> CanonValue.t
             -> RawMemory.Access.t list
             -> ('accum, 'final) Continue_or_stop.t )
+      -> ?f_revisit:(Var.t -> 'accum -> CanonValue.t -> RawMemory.Access.t list -> 'accum)
       -> finish:('accum -> 'final)
+      -> t
+      -> [`Pre | `Post]
       -> CanonValue.Set.t * 'final
     (** Generic graph traversal of the memory starting from each variable in the stack that pass
         [var_filter], in order. Returns the result of folding over every address in the graph and
@@ -1236,13 +1253,14 @@ module Internal = struct
 
     val fold_from_addresses :
          ?edge_filter:(SafeMemory.Access.t -> bool)
-      -> CanonValue.t Seq.t
-      -> t
-      -> [`Pre | `Post]
       -> already_visited:CanonValue.Set.t
       -> init:'accum
       -> f:('accum -> CanonValue.t -> RawMemory.Access.t list -> ('accum, 'final) Continue_or_stop.t)
+      -> ?f_revisit:('accum -> CanonValue.t -> RawMemory.Access.t list -> 'accum)
       -> finish:('accum -> 'final)
+      -> CanonValue.t Seq.t
+      -> t
+      -> [`Pre | `Post]
       -> CanonValue.Set.t * 'final
     (** Similar to [fold], but start from given addresses, instead of stack variables. Use
         already_visited as initial set of visited values. *)
@@ -1256,11 +1274,15 @@ module Internal = struct
         `NotAlreadyVisited visited
 
 
-    let rec visit_address ~edge_filter address ~f rev_accesses astate heap
-        ((visited, accum) as visited_accum) =
+    let rec visit_address ~edge_filter address ~f ~f_revisit rev_accesses astate heap
+        (visited, accum) =
       match visit address visited with
       | `AlreadyVisited ->
-          Continue visited_accum
+          let accum =
+            f_revisit accum address
+              (rev_accesses : BaseMemory.Access.t list :> RawMemory.Access.t list)
+          in
+          Continue (visited, accum)
       | `NotAlreadyVisited visited -> (
         match
           f accum address (rev_accesses : BaseMemory.Access.t list :> RawMemory.Access.t list)
@@ -1271,13 +1293,15 @@ module Internal = struct
             Container.fold_until ~fold:(SafeBaseMemory.fold_edges astate address)
               heap ~init:visited_accum ~finish ~f:(fun visited_accum (access, (address, _trace)) ->
                 if edge_filter access then
-                  match visit_access ~edge_filter ~f access astate heap visited_accum with
+                  match
+                    visit_access ~edge_filter ~f ~f_revisit access astate heap visited_accum
+                  with
                   | Stop fin ->
                       Stop (Stop fin)
                   | Continue visited_accum -> (
                     match
-                      visit_address ~edge_filter address ~f (access :: rev_accesses) astate heap
-                        visited_accum
+                      visit_address ~edge_filter address ~f ~f_revisit (access :: rev_accesses)
+                        astate heap visited_accum
                     with
                     | Continue _ as cont ->
                         cont
@@ -1288,24 +1312,28 @@ module Internal = struct
             Stop (visited, fin) )
 
 
-    and visit_access ~edge_filter ~f (access : SafeMemory.Access.t) astate heap visited_accum =
+    and visit_access ~edge_filter ~f ~f_revisit (access : SafeMemory.Access.t) astate heap
+        visited_accum =
       match access with
       | ArrayAccess (_, addr) ->
-          visit_address ~edge_filter addr ~f [] astate heap visited_accum
-      | FieldAccess _ | TakeAddress | Dereference ->
+          visit_address ~edge_filter addr ~f ~f_revisit [] astate heap visited_accum
+      | FieldAccess _ | Dereference ->
           Continue visited_accum
 
 
-    let visit_address_from_var ~edge_filter (orig_var, (address, _loc)) ~f rev_accesses astate heap
-        visited_accum =
-      visit_address ~edge_filter address ~f:(f orig_var) rev_accesses astate heap visited_accum
+    let visit_address_from_var ~edge_filter (orig_var, (address, _loc)) ~f ~f_revisit rev_accesses
+        astate heap visited_accum =
+      visit_address ~edge_filter address ~f:(f orig_var) ~f_revisit:(f_revisit orig_var)
+        rev_accesses astate heap visited_accum
 
 
-    let fold_common x astate heap ~fold ~filter ~visit ~init ~already_visited ~f ~finish =
+    let fold_common x astate heap ~fold ~filter ~visit ~init ~already_visited ~f ~f_revisit ~finish
+        =
       let finish (visited, accum) = (visited, finish accum) in
       let init = (already_visited, init) in
       Container.fold_until x ~fold ~init ~finish ~f:(fun visited_accum elem ->
-          if filter elem then visit elem ~f [] astate heap visited_accum else Continue visited_accum )
+          if filter elem then visit elem ~f ~f_revisit [] astate heap visited_accum
+          else Continue visited_accum )
 
 
     let pre_or_post_heap astate pre_or_post =
@@ -1316,23 +1344,24 @@ module Internal = struct
           (astate.post :> base_domain).heap
 
 
-    let fold ~var_filter ?(edge_filter = fun _ -> true) astate pre_or_post ~init ~f ~finish =
+    let fold ~var_filter ?(edge_filter = fun _ -> true) ~init ~f
+        ?(f_revisit = fun _ accum _ _ -> accum) ~finish astate pre_or_post =
       fold_common astate astate
         (pre_or_post_heap astate pre_or_post)
         ~fold:(IContainer.fold_of_pervasives_map_fold (SafeStack.fold pre_or_post))
         ~filter:(fun (var, _) -> var_filter var)
         ~visit:(visit_address_from_var ~edge_filter)
-        ~already_visited:CanonValue.Set.empty ~init ~f ~finish
+        ~already_visited:CanonValue.Set.empty ~init ~f ~f_revisit ~finish
 
 
-    let fold_from_addresses ?(edge_filter = fun _ -> true) from astate pre_or_post ~already_visited
-        ~init ~f ~finish =
+    let fold_from_addresses ?(edge_filter = fun _ -> true) ~already_visited ~init ~f
+        ?(f_revisit = fun accum _ _ -> accum) ~finish from astate pre_or_post =
       let seq_fold seq ~init ~f = Seq.fold_left f init seq in
       fold_common from astate
         (pre_or_post_heap astate pre_or_post)
         ~fold:seq_fold
         ~filter:(fun _ -> true)
-        ~visit:(visit_address ~edge_filter) ~already_visited ~init ~f ~finish
+        ~visit:(visit_address ~edge_filter) ~already_visited ~init ~f ~f_revisit ~finish
   end
 
   let reachable_addresses ?(var_filter = fun _ -> true) ?edge_filter astate pre_or_post =
@@ -1463,6 +1492,7 @@ let mk_initial tenv (proc_attrs : ProcAttributes.t) =
     ; need_dynamic_type_specialization= AbstractValue.Set.empty
     ; topl= PulseTopl.start ()
     ; transitive_info= TransitiveInfo.bottom
+    ; recursive_calls= RecursiveCalls.empty
     ; skipped_calls= SkippedCalls.empty }
   in
   let astate =
@@ -1733,7 +1763,7 @@ let filter_for_summary proc_name astate0 =
   L.d_printfln "%a" pp astate0 ;
   L.d_printfln "Canonicalizing..." ;
   let* astate_before_filter = canonicalize astate0 in
-  let pp_state = Pp.html_collapsible_block ~name:"Show/hide canonicalized state" pp in
+  let pp_state = Pp.html_collapsible_block ~name:"Show/hide canonicalized state" HTML pp in
   L.d_printfln "%a" pp_state astate_before_filter ;
   (* Remove the stack from the post as it's not used: the values of formals are the same as in the
      pre. Moreover, formals can be treated as local variables inside the function's body so we need
@@ -1965,7 +1995,7 @@ module Summary = struct
       | Dereference :: rev_accesses ->
           let+ heap_path = mk_heap_path var rev_accesses in
           Specialization.HeapPath.Dereference heap_path
-      | (TakeAddress | ArrayAccess _) :: _ ->
+      | ArrayAccess _ :: _ ->
           None
     in
     (* safe because this is a summary so these addresses are actually canon values *)
@@ -2013,8 +2043,8 @@ module Summary = struct
 end
 
 module Topl = struct
-  let small_step loc event astate =
-    {astate with topl= PulseTopl.small_step loc (topl_view astate) event astate.topl}
+  let small_step tenv loc event astate =
+    {astate with topl= PulseTopl.small_step tenv loc (topl_view astate) event astate.topl}
 
 
   let large_step ~call_location ~callee_proc_name ~substitution ~callee_summary ~callee_is_manifest
@@ -2053,13 +2083,10 @@ let add_skipped_calls new_skipped_calls astate =
   if phys_equal skipped_calls astate.skipped_calls then astate else {astate with skipped_calls}
 
 
-let transfer_transitive_info_to_caller callee_proc_name call_loc summary caller_astate =
+let transfer_transitive_info_to_caller callee_pname call_loc summary caller_astate =
   let caller = caller_astate.transitive_info in
-  let callee_summary = summary.transitive_info in
-  let transitive_info =
-    TransitiveInfo.transfer_transitive_info_to_caller ~caller callee_proc_name call_loc
-      ~callee_summary
-  in
+  let summary = summary.transitive_info in
+  let transitive_info = TransitiveInfo.apply_summary ~callee_pname ~call_loc ~summary caller in
   {caller_astate with transitive_info}
 
 
@@ -2103,6 +2130,18 @@ let incorporate_new_eqs_on_val new_eqs v =
 
 let downcast_filter f canon_access = f (downcast_access canon_access)
 
+(* HACK: too lazy to canonicalize [edge_filter] as appropriate and don't need it for now so ignore
+   it until someone needs it *)
+let fold_all ?(var_filter = fun _ -> true) ~init ~finish ~f ?f_revisit astate pre_or_post =
+  GraphVisit.fold astate pre_or_post ~var_filter ~init ~finish
+    ~f:(fun root_var acc v_canon accesses_from_root ->
+      f root_var acc (downcast v_canon) accesses_from_root )
+    ?f_revisit:
+      (Option.map f_revisit ~f:(fun f_revisit root_var acc v_canon accesses_from_root ->
+           f_revisit root_var acc (downcast v_canon) accesses_from_root ) )
+  |> snd
+
+
 let reachable_addresses_from ?edge_filter addresses astate pre_or_post =
   let edge_filter = Option.map edge_filter ~f:downcast_filter in
   reachable_addresses_from ?edge_filter
@@ -2114,8 +2153,10 @@ let reachable_addresses_from ?edge_filter addresses astate pre_or_post =
 module Stack = struct
   include SafeStack
 
-  let fold f astate init =
-    SafeStack.fold `Post (fun var addr_hist acc -> f var (downcast_fst addr_hist) acc) astate init
+  let fold ?(pre_or_post = `Post) f astate init =
+    SafeStack.fold pre_or_post
+      (fun var addr_hist acc -> f var (downcast_fst addr_hist) acc)
+      astate init
 
 
   let find_opt var astate = SafeStack.find_opt var astate |> Option.map ~f:downcast_fst
@@ -2144,8 +2185,8 @@ module Memory = struct
     |> downcast_snd_fst
 
 
-  let fold_edges addr astate ~init ~f =
-    SafeMemory.fold_edges (CanonValue.canon' astate addr) astate ~init
+  let fold_edges ?(pre_or_post = `Post) addr astate ~init ~f =
+    SafeMemory.fold_edges pre_or_post (CanonValue.canon' astate addr) astate ~init
       ~f:(fun acc access_addr_hist ->
         f acc
           ( access_addr_hist
@@ -2161,8 +2202,9 @@ module Memory = struct
     |> Option.map ~f:downcast_fst
 
 
-  let exists_edge addr astate ~f =
-    SafeMemory.exists_edge (CanonValue.canon' astate addr) astate ~f:(fun access_addr_hist ->
+  let exists_edge ?(pre_or_post = `Post) addr astate ~f =
+    SafeMemory.exists_edge pre_or_post (CanonValue.canon' astate addr) astate
+      ~f:(fun access_addr_hist ->
         f
           ( access_addr_hist
             : Access.t * (CanonValue.t * ValueHistory.t)

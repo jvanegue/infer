@@ -121,7 +121,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
      objcMessageExpr_trans. *)
   let sizeof_expr_class class_name =
     let typ = Typ.mk (Tstruct class_name) in
-    ( Exp.Sizeof {typ; nbytes= None; dynamic_length= None; subtype= Subtype.exact}
+    ( Exp.Sizeof {typ; nbytes= None; dynamic_length= None; subtype= Subtype.exact; nullable= false}
     , Typ.mk (Tint IULong) )
 
 
@@ -417,7 +417,9 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
     match unary_expr_or_type_trait_expr_info.Clang_ast_t.uttei_kind with
     | (`SizeOf | `SizeOfWithSize _) as size ->
         let nbytes = match size with `SizeOfWithSize nbytes -> Some nbytes | _ -> None in
-        let sizeof_data = {Exp.typ; nbytes; dynamic_length= None; subtype= Subtype.exact} in
+        let sizeof_data =
+          {Exp.typ; nbytes; dynamic_length= None; subtype= Subtype.exact; nullable= false}
+        in
         mk_trans_result (Exp.Sizeof sizeof_data, typ) empty_control
     | `AlignOf | `OpenMPRequiredSimdAlign | `PreferredAlignOf | `VecStep | `VectorElements ->
         let nondet = (Exp.Var (Ident.create_fresh Ident.knormal), typ) in
@@ -497,21 +499,13 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
     let is_pointer_typ = Typ.is_pointer class_typ in
     let class_typ = match class_typ.Typ.desc with Typ.Tptr (t, _) -> t | _ -> class_typ in
     L.debug Capture Verbose "Type is  '%s' @\n" (Typ.to_string class_typ) ;
-    let class_tname, cxx_record_decl_info =
+    let class_tname =
       match CAst_utils.get_decl decl_ptr with
       | Some (FieldDecl ({di_parent_pointer}, _, _, _))
       | Some (ObjCIvarDecl ({di_parent_pointer}, _, _, _, _)) -> (
         match CAst_utils.get_decl_opt di_parent_pointer with
         | Some decl ->
-            let class_tname = CType_decl.get_record_typename ~tenv:context.tenv decl in
-            let cxx_record_decl_info =
-              match decl with
-              | CXXRecordDecl (_, _, _, _, _, _, _, cxx_record_decl_info) ->
-                  Some cxx_record_decl_info
-              | _ ->
-                  None
-            in
-            (class_tname, cxx_record_decl_info)
+            CType_decl.get_record_typename ~tenv:context.tenv decl
         | _ ->
             assert false )
       | _ as decl ->
@@ -521,9 +515,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
             (Pp.option (Pp.of_string ~f:Clang_ast_j.string_of_decl))
             decl
     in
-    let field_name =
-      CGeneral_utils.mk_class_field_name ?cxx_record_decl_info class_tname field_string
-    in
+    let field_name = CGeneral_utils.mk_class_field_name class_tname field_string in
     let field_exp = Exp.Lfield (obj_sil, field_name, class_typ) in
     (* In certain cases, there is be no LValueToRValue cast, but backend needs dereference*)
     (* there either way:*)
@@ -4267,7 +4259,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
     let sizeof_expr =
       match cast_type.desc with
       | Typ.Tptr (typ, _) ->
-          Exp.Sizeof {typ; nbytes= None; dynamic_length= None; subtype}
+          Exp.Sizeof {typ; nbytes= None; dynamic_length= None; subtype; nullable= false}
       | _ ->
           assert false
     in
@@ -4371,7 +4363,8 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
     let ret_id = Ident.create_fresh Ident.knormal in
     let void_typ = StdTyp.void in
     let type_info_objc =
-      (Exp.Sizeof {typ; nbytes= None; dynamic_length= None; subtype= Subtype.exact}, void_typ)
+      ( Exp.Sizeof {typ; nbytes= None; dynamic_length= None; subtype= Subtype.exact; nullable= false}
+      , void_typ )
     in
     let class_tname =
       Typ.Name.Cpp.from_qual_name Typ.NoTemplate ~is_union:false

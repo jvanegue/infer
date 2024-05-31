@@ -250,10 +250,6 @@ BUCK OPTIONS
        --buck2-root dir
            Specify the parent directory of buck-out (used only for buck2).
 
-       --buck2-use-bxl
-           Activates: Use BXL script when capturing with buck2. (Conversely:
-           --no-buck2-use-bxl)
-
        --Xbuck +string
            Pass values as command-line arguments to invocations of `buck
            build`. Only valid for --buck-clang.
@@ -329,6 +325,13 @@ CLANG OPTIONS
        --skip-translation-headers +path_regex
            Ignore declarations in headers whose path matches the given OCaml
            regex from the start of the string during capture.
+
+       --struct-as-cpp-class
+           Activates: Translate C structs as C++ classes. This can be useful
+           when analyzing C/C++ code to make sure struct global variables
+           shared between C and C++ source files are treated as same
+           variables
+                (Conversely: --no-struct-as-cpp-class)
 
        --Xclang +string
            Pass values as command-line arguments to invocations of clang

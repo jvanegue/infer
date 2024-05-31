@@ -218,8 +218,6 @@ type t =
   | Python of Python.t
 [@@deriving compare, yojson_of, sexp, hash, normalize]
 
-val equal : t -> t -> bool
-
 val compare_name : t -> t -> int
 (** Similar to compare, but compares only names, except parameter types and template arguments. *)
 
@@ -273,6 +271,8 @@ val is_std_move : t -> bool
 
 val is_shared_ptr_observer : t -> bool
 (** Check if it is C++ shared pointer observer, e.g. [std::shared_ptr::operator*] *)
+
+include Comparable.S with type t := t
 
 (** Hash tables with proc names as keys. *)
 module Hash : Caml.Hashtbl.S with type key = t
@@ -473,7 +473,7 @@ val is_lambda : t -> bool
 
 val is_lambda_or_block : t -> bool
 
-val patterns_match : Re.Str.regexp list -> t -> bool
+val patterns_match : Str.regexp list -> t -> bool
 (** Test whether a proc name matches to one of the regular expressions. *)
 
 val is_erlang_unsupported : t -> bool
@@ -502,3 +502,5 @@ val has_hack_classname : t -> bool
 
 val is_hack_async_name : t -> bool
 (* Checks if the function name starts with "gen", which is a (lint-checked) convention for it being async at Meta *)
+
+val is_hack_construct : t -> bool

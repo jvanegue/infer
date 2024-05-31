@@ -97,10 +97,13 @@ let should_report (astate : AbductiveDomain.Summary.t) (diagnostic : Diagnostic.
   | ConfigUsage _
   | ConstRefableParameter _
   | CSharpResourceLeak _
+  | DynamicTypeMismatch _
   | JavaResourceLeak _
   | TransitiveAccess _
+  | HackCannotInstantiateAbstractClass _
   | HackUnawaitedAwaitable _
   | MemoryLeak _
+  | MutualRecursionCycle _
   | ReadUninitialized _
   | ReadonlySharedPtrParameter _
   | RetainCycle _

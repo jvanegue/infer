@@ -95,6 +95,14 @@ module PulseSummaryCountMap = struct
               ~value:count ) )
     in
     LogEntry.mk_count ~label:"backend_stats.pulse_summaries_total" ~value:total :: counts
+
+
+  let pp fmt map =
+    let bindings = bindings map in
+    (* already sorted because we use Caml.Map *)
+    let pp_binding fmt (key, value) = F.fprintf fmt "%d: %d" key value in
+    let pp_sep fmt () = F.pp_print_string fmt ", " in
+    F.fprintf fmt "{ %a }" (F.pp_print_list ~pp_sep pp_binding) bindings
 end
 
 module DurationItem = struct
@@ -158,7 +166,15 @@ type t =
   ; mutable pulse_disjuncts_dropped: IntCounter.t
   ; mutable pulse_interrupted_loops: IntCounter.t
   ; mutable pulse_summaries_contradictions: IntCounter.t
+  ; mutable pulse_summaries_unsat_for_caller: IntCounter.t
+  ; mutable pulse_summaries_unsat_for_caller_percent: IntCounter.t
+  ; mutable pulse_summaries_with_some_unreachable_nodes: IntCounter.t
+  ; mutable pulse_summaries_with_some_unreachable_nodes_percent: IntCounter.t
+  ; mutable pulse_summaries_with_some_unreachable_returns: IntCounter.t
+  ; mutable pulse_summaries_with_some_unreachable_returns_percent: IntCounter.t
   ; mutable pulse_summaries_count: IntCounter.t PulseSummaryCountMap.t
+  ; mutable pulse_summaries_count_0_continue_program: IntCounter.t
+  ; mutable pulse_summaries_count_0_percent: IntCounter.t
   ; mutable topl_reachable_calls: IntCounter.t
   ; mutable timeouts: IntCounter.t
   ; mutable timings: TimingsStat.t
@@ -183,13 +199,87 @@ let log_to_scuba stats =
   Option.to_list summary_cache_hit_percent_entry @ to_log_entries stats |> ScubaLogging.log_many
 
 
+let log_to_file
+    { ondemand_procs_analyzed
+    ; pulse_aliasing_contradictions
+    ; pulse_args_length_contradictions
+    ; pulse_captured_vars_length_contradictions
+    ; pulse_disjuncts_dropped
+    ; pulse_interrupted_loops
+    ; pulse_summaries_contradictions
+    ; pulse_summaries_unsat_for_caller
+    ; pulse_summaries_unsat_for_caller_percent
+    ; pulse_summaries_with_some_unreachable_nodes
+    ; pulse_summaries_with_some_unreachable_nodes_percent
+    ; pulse_summaries_with_some_unreachable_returns
+    ; pulse_summaries_with_some_unreachable_returns_percent
+    ; pulse_summaries_count
+    ; pulse_summaries_count_0_continue_program
+    ; pulse_summaries_count_0_percent } =
+  let filename = Filename.concat Config.results_dir "stats/stats.txt" in
+  let out_channel = Out_channel.create filename in
+  let fmt = Format.formatter_of_out_channel out_channel in
+  F.fprintf fmt "=== global counters ===@\n" ;
+  F.fprintf fmt "ondemand_procs_analyzed: %d@\n" ondemand_procs_analyzed ;
+  F.fprintf fmt "pulse_aliasing_contradictions: %d@\n" pulse_aliasing_contradictions ;
+  F.fprintf fmt "pulse_args_length_contradictions: %d@\n" pulse_args_length_contradictions ;
+  F.fprintf fmt "pulse_captured_vars_length_contradictions: %d@\n"
+    pulse_captured_vars_length_contradictions ;
+  F.fprintf fmt "pulse_disjuncts_dropped: %d@\n" pulse_disjuncts_dropped ;
+  F.fprintf fmt "pulse_interrupted_loops: %d@\n" pulse_interrupted_loops ;
+  F.fprintf fmt "pulse_summaries_contradictions: %d@\n" pulse_summaries_contradictions ;
+  F.fprintf fmt "pulse_summaries_unsat_for_caller: %d@\n" pulse_summaries_unsat_for_caller ;
+  F.fprintf fmt "pulse_summaries_with_some_unreachable_nodes: %d@\n"
+    pulse_summaries_with_some_unreachable_nodes ;
+  F.fprintf fmt "pulse_summaries_with_some_unreachable_returns: %d@\n"
+    pulse_summaries_with_some_unreachable_returns ;
+  F.fprintf fmt "pulse_summaries_count_0_continue_program: %d@\n"
+    pulse_summaries_count_0_continue_program ;
+  F.fprintf fmt "pulse_summaries_count: %a@\n" PulseSummaryCountMap.pp pulse_summaries_count ;
+  F.fprintf fmt "=== percents per function and specialization ===@\n" ;
+  F.fprintf fmt "percent of functions where a callee never returns: %d%%@\n"
+    pulse_summaries_unsat_for_caller_percent ;
+  F.fprintf fmt "percent of functions where at least one node got 0 disjuncts in its post: %d%%@\n"
+    pulse_summaries_with_some_unreachable_nodes_percent ;
+  F.fprintf fmt "percent of function where at least one return point got 0 disjuncts: %d%%@\n"
+    pulse_summaries_with_some_unreachable_returns_percent ;
+  F.fprintf fmt "percent of function where 0 disjuncts were returned: %d%%@\n"
+    pulse_summaries_count_0_percent ;
+  Out_channel.close out_channel
+
+
 let log_aggregate stats_list =
   match stats_list with
   | [] ->
       L.internal_error "Empty list of backend stats to aggregate, weird!@\n"
   | one :: rest ->
       let stats = List.fold rest ~init:one ~f:(fun aggregate one -> merge aggregate one) in
-      log_to_scuba stats
+      let stats =
+        if stats.ondemand_procs_analyzed > 0 then
+          let mk_percent value =
+            int_of_float (100. *. float_of_int value /. float_of_int stats.ondemand_procs_analyzed)
+          in
+          let pulse_summaries_unsat_for_caller_percent =
+            mk_percent stats.pulse_summaries_unsat_for_caller
+          in
+          let pulse_summaries_with_some_unreachable_returns_percent =
+            mk_percent stats.pulse_summaries_with_some_unreachable_returns
+          in
+          let pulse_summaries_with_some_unreachable_nodes_percent =
+            mk_percent stats.pulse_summaries_with_some_unreachable_nodes
+          in
+          let pulse_summaries_count_0_percent =
+            mk_percent stats.pulse_summaries_count_0_continue_program
+          in
+          { stats with
+            pulse_summaries_unsat_for_caller_percent
+          ; pulse_summaries_with_some_unreachable_returns_percent
+          ; pulse_summaries_with_some_unreachable_nodes_percent
+          ; pulse_summaries_count_0_percent }
+        else stats
+      in
+      log_to_scuba stats ;
+      log_to_file stats
 
 
 let get () = {global_stats with timings= TimingsStat.serialize global_stats.timings}
@@ -247,6 +337,20 @@ let add_pulse_disjuncts_dropped n = add Fields.pulse_disjuncts_dropped n
 let add_pulse_interrupted_loops n = add Fields.pulse_interrupted_loops n
 
 let incr_pulse_summaries_contradictions () = incr Fields.pulse_summaries_contradictions
+
+let incr_pulse_summaries_unsat_for_caller () = incr Fields.pulse_summaries_unsat_for_caller
+
+let incr_pulse_summaries_with_some_unreachable_nodes () =
+  incr Fields.pulse_summaries_with_some_unreachable_nodes
+
+
+let incr_pulse_summaries_with_some_unreachable_returns () =
+  incr Fields.pulse_summaries_with_some_unreachable_returns
+
+
+let incr_pulse_summaries_count_0_continue_program () =
+  incr Fields.pulse_summaries_count_0_continue_program
+
 
 let add_pulse_summaries_count n =
   update_with Fields.pulse_summaries_count ~f:(fun counters ->

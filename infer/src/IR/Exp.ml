@@ -32,7 +32,8 @@ and captured_var = t * Pvar.t * Typ.t * CapturedVar.capture_mode
     over-allocated.
 
     If [typ] is a struct type, the [dynamic_length] is that of the final extensible array, if any.*)
-and sizeof_data = {typ: Typ.t; nbytes: int option; dynamic_length: t option; subtype: Subtype.t}
+and sizeof_data =
+  {typ: Typ.t; nbytes: int option; dynamic_length: t option; subtype: Subtype.t; nullable: bool}
 
 (** Program expressions. *)
 and t =
@@ -221,16 +222,16 @@ let rec pp_ pe pp_t f e =
       F.fprintf f "%a.%a" pp_exp e Fieldname.pp fld
   | Lindex (e1, e2) ->
       F.fprintf f "%a[%a]" pp_exp e1 pp_exp e2
-  | Sizeof {typ; nbytes; dynamic_length; subtype} ->
+  | Sizeof {typ; nbytes; dynamic_length; subtype; nullable} ->
       let pp_len f l = Option.iter ~f:(F.fprintf f "[%a]" pp_exp) l in
       let pp_size f size = Option.iter ~f:(Int.pp f) size in
       let pp_if b pp label f v = if b then F.fprintf f ";%s=%a" label pp v in
       let pp_if_some pp_opt label f opt = pp_if (Option.is_some opt) pp_opt label f opt in
       let subt_s = F.asprintf "%a" Subtype.pp subtype in
-      F.fprintf f "sizeof(t=%a%a%a%a)" pp_t typ (pp_if_some pp_size "nbytes") nbytes
+      F.fprintf f "sizeof(t=%a%a%a%a;nullable=%b)" pp_t typ (pp_if_some pp_size "nbytes") nbytes
         (pp_if_some pp_len "len") dynamic_length
         (pp_if (not (String.equal "" subt_s)) Subtype.pp "sub_t")
-        subtype
+        subtype nullable
 
 
 and pp_captured_var pe pp_t f (exp, var, typ, mode) =

@@ -8,7 +8,8 @@
 open! IStd
 module F = Format
 
-type captured_data = {capture_mode: CapturedVar.capture_mode; is_weak: bool}
+type captured_data =
+  {capture_mode: CapturedVar.capture_mode; is_weak: bool; is_function_pointer: bool}
 [@@deriving compare, equal, yojson_of, sexp, hash, normalize]
 
 type t = {class_name: Typ.Name.t; field_name: string; captured_data: captured_data option}
@@ -72,6 +73,10 @@ let is_weak_capture_field_in_closure {captured_data} =
 
 let is_capture_field_in_closure_by_ref {captured_data} =
   Option.exists captured_data ~f:(fun {capture_mode} -> CapturedVar.is_captured_by_ref capture_mode)
+
+
+let is_capture_field_function_pointer {captured_data} =
+  Option.exists captured_data ~f:(fun {is_function_pointer} -> is_function_pointer)
 
 
 let get_class_name {class_name} = class_name
@@ -140,7 +145,7 @@ let to_full_string fld =
 
 let patterns_match patterns fld =
   let s = to_simplified_string fld in
-  List.exists patterns ~f:(fun pattern -> Re.Str.string_match pattern s 0)
+  List.exists patterns ~f:(fun pattern -> Str.string_match pattern s 0)
 
 
 let is_java_outer_instance ({field_name} as field) =
@@ -150,3 +155,6 @@ let is_java_outer_instance ({field_name} as field) =
   let last_char = field_name.[String.length field_name - 1] in
   Char.(last_char >= '0' && last_char <= '9')
   && String.is_suffix field_name ~suffix:(this ^ String.of_char last_char)
+
+
+let add_underscore fieldname = {fieldname with field_name= "_" ^ fieldname.field_name}

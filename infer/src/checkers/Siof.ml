@@ -65,7 +65,10 @@ module TransferFunctions (CFG : ProcCfg.S) = struct
 
   let is_compile_time_constructed {InterproceduralAnalysis.analyze_dependency} pv =
     let init_pname = Pvar.get_initializer_pname pv in
-    match Option.bind init_pname ~f:(fun callee_pname -> analyze_dependency callee_pname) with
+    match
+      Option.bind init_pname ~f:(fun callee_pname ->
+          analyze_dependency callee_pname |> AnalysisResult.to_option )
+    with
     | Some (Bottom, _) ->
         (* we analyzed the initializer for this global and found that it doesn't require any runtime
            initialization so cannot participate in SIOF *)
@@ -76,6 +79,8 @@ module TransferFunctions (CFG : ProcCfg.S) = struct
 
   let filter_global_accesses initialized =
     let initialized_matcher =
+      (* Note: [QualifiedCppName.Match.of_fuzzy_qual_names] may be expensive since it includes
+         [Str.regexp]. *)
       Domain.VarNames.elements initialized |> QualifiedCppName.Match.of_fuzzy_qual_names
     in
     Staged.stage (fun (* gvar \notin initialized, up to some fuzzing *)
@@ -128,6 +133,18 @@ module TransferFunctions (CFG : ProcCfg.S) = struct
 
   let at_least_nonbottom = Domain.join (NonBottom SiofTrace.bottom, Domain.VarNames.empty)
 
+  let init_f =
+    List.map models ~f:(fun {qual_name; initialized_globals} ->
+        let regexp = lazy (QualifiedCppName.Match.of_fuzzy_qual_names [qual_name]) in
+        fun callee_pname ->
+          if
+            Lazy.force regexp
+            |> Fn.flip QualifiedCppName.Match.match_qualifiers
+                 (Procname.get_qualifiers callee_pname)
+          then Some initialized_globals
+          else None )
+
+
   let exec_instr astate
       ({InterproceduralAnalysis.proc_desc; analyze_dependency; _} as analysis_data) _ _
       (instr : Sil.instr) =
@@ -151,15 +168,7 @@ module TransferFunctions (CFG : ProcCfg.S) = struct
     | Call (_, Const (Cfun callee_pname), _, _, _) when is_allow_listed callee_pname ->
         at_least_nonbottom astate
     | Call (_, Const (Cfun callee_pname), _, _, _) when is_modelled callee_pname ->
-        let init =
-          List.find_map_exn models ~f:(fun {qual_name; initialized_globals} ->
-              if
-                QualifiedCppName.Match.of_fuzzy_qual_names [qual_name]
-                |> Fn.flip QualifiedCppName.Match.match_qualifiers
-                     (Procname.get_qualifiers callee_pname)
-              then Some initialized_globals
-              else None )
-        in
+        let init = List.find_map_exn init_f ~f:(fun f -> f callee_pname) in
         Domain.join astate (NonBottom SiofTrace.bottom, Domain.VarNames.of_list init)
     | Call (_, Const (Cfun callee_pname), actuals, loc, _)
       when Attributes.load callee_pname
@@ -172,7 +181,7 @@ module TransferFunctions (CFG : ProcCfg.S) = struct
     | Call (_, Const (Cfun callee_pname), actuals, loc, _) ->
         let callee_astate =
           match analyze_dependency callee_pname with
-          | Some (NonBottom trace, initialized_by_callee) ->
+          | Ok (NonBottom trace, initialized_by_callee) ->
               let already_initialized = snd astate in
               let dangerous_accesses =
                 SiofTrace.sinks trace
@@ -187,10 +196,10 @@ module TransferFunctions (CFG : ProcCfg.S) = struct
                   dangerous_accesses
               in
               (NonBottom (SiofTrace.update_sinks trace sinks), initialized_by_callee)
-          | Some ((Bottom, _) as callee_astate) ->
+          | Ok ((Bottom, _) as callee_astate) ->
               callee_astate
-          | None ->
-              L.d_printfln "Unknown call" ;
+          | Error no_summary ->
+              L.d_printfln "No summary: %a" AnalysisResult.pp_no_summary no_summary ;
               (Bottom, Domain.VarNames.empty)
         in
         add_actuals_globals analysis_data astate loc actuals
@@ -222,7 +231,7 @@ let report_siof {InterproceduralAnalysis.proc_desc; err_log; analyze_dependency;
     =
   let trace_of_pname pname =
     match analyze_dependency pname with
-    | Some (NonBottom summary, _) ->
+    | Ok (NonBottom summary, _) ->
         summary
     | _ ->
         SiofTrace.bottom

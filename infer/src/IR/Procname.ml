@@ -387,8 +387,10 @@ module ObjC_Cpp = struct
         F.pp_print_string fmt "[instance]"
 
 
+  let get_sep osig = if is_objc_method osig then "." else "::"
+
   let pp verbosity fmt osig =
-    let sep = if is_objc_method osig then "." else "::" in
+    let sep = get_sep osig in
     match verbosity with
     | Simple ->
         F.pp_print_string fmt osig.method_name
@@ -402,8 +404,9 @@ module ObjC_Cpp = struct
 
 
   let pp_without_templates fmt osig =
-    F.fprintf fmt "%s::%s"
+    F.fprintf fmt "%s%s%s"
       (Typ.Name.name_without_templates osig.class_name)
+      (get_sep osig)
       (remove_templates osig.method_name)
 
 
@@ -958,11 +961,9 @@ let is_constructor t =
 
 
 (** [is_infer_undefined pn] returns true if [pn] is a special Infer undefined proc *)
-let is_infer_undefined pn =
-  match pn with
+let is_infer_undefined = function
   | Java j ->
-      let regexp = Str.regexp_string "com.facebook.infer.builtins.InferUndefined" in
-      Str.string_match regexp (Java.get_class_name j) 0
+      String.equal "com.facebook.infer.builtins.InferUndefined" (Java.get_class_name j)
   | _ ->
       (* TODO: add cases for obj-c, c, c++ *)
       false
@@ -1005,6 +1006,13 @@ let is_hack_builtins = function
 let is_hack_sinit = function
   | Hack {function_name} ->
       String.equal function_name "_86sinit"
+  | _ ->
+      false
+
+
+let is_hack_construct = function
+  | Hack {function_name} ->
+      String.equal function_name "__construct"
   | _ ->
       false
 
@@ -1089,7 +1097,7 @@ let pp = pp_with_verbosity Non_verbose
 let pp_verbose = pp_with_verbosity Verbose
 
 let pp_without_templates fmt = function
-  | ObjC_Cpp osig when not (ObjC_Cpp.is_objc_method osig) ->
+  | ObjC_Cpp osig ->
       ObjC_Cpp.pp_without_templates fmt osig
   | C csig ->
       C.pp_without_templates fmt csig
@@ -1142,7 +1150,7 @@ let pp_name_only fmt = function
 
 let patterns_match patterns proc_name =
   let s = F.asprintf "%a" pp_name_only proc_name in
-  List.exists patterns ~f:(fun pattern -> Re.Str.string_match pattern s 0)
+  List.exists patterns ~f:(fun pattern -> Str.string_match pattern s 0)
 
 
 (** Convenient representation of a procname for external tools (e.g. eclipse plugin) *)
@@ -1314,12 +1322,11 @@ let parameter_of_name procname class_name =
 
 
 let describe f pn =
-  let name = hashable_name pn in
-  match String.lsplit2 ~on:'<' name with
-  | Some (name_without_template, _template_part) ->
-      F.pp_print_string f name_without_template
-  | None ->
-      F.pp_print_string f name
+  match pn with
+  | Block _ | C _ | Erlang _ | Hack _ | Python _ | ObjC_Cpp _ ->
+      F.fprintf f "%a()" pp_without_templates pn
+  | CSharp _ | Java _ ->
+      F.pp_print_string f (hashable_name pn)
 
 
 let make_java ~class_name ~return_type ~method_name ~parameters ~kind =
@@ -1365,6 +1372,10 @@ module Hashable = struct
 
   let sexp_of_t t = Sexp.of_string (to_string t)
 end
+
+include Comparable.Make (struct
+  type nonrec t = t [@@deriving compare, sexp]
+end)
 
 module Hash = Hashtbl.Make (Hashable)
 module LRUHash = LRUHashtbl.Make (Hashable)

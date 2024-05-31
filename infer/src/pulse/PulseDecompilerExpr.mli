@@ -17,7 +17,6 @@ type access =
   | CaptureFieldAccess of string
   | FieldAccess of Fieldname.t
   | ArrayAccess of source_expr option
-  | TakeAddress
   | Dereference
 
 and source_expr = base * access list [@@deriving compare, equal]
@@ -36,8 +35,6 @@ val includes_block : t -> bool
 val pp_with_abstract_value : Format.formatter -> t -> unit
 
 val abstract_value_of_expr : t -> AbstractValue.t option
-
-val decomp_source_expr_equal : t -> t -> bool
 
 val is_unknown : t -> bool
 

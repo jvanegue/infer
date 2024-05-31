@@ -33,6 +33,10 @@ type 'abductive_domain_t base_t =
       ; address: DecompilerExpr.t
       ; must_be_valid: (Trace.t * Invalidation.must_be_valid_reason option[@yojson.opaque])
       ; calling_context: ((CallEvent.t * Location.t) list[@yojson.opaque]) }
+  | LatentSpecializedTypeIssue of
+      { astate: AbductiveDomain.Summary.t
+      ; specialized_type: Typ.Name.t
+      ; trace: (Trace.t[@yojson.opaque]) }
 [@@deriving equal, compare, yojson_of, variants]
 
 type t = AbductiveDomain.t base_t
@@ -58,28 +62,47 @@ let leq ~lhs ~rhs =
   | _ ->
       false
 
-let pp_ pp_abductive_domain_t fmt = function
-  | InfiniteProgram astate ->
-      pp_abductive_domain_t fmt astate
-  | AbortProgram astate ->
-      F.fprintf fmt "{AbortProgram %a}" AbductiveDomain.Summary.pp astate
-  | ContinueProgram astate ->
-      pp_abductive_domain_t fmt astate
-  | ExceptionRaised astate ->
-      F.fprintf fmt "{ExceptionRaised %a}" pp_abductive_domain_t astate
-  | ExitProgram astate ->
-      F.fprintf fmt "{ExitProgram %a}" AbductiveDomain.Summary.pp astate
-  | LatentAbortProgram {astate; latent_issue} ->
+let to_astate = function
+  | AbortProgram summary
+  | ExitProgram summary
+  | LatentAbortProgram {astate= summary}
+  | LatentInvalidAccess {astate= summary}
+  | LatentSpecializedTypeIssue {astate= summary} ->
+      (summary :> AbductiveDomain.t)
+  | ExceptionRaised astate | ContinueProgram astate | InfiniteProgram astate ->
+      astate
+
+let pp_header kind fmt = function
+  | InfiniteProgram _ ->
+     Pp.with_color kind Red F.pp_print_string fmt "InfiniteProgram"
+  | AbortProgram _ ->
+      Pp.with_color kind Red F.pp_print_string fmt "AbortProgram"
+  | ContinueProgram _ ->
+      ()
+  | ExceptionRaised _ ->
+      Pp.with_color kind Orange F.pp_print_string fmt "ExceptionRaised"
+  | ExitProgram _ ->
+      Pp.with_color kind Orange F.pp_print_string fmt "ExitProgram"
+  | LatentAbortProgram {latent_issue} ->
+      Pp.with_color kind Orange F.pp_print_string fmt "LatentAbortProgram" ;
       let diagnostic = LatentIssue.to_diagnostic latent_issue in
       let message, _suggestion = Diagnostic.get_message_and_suggestion diagnostic in
       let location = Diagnostic.get_location diagnostic in
-      F.fprintf fmt "{LatentAbortProgram(%a: %s)@ %a@ %a}" Location.pp location message
-        LatentIssue.pp latent_issue AbductiveDomain.Summary.pp astate
-  | LatentInvalidAccess {astate; address; must_be_valid= _} ->
-      F.fprintf fmt "{LatentInvalidAccess(%a) %a}" DecompilerExpr.pp address
-        AbductiveDomain.Summary.pp astate
+      F.fprintf fmt "(%a: %s)@ %a" Location.pp location message LatentIssue.pp latent_issue
+  | LatentInvalidAccess {address; must_be_valid= _} ->
+      Pp.with_color kind Orange F.pp_print_string fmt "LatentInvalidAccess" ;
+      F.fprintf fmt "(%a)" DecompilerExpr.pp address
+  | LatentSpecializedTypeIssue {specialized_type; trace} ->
+      Pp.with_color kind Orange F.pp_print_string fmt "LatentSpecializedTypeIssue" ;
+      let origin_location = Trace.get_start_location trace in
+      F.fprintf fmt "(%a: %a)" Location.pp origin_location Typ.Name.pp specialized_type
 
-let pp fmt exec_state = pp_ AbductiveDomain.pp fmt exec_state
+let pp_with_kind kind path_opt fmt exec_state =
+  F.fprintf fmt "%a%a" (pp_header kind) exec_state (PulsePp.pp kind path_opt) (to_astate exec_state)
+
+
+let pp fmt (exec_state: 'abductive_domain_t base_t) = 
+ F.fprintf fmt "%a%a" (pp_header TEXT) exec_state AbductiveDomain.pp (to_astate exec_state)
 
 (* Pulse infinite *)
 (* We record the global widening state *)
@@ -146,7 +169,7 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
     match ws with
     | [] -> true
     | (hd,_)::tl ->                 
-       pp_ AbductiveDomain.pp Format.err_formatter hd;
+       pp Format.err_formatter hd;
        print_workset tl
   in
 
@@ -158,7 +181,7 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
   let print_warning s cnt state =
     let _ = state in 
     L.debug Analysis Quiet "JV: FOUND infinite state from %s with cnt %i \n" s cnt; 
-    pp_ AbductiveDomain.pp Format.std_formatter state; 
+    pp Format.std_formatter state; 
     L.debug Analysis Quiet "JV: End infinite state -- now printing workset at bug location \n";
     let _ = print_workset workset in
     L.debug Analysis Quiet "JV: End Printing Vulnerable Workset \n"
@@ -172,7 +195,8 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
     | LatentInvalidAccess a -> AbductiveDomain.Summary.get_path_condition a.astate
     | InfiniteProgram astate -> AbductiveDomain.get_path_condition astate
     | ExceptionRaised astate -> AbductiveDomain.get_path_condition astate
-    | ContinueProgram astate -> AbductiveDomain.get_path_condition astate
+    | ContinueProgram astate -> AbductiveDomain.get_path_condition astate                             
+    | LatentSpecializedTypeIssue {astate; _} -> AbductiveDomain.Summary.get_path_condition astate
   in
   
   let rec record_pathcond ws : int =
@@ -215,6 +239,7 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
     | LatentAbortProgram a -> LatentAbortProgram a
     | LatentInvalidAccess a -> LatentInvalidAccess a
     | InfiniteProgram astate -> InfiniteProgram astate                                                      
+    | LatentSpecializedTypeIssue astate -> LatentSpecializedTypeIssue astate
   in
 
   let create_infinite_state_and_print (state_set: t list) (idx:int) (case:int) = 
@@ -265,8 +290,9 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
   else [],-1
          
 type summary = AbductiveDomain.Summary.t base_t [@@deriving compare, equal, yojson_of]
-             
-let pp_summary fmt exec_summary = pp_ AbductiveDomain.Summary.pp fmt exec_summary
+
+let pp_summary fmt (exec_summary : summary) =
+  pp_with_kind TEXT None fmt (exec_summary :> AbductiveDomain.t base_t)
 
 let equal_fast exec_state1 exec_state2 =
   phys_equal exec_state1 exec_state2

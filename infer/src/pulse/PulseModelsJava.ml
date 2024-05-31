@@ -38,22 +38,23 @@ let write_field path field new_val location addr astate =
 
 let instance_of (argv, hist) typeexpr : model_no_non_disj =
  fun {location; path; ret= ret_id, _} astate ->
-  if Language.curr_language_is Hack then
+  if Language.curr_language_is Hack then (
     let event = Hist.call_event path location "Hack.instanceof" in
     let res_addr = AbstractValue.mk_fresh () in
-    (* Just copying the Java version to see how well it works *)
     match typeexpr with
-    | Exp.Sizeof {typ} ->
-        let<++> astate = PulseArithmetic.and_equal_instanceof res_addr argv typ astate in
+    | Exp.Sizeof {typ; nullable} ->
+        Logging.d_printfln "hack instanceof typ=%a, nullable=%b" (Typ.pp Pp.text) typ nullable ;
+        let<++> astate = PulseArithmetic.and_equal_instanceof res_addr argv typ ~nullable astate in
         PulseOperations.write_id ret_id (res_addr, Hist.add_event path event hist) astate
     | _ ->
-        astate |> Basic.ok_continue
+        Logging.d_printfln "typeexpr didn't match!" ;
+        astate |> Basic.ok_continue )
   else
     let event = Hist.call_event path location "Java.instanceof" in
     let res_addr = AbstractValue.mk_fresh () in
     match typeexpr with
-    | Exp.Sizeof {typ} ->
-        let<++> astate = PulseArithmetic.and_equal_instanceof res_addr argv typ astate in
+    | Exp.Sizeof {typ; nullable} ->
+        let<++> astate = PulseArithmetic.and_equal_instanceof res_addr argv typ ~nullable astate in
         PulseOperations.write_id ret_id (res_addr, Hist.add_event path event hist) astate
     (* The type expr is sometimes a Var expr but this is not expected.
        This seems to be introduced by inline mechanism of Java synthetic methods during preanalysis *)

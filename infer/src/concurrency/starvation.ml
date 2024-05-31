@@ -207,7 +207,7 @@ module TransferFunctions (CFG : ProcCfg.S) = struct
         Some (make_ret_attr (Looper ForUIThread))
       else None
     in
-    let get_callee_summary () = analyze_dependency callee in
+    let get_callee_summary () = analyze_dependency callee |> AnalysisResult.to_option in
     let treat_handler_constructor () =
       if StarvationModels.is_handler_constructor tenv callee actuals then
         match actuals_acc_exps with
@@ -307,6 +307,42 @@ module TransferFunctions (CFG : ProcCfg.S) = struct
         astate
 
 
+  let check_function_pointer_model fn_ptr =
+    match Config.starvation_c_function_pointer_models with
+    | `Assoc models ->
+        let pointer_name : string = Format.asprintf "%a" HilExp.pp fn_ptr in
+        List.find_map
+          ~f:(function
+            | model_pointer_name, `String model_target
+              when String.equal model_pointer_name pointer_name ->
+                L.debug Analysis Verbose "Mapping %s -> %s" pointer_name model_target ;
+                Some model_target
+            | _ ->
+                None )
+          models
+    | _ ->
+        None
+
+
+  let do_function_pointer_call analysis_data loc id typ fn_ptr sil_actuals astate =
+    let ret_base = (Var.of_id id, typ) in
+    let ret_exp = HilExp.AccessExpression.base ret_base in
+    let actuals = hilexp_of_sils ~add_deref:false astate sil_actuals in
+    let astate =
+      match hilexp_of_sils ~add_deref:false astate [fn_ptr] with
+      | [] ->
+          astate
+      | fn_ptr :: _rest -> (
+        match check_function_pointer_model fn_ptr with
+        | Some model_target ->
+            let callee = Procname.from_string_c_fun model_target in
+            do_call analysis_data ret_exp callee actuals loc astate
+        | None ->
+            astate )
+    in
+    astate
+
+
   let exec_instr (astate : Domain.t) ({interproc= {proc_desc; tenv}; formals} as analysis_data) _ _
       instr =
     let open ConcurrencyModels in
@@ -342,6 +378,9 @@ module TransferFunctions (CFG : ProcCfg.S) = struct
     | Call ((id, base_typ), Const (Cfun callee), actuals, _, _)
       when Procname.equal callee BuiltinDecl.__cast ->
         do_cast tenv formals id base_typ actuals astate
+    | Call ((id, typ), Const (Cfun callee), fn_ptr :: fn_args, loc, _)
+      when Procname.equal callee BuiltinDecl.__call_c_function_ptr ->
+        do_function_pointer_call analysis_data loc id typ fn_ptr fn_args astate
     | Call ((id, typ), Const (Cfun callee), sil_actuals, loc, _) -> (
         let ret_base = (Var.of_id id, typ) in
         let actuals = hilexp_of_sils ~add_deref:false astate sil_actuals in
@@ -903,7 +942,10 @@ let reporting {InterproceduralAnalysis.procedures; file_exe_env; analyze_file_de
   else
     let report_on_proc tenv pattrs report_map payload =
       Domain.fold_critical_pairs_of_summary
-        (report_on_pair ~analyze_ondemand:analyze_file_dependency tenv pattrs)
+        (report_on_pair
+           ~analyze_ondemand:(fun proc_name ->
+             analyze_file_dependency proc_name |> AnalysisResult.to_option )
+           tenv pattrs )
         payload report_map
     in
     let report_procedure report_map procname =
@@ -911,7 +953,7 @@ let reporting {InterproceduralAnalysis.procedures; file_exe_env; analyze_file_de
       | None ->
           report_map
       | Some attributes ->
-          analyze_file_dependency procname
+          analyze_file_dependency procname |> AnalysisResult.to_option
           |> Option.value_map ~default:report_map ~f:(fun summary ->
                  let tenv = Exe_env.get_proc_tenv file_exe_env procname in
                  if should_report attributes then report_on_proc tenv attributes report_map summary

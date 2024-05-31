@@ -62,9 +62,15 @@ val html : color -> env
 val color_string : color -> string
 (** string representation of colors *)
 
+val escape_xml : (F.formatter -> 'a -> unit) -> print_kind -> F.formatter -> 'a -> unit
+(** escapes the output of the pretty printer parameter using HTML codes *)
+
+val with_color : print_kind -> color -> (F.formatter -> 'a -> unit) -> F.formatter -> 'a -> unit
+
 val html_with_color : color -> (F.formatter -> 'a -> unit) -> F.formatter -> 'a -> unit
 
-val html_collapsible_block : name:string -> (F.formatter -> 'a -> unit) -> F.formatter -> 'a -> unit
+val html_collapsible_block :
+  name:string -> print_kind -> (F.formatter -> 'a -> unit) -> F.formatter -> 'a -> unit
 (** Output the value in a named summary-details block. Both the name and the result of inner
     pretty-printer will be escaped. *)
 
@@ -113,8 +119,9 @@ val in_backticks : (F.formatter -> 'a -> unit) -> F.formatter -> 'a -> unit
 
 val collection :
      fold:('t, 'item, bool) Container.fold
-  -> sep:string
-  -> pp_item:(F.formatter -> 'item -> unit)
+  -> sep:(unit, F.formatter, unit) format
+  -> ?filter:('item -> bool)
+  -> (F.formatter -> 'item -> unit)
   -> F.formatter
   -> 't
   -> unit

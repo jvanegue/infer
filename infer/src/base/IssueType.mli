@@ -269,6 +269,8 @@ val modifies_immutable : t
 
 val multiple_weakself : t
 
+val mutual_recursion_cycle : t
+
 val nil_block_call : latent:bool -> t
 
 val nil_insertion_into_collection : latent:bool -> t
@@ -301,9 +303,11 @@ val precondition_not_met : t
 
 val premature_nil_termination : t
 
-val pulse_cannot_instantiate_abstract_class : t [@@warning "-unused-value-declaration"]
+val pulse_cannot_instantiate_abstract_class : t
 
 val pulse_dict_missing_key : t
+
+val pulse_dynamic_type_mismatch : t
 
 val pulse_transitive_access : t
 
@@ -330,6 +334,8 @@ val regex_op_on_ui_thread : t
 val resource_leak : t
 
 val retain_cycle : t
+
+val retain_cycle_no_weak_info : t
 
 val scope_leakage : t
 

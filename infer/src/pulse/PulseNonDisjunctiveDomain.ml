@@ -9,8 +9,11 @@ open! IStd
 module F = Format
 module IRAttributes = Attributes
 open PulseBasicInterface
+module AbductiveDomain = PulseAbductiveDomain
 module BaseMemory = PulseBaseMemory
 module DecompilerExpr = PulseDecompilerExpr
+module ExecutionDomain = PulseExecutionDomain
+module PathContext = PulsePathContext
 
 (** Unnecessary copies are tracked in two places:
 
@@ -660,6 +663,9 @@ let top = {intra= IntraDom.top; inter= InterDom.top}
 
 let is_top {intra; inter} = IntraDom.is_top intra && InterDom.is_top inter
 
+(* faster? *)
+let join lhs rhs = if is_bottom lhs then rhs else if is_bottom rhs then lhs else join lhs rhs
+
 let map_intra f ({intra} as x) = {x with intra= f intra}
 
 let map_inter f ({inter} as x) = {x with inter= f inter}
@@ -715,17 +721,22 @@ let set_passed_to loc timestamp call_exp actuals =
 
 let is_lifetime_extended var {intra} = IntraDom.is_lifetime_extended var intra
 
-let remember_dropped_elements dropped = map_inter (InterDom.remember_dropped_elements dropped)
-
-let quick_join lhs rhs =
-  if phys_equal lhs bottom then rhs else if phys_equal rhs bottom then lhs else join lhs rhs
+let remember_dropped_disjuncts disjuncts non_disj =
+  List.fold disjuncts ~init:non_disj ~f:(fun non_disj (exec, _) ->
+      match exec with
+      | ExecutionDomain.ContinueProgram astate ->
+          map_inter
+            (InterDom.remember_dropped_elements astate.AbductiveDomain.transitive_info)
+            non_disj
+      | _ ->
+          non_disj )
 
 
 let bind (execs, non_disj) ~f =
   List.rev execs
   |> List.fold ~init:([], bottom) ~f:(fun (acc, joined_non_disj) elt ->
          let l, new_non_disj = f elt non_disj in
-         (l @ acc, quick_join joined_non_disj new_non_disj) )
+         (l @ acc, join joined_non_disj new_non_disj) )
 
 
 type summary = InterDom.t [@@deriving abstract_domain]

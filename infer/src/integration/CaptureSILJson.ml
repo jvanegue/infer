@@ -38,18 +38,19 @@ let parse_list_parameters (eleparse : Safe.t -> 'a) (json : Safe.t) =
   List.map ~f:eleparse (to_list json) |> List.map ~f:parse_parameter
 
 
-let parse_cil_type_name (str : string) : Typ.t =
+let parse_cil_type_name =
   let r = Str.regexp "\\." in
-  try
-    let n = Str.search_backward r str (String.length str) in
-    let _namespace = Str.string_before str n in
-    let _name = Str.string_after str (n + 1) in
-    Typ.(
-      mk_ptr
-        (mk_struct
-           (CSharpClass (CSharpClassName.make ~namespace:(Some _namespace) ~classname:_name)) ) )
-  with _ ->
-    Typ.(mk_ptr (mk_struct (CSharpClass (CSharpClassName.make ~namespace:None ~classname:str))))
+  fun (str : string) : Typ.t ->
+    try
+      let n = Str.search_backward r str (String.length str) in
+      let _namespace = Str.string_before str n in
+      let _name = Str.string_after str (n + 1) in
+      Typ.(
+        mk_ptr
+          (mk_struct
+             (CSharpClass (CSharpClassName.make ~namespace:(Some _namespace) ~classname:_name)) ) )
+    with _ ->
+      Typ.(mk_ptr (mk_struct (CSharpClass (CSharpClassName.make ~namespace:None ~classname:str))))
 
 
 let parse_cil_procname (json : Safe.t) : Procname.t =
@@ -306,11 +307,18 @@ and parse_exp (json : Safe.t) =
     let dl = try Some (parse_exp (member "dynamic_length" json)) with Type_error _ -> None in
     match s with
     | "exact" ->
-        Exp.Sizeof {typ= t; nbytes= None; dynamic_length= dl; subtype= Subtype.exact}
+        Exp.Sizeof
+          {typ= t; nbytes= None; dynamic_length= dl; subtype= Subtype.exact; nullable= false}
     | "instof" ->
-        Exp.Sizeof {typ= t; nbytes= None; dynamic_length= dl; subtype= Subtype.subtypes_instof}
+        Exp.Sizeof
+          { typ= t
+          ; nbytes= None
+          ; dynamic_length= dl
+          ; subtype= Subtype.subtypes_instof
+          ; nullable= false }
     | "cast" ->
-        Exp.Sizeof {typ= t; nbytes= None; dynamic_length= dl; subtype= Subtype.subtypes_cast}
+        Exp.Sizeof
+          {typ= t; nbytes= None; dynamic_length= dl; subtype= Subtype.subtypes_cast; nullable= false}
     | _ ->
         Logging.die InternalError "Subtype in Sizeof instruction is not supported."
   else Logging.die InternalError "Unknown expression kind %s" ekind

@@ -40,6 +40,11 @@ module Syntax = struct
 
   let unreachable : 'a model_monad = fun _ _ _ -> ([], NonDisjDomain.bottom)
 
+  let report diagnostic : unit model_monad =
+   fun _data astate non_disj ->
+    ([Recoverable (ContinueProgram ((), astate), [ReportableError {astate; diagnostic}])], non_disj)
+
+
   let bind (x : 'a model_monad) (f : 'a -> 'b model_monad) : 'b model_monad =
    fun data astate non_disj ->
     x data astate non_disj
@@ -250,6 +255,11 @@ module Syntax = struct
     ret (addr, hist)
 
 
+  let eval_deref exp : aval model_monad =
+    let* {path; location} = get_data in
+    PulseOperations.eval_deref path location exp |> exec_partial_operation
+
+
   let eval_deref_access access_mode aval access : aval model_monad =
     let* {path; location} = get_data in
     PulseOperations.eval_deref_access path access_mode location aval access
@@ -260,24 +270,70 @@ module Syntax = struct
     PulseOperations.add_dict_contain_const_keys addr |> exec_command
 
 
-  let is_dict_non_alias formals addr {AbductiveDomain.decompiler} =
-    match PulseDecompiler.find addr decompiler with
-    | SourceExpr ((PVar pvar, ([] | [Dereference])), _) ->
-        List.exists formals ~f:(fun (formal, typ) ->
-            Pvar.equal pvar formal
-            && Option.exists
-                 (Typ.name (Typ.strip_ptr typ))
-                 ~f:(Typ.Name.equal TextualSil.hack_dict_type_name) )
+  let find_decompiler_expr addr : DecompilerExpr.t model_monad =
+    (fun {decompiler} -> PulseDecompiler.find addr decompiler) |> exec_pure_operation
+
+
+  let is_dict_missing_key_var_block_list s =
+    Option.exists Config.dict_missing_key_var_block_list ~f:(fun regexp ->
+        Str.string_match regexp s 0 )
+
+
+  let get_pvar_deref_typ formals pvar : Typ.name option model_monad =
+    if is_dict_missing_key_var_block_list (Pvar.to_string pvar) then ret None
+    else
+      match List.Assoc.find formals ~equal:Pvar.equal pvar with
+      | Some typ ->
+          ret (Typ.name (Typ.strip_ptr typ))
+      | None ->
+          let* addr, _ = eval_deref (Lvar pvar) in
+          AddressAttributes.get_static_type addr |> exec_pure_operation
+
+
+  let resolve_field_info typ fld : Struct.field_info option model_monad =
+    if is_dict_missing_key_var_block_list (Fieldname.get_field_name fld) then ret None
+    else
+      let* {analysis_data= {tenv}} = get_data in
+      Tenv.resolve_field_info tenv typ fld |> ret
+
+
+  let is_dict_non_alias formals addr : bool model_monad =
+    let opt_bind ~default opt_x f =
+      let* opt_x in
+      match opt_x with None -> ret default | Some x -> f x
+    in
+    let rec get_field_typ typ accesses : Typ.name option model_monad =
+      match (accesses : DecompilerExpr.access list) with
+      | FieldAccess fld :: Dereference :: accesses ->
+          let ( let** ) opt_x f = opt_bind ~default:None opt_x f in
+          let** {Struct.typ} = resolve_field_info typ fld in
+          let** typ = Typ.name (Typ.strip_ptr typ) |> ret in
+          get_field_typ typ accesses
+      | [] ->
+          ret (Some typ)
+      | _ ->
+          ret None
+    in
+    let* decompiled = find_decompiler_expr addr in
+    match (decompiled : DecompilerExpr.t) with
+    | SourceExpr ((PVar pvar, rev_accesses), _) -> (
+      (* NOTE: The [access] in [DecompilerExpr.source_expr] has the reverse order by default,
+         e.g. the access of [x->f->g] is [\[*; g; *; f; *\]]. *)
+      match List.rev rev_accesses with
+      | Dereference :: accesses ->
+          let ( let** ) opt_x f = opt_bind ~default:false opt_x f in
+          let** base_typ = get_pvar_deref_typ formals pvar in
+          let** typ = get_field_typ base_typ accesses in
+          ret (Typ.Name.equal typ TextualSil.hack_dict_type_name)
+      | _ ->
+          ret false )
     | _ ->
-        false
+        ret false
 
 
   let add_dict_read_const_key (addr, history) key : unit model_monad =
     let* {analysis_data= {proc_desc}; path= {timestamp}; location} = get_data in
-    let* is_dict_non_alias =
-      let formals = Procdesc.get_pvar_formals proc_desc in
-      is_dict_non_alias formals addr |> exec_pure_operation
-    in
+    let* is_dict_non_alias = is_dict_non_alias (Procdesc.get_pvar_formals proc_desc) addr in
     if is_dict_non_alias then
       PulseOperations.add_dict_read_const_key timestamp (Immediate {location; history}) addr key
       >> sat |> exec_partial_command
@@ -425,6 +481,7 @@ module Syntax = struct
     let* new_obj = lift_to_monad_and_get_result (internal_new_ type_name_exp) in
     match type_name_exp with
     | Exp.Sizeof {typ} ->
+        (* TODO: pass a nullable parameter to and_dynamic_type_is *)
         let* () = and_dynamic_type_is new_obj typ in
         ret new_obj
     | _ ->
@@ -434,7 +491,11 @@ module Syntax = struct
   let constructor type_name fields : aval model_monad =
     let exp =
       Exp.Sizeof
-        {typ= Typ.mk_struct type_name; nbytes= None; dynamic_length= None; subtype= Subtype.exact}
+        { typ= Typ.mk_struct type_name
+        ; nbytes= None
+        ; dynamic_length= None
+        ; subtype= Subtype.exact
+        ; nullable= false }
     in
     let* new_obj = new_ exp in
     let* () =

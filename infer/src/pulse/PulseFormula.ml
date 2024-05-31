@@ -44,7 +44,8 @@ let pp_function_symbol fmt = function
   | Unknown v ->
       Var.pp fmt v
   | Procname proc_name ->
-      Procname.pp fmt proc_name
+      (* templates mess up HTML debug output and are too much info most of the time *)
+      Procname.pp_without_templates fmt proc_name
 
 
 type operand =
@@ -202,9 +203,9 @@ end = struct
         if not (Q.is_one abs_q) then F.fprintf fmt "%a·" Q.pp_print abs_q
       in
       let pp_vs fmt vs =
-        Pp.collection ~sep:" "
+        Pp.collection ~sep:"@;"
           ~fold:(IContainer.fold_of_pervasives_map_fold VarMap.fold)
-          ~pp_item:(fun fmt (v, q) ->
+          (fun fmt (v, q) ->
             F.fprintf fmt "%a%a" pp_coeff q pp_var v ;
             is_first := false )
           fmt vs
@@ -389,13 +390,14 @@ end
 let pp_var_set pp_var fmt var_set =
   Pp.collection ~sep:","
     ~fold:(IContainer.fold_of_pervasives_set_fold Var.Set.fold)
-    ~pp_item:pp_var fmt var_set
+    pp_var fmt var_set
 
 
-let pp_var_map ~arrow pp_val pp_var fmt var_map =
-  Pp.collection ~sep:" ∧ "
+let pp_var_map ?filter ~arrow pp_val pp_var fmt var_map =
+  Pp.collection ~sep:"@;∧ "
     ~fold:(IContainer.fold_of_pervasives_map_fold Var.Map.fold)
-    ~pp_item:(fun fmt (v, value) -> F.fprintf fmt "%a%s%a" pp_var v arrow pp_val value)
+    ?filter
+    (fun fmt (v, value) -> F.fprintf fmt "%a%s%a" pp_var v arrow pp_val value)
     fmt var_map
 
 
@@ -534,7 +536,7 @@ module Term = struct
     | BitShiftRight of t * t
     | BitXor of t * t
     | StringConcat of t * t
-    | IsInstanceOf of Var.t * Typ.t
+    | IsInstanceOf of {var: Var.t; typ: Typ.t; nullable: bool}
     | IsInt of t
   [@@deriving compare, equal, yojson_of]
 
@@ -592,7 +594,8 @@ module Term = struct
     | String s ->
         F.fprintf fmt "\"%s\"" s
     | Procname proc_name ->
-        Procname.pp fmt proc_name
+        (* templates mess up HTML debug output and are too much info most of the time *)
+        Procname.pp_without_templates fmt proc_name
     | FunctionApplication {f; actuals} ->
         F.fprintf fmt "%a(%a)" (pp_paren pp_var ~needs_paren) f
           (Pp.seq ~sep:"," (pp_paren pp_var ~needs_paren))
@@ -643,8 +646,9 @@ module Term = struct
         F.fprintf fmt "%a=%a" (pp_paren pp_var ~needs_paren) t1 (pp_paren pp_var ~needs_paren) t2
     | NotEqual (t1, t2) ->
         F.fprintf fmt "%a≠%a" (pp_paren pp_var ~needs_paren) t1 (pp_paren pp_var ~needs_paren) t2
-    | IsInstanceOf (v, t) ->
-        F.fprintf fmt "%a instanceof %a" pp_var v (Typ.pp_full Pp.text) t
+    | IsInstanceOf {var; typ; nullable} ->
+        F.fprintf fmt "%a instanceof %a nullable=%a" pp_var var (Typ.pp_full Pp.text) typ
+          Format.pp_print_bool nullable
     | IsInt t ->
         F.fprintf fmt "is_int(%a)" (pp_no_paren pp_var) t
 
@@ -908,14 +912,16 @@ module Term = struct
         let acc, op = f_subst init v in
         let t' = match op with VarSubst v' when Var.equal v v' -> t | _ -> of_subst_target op in
         f_post ~prev:t acc t'
-    | IsInstanceOf (v, typ) ->
+    | IsInstanceOf {var= v; typ; nullable} ->
         let acc, op = f_subst init v in
         let t' =
           match op with
           | (VarSubst v' | ConstantSubst (_, Some v')) when not (Var.equal v v') ->
-              IsInstanceOf (v', typ)
+              IsInstanceOf {var= v'; typ; nullable}
           | QSubst q when Q.is_zero q ->
-              zero
+              (* TODO: I still think this maybe isn't quite right, since we lose the instanceof fact which we previously
+                 tried to keep in order to get the right latency info, but worry about that later *)
+              if nullable then one else zero
           | QSubst _ | ConstantSubst _ | VarSubst _ | LinSubst _ | NonLinearTermSubst _ ->
               t
         in
@@ -1280,7 +1286,9 @@ module Term = struct
         t
 
 
-  let get_as_isinstanceof t = match t with IsInstanceOf (var, typ) -> Some (var, typ) | _ -> None
+  let get_as_isinstanceof t =
+    match t with IsInstanceOf {var; typ; nullable} -> Some (var, typ, nullable) | _ -> None
+
 
   let get_as_var = function
     | Var x ->
@@ -1442,7 +1450,7 @@ module Term = struct
     let pp_with_pp_var pp_var fmt m =
       Pp.collection ~sep:"∧"
         ~fold:(IContainer.fold_of_pervasives_map_fold fold)
-        ~pp_item:(fun fmt (term, var) -> F.fprintf fmt "%a=%a" (pp pp_var) term pp_var var)
+        (fun fmt (term, var) -> F.fprintf fmt "%a=%a" (pp pp_var) term pp_var var)
         fmt m
       
     let yojson_of_t_ m = `List (List.map (bindings m) ~f:[%yojson_of: t * Var.t])
@@ -1454,19 +1462,18 @@ module Term = struct
     include Caml.Set.Make (struct
                 type nonrec t = t [@@deriving compare]
               end)
-
-    (* type t_ = t [@@deriving compare, equal] *)
-
-    let pp_with_pp_var pp_var fmt atoms =
+          
+    let pp_with_pp_var ?filter pp_var fmt atoms =
       if is_empty atoms then F.pp_print_string fmt "(empty)"
       else
         Pp.collection ~sep:"∧"
           ~fold:(IContainer.fold_of_pervasives_set_fold fold)
-          ~pp_item:(fun fmt atom -> F.fprintf fmt "{%a}" (pp_no_paren pp_var) atom)
+          ?filter
+          (fun fmt atom -> F.fprintf fmt "{%a}" (pp_no_paren pp_var) atom)
           fmt atoms
 
     let yojson_of_t atoms = `List (List.map (elements atoms) ~f:yojson_of_t)
-      
+                          
   end
                 
 end
@@ -1474,13 +1481,13 @@ end
 (** Basically boolean terms, used to build the part of a formula that is not equalities between
     linear arithmetic. *)
 module Atom = struct
+
   type t =
     | LessEqual of Term.t * Term.t
     | LessThan of Term.t * Term.t
     | Equal of Term.t * Term.t
     | NotEqual of Term.t * Term.t
-
-                             (* | Bitmasked of Term.t * Term.t *)
+ (* | Bitmasked of Term.t * Term.t *)
                              
   [@@deriving compare, equal, yojson_of]
 
@@ -1904,13 +1911,12 @@ module Atom = struct
       type nonrec t = t [@@deriving compare]
     end)
 
-    let pp_with_pp_var pp_var fmt atoms =
-      if is_empty atoms then F.pp_print_string fmt "(empty)"
-      else
-        Pp.collection ~sep:"∧"
-          ~fold:(IContainer.fold_of_pervasives_set_fold fold)
-          ~pp_item:(fun fmt atom -> F.fprintf fmt "{%a}" (pp_with_pp_var pp_var) atom)
-          fmt atoms
+    let pp_with_pp_var ?filter pp_var fmt atoms =
+      Pp.collection ~sep:"∧"
+        ~fold:(IContainer.fold_of_pervasives_set_fold fold)
+        ?filter
+        (fun fmt atom -> F.fprintf fmt "{%a}" (pp_with_pp_var pp_var) atom)
+        fmt atoms
 
 
     let yojson_of_t atoms = `List (List.map (elements atoms) ~f:yojson_of_t)
@@ -1993,7 +1999,7 @@ module TermDomainOrRange = struct
     else
       Pp.collection ~sep:","
         ~fold:(IContainer.fold_of_pervasives_set_fold Set.fold)
-        ~pp_item:(fun fmt (term, domain_or_range) ->
+        (fun fmt (term, domain_or_range) ->
           ( match domain_or_range with
           | Domain ->
               F.pp_print_char fmt 'd'
@@ -2010,7 +2016,7 @@ module TermMapOccurrences = MakeOccurrences (TermDomainOrRange)
 module AtomMapOccurrences = MakeOccurrences (struct
   include Atom
 
-  let pp_set = Atom.Set.pp_with_pp_var
+  let pp_set fmt atoms = Atom.Set.pp_with_pp_var fmt atoms
 end)
 
 module InstanceOf = struct
@@ -2039,7 +2045,7 @@ module InstanceOf = struct
   let pp_with_pp_var pp_var fmt m =
     Pp.collection ~sep:"∧"
       ~fold:(IContainer.fold_of_pervasives_map_fold Var.Map.fold)
-      ~pp_item:(fun fmt (var, inf) -> F.fprintf fmt "%a:%a" pp_var var pp_instance_fact inf)
+      (fun fmt (var, inf) -> F.fprintf fmt "%a:%a" pp_var var pp_instance_fact inf)
       fmt m
 
 
@@ -2051,6 +2057,45 @@ module InstanceOf = struct
         PatternMatch.is_subtype tenv n1 n2
     | _, _ ->
         Typ.equal t1 t2
+
+
+  let is_final t =
+    let tenv = PulseContext.tenv_exn () in
+    match Typ.name t with
+    | None ->
+        false
+    | Some (ErlangType _) ->
+        true
+        (* TODO: Actually wrong for Any, if we ever get that, and maybe there are subtypes of bool?? *)
+    | Some tn -> (
+      match Tenv.lookup tenv tn with None -> false | Some {annots} -> Annot.Item.is_final annots )
+
+
+  (* The following are a bit conservative, as they currently only return true for Hack types
+     TODO: check soundness of reasoning for other languages and extend the logic
+  *)
+  let is_concrete_or_abstract t =
+    let tenv = PulseContext.tenv_exn () in
+    match Typ.name t with
+    | None ->
+        false
+    | Some (ErlangType _) ->
+        true
+    | Some (JavaClass _ as tn) -> (
+      match Tenv.lookup tenv tn with None -> false | Some str -> Struct.is_not_java_interface str )
+    | Some (HackClass _ as tn) -> (
+      match Tenv.lookup tenv tn with None -> false | Some str -> Struct.is_hack_class str )
+    | _ ->
+        false
+
+
+  let is_abstract t =
+    let tenv = PulseContext.tenv_exn () in
+    match Typ.name t with
+    | None ->
+        false
+    | Some tn -> (
+      match Tenv.lookup tenv tn with None -> false | Some str -> Struct.is_hack_abstract_class str )
 end
 
 module Formula = struct
@@ -2175,6 +2220,13 @@ module Formula = struct
 
     val subst_term_eqs : Var.t Var.Map.t -> t -> Term.VarMap.t_
 
+    val pp_term_eqs_with_pp_var :
+         ?filter:(Term.t -> Var.t -> bool)
+      -> (F.formatter -> Var.t -> unit)
+      -> F.formatter
+      -> t
+      -> unit
+
     (* {2 mutations} *)
 
     val add_const_eq : Var.t -> Term.t -> t -> t SatUnsat.t
@@ -2183,11 +2235,11 @@ module Formula = struct
 
     val remove_const_eq : Var.t -> t -> t
 
-    val add_dynamic_type : Var.t -> Typ.t -> ?source_file:SourceFile.t -> t -> t SatUnsat.t
+    val add_dynamic_type : Var.t -> Typ.t -> ?source_file:SourceFile.t -> t -> t * bool
 
-    val add_below : Var.t -> Typ.t -> t -> t SatUnsat.t
+    val add_below : Var.t -> Typ.t -> t -> t * bool
 
-    val add_notbelow : Var.t -> Typ.t -> t -> t SatUnsat.t
+    val add_notbelow : Var.t -> Typ.t -> t -> t * bool
 
     val copy_type_constraints : Var.t -> Var.t -> t -> t
 
@@ -2369,7 +2421,7 @@ module Formula = struct
         phi Term.VarMap.empty
 
 
-    let pp_term_eqs_with_pp_var pp_var fmt phi =
+    let pp_term_eqs_with_pp_var ?(filter = fun _ _ -> true) pp_var fmt phi =
       (* Change this to get the raw data in the map, otherwise by default print what clients would
          get out of the map. The only difference is in the range of the map: whether variables get
          through [get_repr] or not before being printed. *)
@@ -2381,10 +2433,11 @@ module Formula = struct
         F.pp_open_hvbox fmt 0 ;
         term_eqs_iter
           (fun term var ->
-            F.pp_open_hbox fmt () ;
-            if not !is_first then F.pp_print_string fmt "∧" ;
-            is_first := false ;
-            F.fprintf fmt "%a=%a@]" (Term.pp pp_var) term pp_var var )
+            if filter term var then (
+              F.pp_open_hbox fmt () ;
+              if not !is_first then F.pp_print_string fmt "∧" ;
+              is_first := false ;
+              F.fprintf fmt "%a=%a@]" (Term.pp pp_var) term pp_var var ) )
           phi ;
         F.pp_close_box fmt ()
 
@@ -2472,84 +2525,113 @@ module Formula = struct
       {phi with const_eqs= Var.Map.remove v phi.const_eqs}
 
 
+    (** We're now tracking nullability more precisely. If the language includes nulls and we have
+        apparently contradictory type information then, instead of immediately returning [Unsat], we
+        want to add an assertion that the value must be null (which inhabits all (nullable) types).
+        But at this low level in the solver stack (the [Unsafe] module), we can't yet decide if the
+        resulting state is [Unsat]. So we return an extra boolean that indicates whether or not a
+        higher-level wrapper should add, and compute the consequences of, that assertion. See
+        [and_dynamic_type] further down (in the [Normalizer] module) for such a wrapper around
+        [add_dynamic_type] *)
     let add_dynamic_type v t ?source_file phi =
       match Var.Map.find_opt v phi.type_constraints with
       | None ->
-          Sat
-            { phi with
+          ( { phi with
               type_constraints=
                 Var.Map.add v (InstanceOf.Known {typ= t; source_file}) phi.type_constraints }
+          , false )
       | Some (InstanceOf.Known {typ= t'}) ->
-          if Typ.equal t t' then Sat phi else Unsat
+          if Typ.equal t t' then (phi, false) else (phi, true)
       | Some (InstanceOf.Unknown {below; notbelow}) ->
-          if List.exists below ~f:(fun t' -> InstanceOf.is_subtype t t' |> not) then Unsat
-          else if List.exists notbelow ~f:(fun t' -> InstanceOf.is_subtype t t') then Unsat
+          if List.exists below ~f:(fun t' -> InstanceOf.is_subtype t t' |> not) then (phi, true)
+          else if List.exists notbelow ~f:(fun t' -> InstanceOf.is_subtype t t') then (phi, true)
           else
-            Sat
-              { phi with
+            ( { phi with
                 type_constraints=
                   Var.Map.add v (InstanceOf.Known {typ= t; source_file= None}) phi.type_constraints
               }
+            , false )
 
 
     let add_below v t phi =
       Debug.p "add_below %a %a@\n" Var.pp v (Typ.pp_full Pp.text) t ;
-      match Var.Map.find_opt v phi.type_constraints with
-      | None ->
-          (* TODO: case where t is final -> add_dynamic_type v t instead *)
-          Debug.p "not found so adding below constraint\n" ;
-          let phi =
-            { phi with
-              type_constraints=
-                Var.Map.add v (InstanceOf.Unknown {below= [t]; notbelow= []}) phi.type_constraints
-            }
-          in
-          Debug.p "new phi is %a@\n" (pp_with_pp_var Var.pp) phi ;
-          Sat phi
-      | Some (InstanceOf.Known {typ= t'}) ->
-          if InstanceOf.is_subtype t' t then Sat phi else Unsat
-      | Some (InstanceOf.Unknown {below; notbelow}) ->
-          (* new below constraint is redundant with an existing one *)
-          if List.exists below ~f:(fun t' -> InstanceOf.is_subtype t' t) then Sat phi
-            (* new below constraint is incompatible with a notbelow one *)
-          else if List.exists notbelow ~f:(fun t' -> InstanceOf.is_subtype t t') then Unsat
-            (* TODO: We omit rest of interesting logic for now *)
-          else
-            Sat
+      if InstanceOf.is_final t then
+        if InstanceOf.is_abstract t then (
+          (* Not sure this ever actually happens *)
+          Debug.p "type is abstract and final so v=0" ;
+          (phi, true) )
+        else (
+          Debug.p "type is final so adding as known dynamic type" ;
+          add_dynamic_type v t phi )
+      else
+        match Var.Map.find_opt v phi.type_constraints with
+        | None ->
+            Debug.p "not found so adding below constraint\n" ;
+            let phi =
               { phi with
                 type_constraints=
-                  Var.Map.add v
-                    (InstanceOf.Unknown {below= t :: below; notbelow})
-                    phi.type_constraints }
+                  Var.Map.add v (InstanceOf.Unknown {below= [t]; notbelow= []}) phi.type_constraints
+              }
+            in
+            Debug.p "new phi is %a@\n" (pp_with_pp_var Var.pp) phi ;
+            (phi, false)
+        | Some (InstanceOf.Known {typ= t'}) ->
+            if InstanceOf.is_subtype t' t then (phi, false) else (phi, true)
+        | Some (InstanceOf.Unknown {below; notbelow}) ->
+            (* new below constraint is redundant with an existing one *)
+            if List.exists below ~f:(fun t' -> InstanceOf.is_subtype t' t) then (phi, false)
+              (* New below constraint is incompatible with a notbelow one.
+                 Note that once we know the value is zero, we shouldn't care
+                 any more what type_constraints says about it, so we don't
+                 bother to update, or do any further checks
+              *)
+            else if List.exists notbelow ~f:(fun t' -> InstanceOf.is_subtype t t') then (phi, true)
+            else if
+              InstanceOf.is_concrete_or_abstract t
+              && List.exists below ~f:(fun t' ->
+                     InstanceOf.is_concrete_or_abstract t'
+                     && (not (InstanceOf.is_subtype t t'))
+                     && not (InstanceOf.is_subtype t' t) )
+            then (
+              Debug.p "inconsistent concrete upper bounds %a and <something>, zeroing"
+                (Typ.pp Pp.text) t ;
+              (phi, true) )
+            else
+              ( { phi with
+                  type_constraints=
+                    Var.Map.add v
+                      (InstanceOf.Unknown {below= t :: below; notbelow})
+                      phi.type_constraints }
+              , false )
 
 
     let add_notbelow v t phi =
       match Var.Map.find_opt v phi.type_constraints with
       | None ->
           Debug.p "couldn't find %a in type constraints, writing singleton notbelow" Var.pp v ;
-          Sat
-            { phi with
+          ( { phi with
               type_constraints=
                 Var.Map.add v (InstanceOf.Unknown {below= []; notbelow= [t]}) phi.type_constraints
             }
+          , false )
       | Some (InstanceOf.Known {typ= t'}) ->
-          if InstanceOf.is_subtype t' t then Unsat else Sat phi
+          if InstanceOf.is_subtype t' t then (phi, true) else (phi, false)
       | Some (InstanceOf.Unknown {below; notbelow}) ->
           (* new notbelow constraint is redundant with an existing one *)
           if List.exists notbelow ~f:(fun t' -> InstanceOf.is_subtype t t') then (
             Debug.p "adding %a to notbelow is redundant" (Typ.pp_full Pp.text) t ;
-            Sat phi (* new notbelow constraint is incompatible with a below one *) )
+            (phi, false) )
           else if List.exists below ~f:(fun t' -> InstanceOf.is_subtype t' t) then (
             Debug.p "adding %a to notbelow is inconsistent" (Typ.pp_full Pp.text) t ;
-            Unsat (* TODO: We omit rest of interesting logic for now *) )
+            (phi, true) )
           else (
             Debug.p "actually going ahead and adding %a to notbelow" (Typ.pp_full Pp.text) t ;
-            Sat
-              { phi with
+            ( { phi with
                 type_constraints=
                   Var.Map.add v
                     (InstanceOf.Unknown {below; notbelow= t :: notbelow})
-                    phi.type_constraints } )
+                    phi.type_constraints }
+            , false ) )
 
 
     let copy_type_constraints v_src v_target phi =
@@ -2856,6 +2938,13 @@ module Formula = struct
 
     val and_atom : Atom.t -> t * new_eqs -> bool -> (t * new_eqs) SatUnsat.t
 
+    val and_dynamic_type :
+      Var.t -> Typ.t -> ?source_file:SourceFile.t -> t * new_eqs -> (t * new_eqs) SatUnsat.t
+
+    val and_below : Var.t -> Typ.t -> t * new_eqs -> (t * new_eqs) SatUnsat.t
+
+    val and_notbelow : Var.t -> Typ.t -> t * new_eqs -> (t * new_eqs) SatUnsat.t
+
     val propagate_atom : Atom.t -> t * new_eqs -> (t * new_eqs) SatUnsat.t
 
     (** [and_atom atom (phi, new_eqs)] is
@@ -2906,23 +2995,28 @@ module Formula = struct
     let normalize_restricted phi l = normalize_linear_ phi phi.tableau l
 
     let normalize_var_const phi t =
-      Term.subst_variables t ~f:(fun v ->
-          let v_canon = (get_repr phi v :> Var.t) in
-          match Var.Map.find_opt v_canon phi.linear_eqs with
-          | None -> (
-            match Var.Map.find_opt v_canon phi.const_eqs with
-            | None ->
-                VarSubst v_canon
-            | Some c ->
-                ConstantSubst (c, Some v_canon) )
-          | Some l -> (
-            match LinArith.get_as_const l with
-            | None ->
-                (* OPTIM: don't make the term bigger *) VarSubst v_canon
-            | Some q ->
-                (* replace vars by constants when available to possibly trigger further
-                   simplifications in atoms. This is not actually needed for [term_eqs]. *)
-                QSubst q ) )
+      L.d_printfln "normalize_var_const initial term is %a" (Term.pp Var.pp) t ;
+      let t' =
+        Term.subst_variables t ~f:(fun v ->
+            let v_canon = (get_repr phi v :> Var.t) in
+            match Var.Map.find_opt v_canon phi.linear_eqs with
+            | None -> (
+              match Var.Map.find_opt v_canon phi.const_eqs with
+              | None ->
+                  VarSubst v_canon
+              | Some c ->
+                  ConstantSubst (c, Some v_canon) )
+            | Some l -> (
+              match LinArith.get_as_const l with
+              | None ->
+                  (* OPTIM: don't make the term bigger *) VarSubst v_canon
+              | Some q ->
+                  (* replace vars by constants when available to possibly trigger further
+                     simplifications in atoms. This is not actually needed for [term_eqs]. *)
+                  QSubst q ) )
+      in
+      L.d_printfln "normalized term is %a" (Term.pp Var.pp) t' ;
+      t'
 
 
     let add_lin_eq_to_new_eqs v l new_eqs =
@@ -2995,7 +3089,7 @@ module Formula = struct
     (** add [t = v] to [phi.term_eqs] and resolves consequences of that new fact; don't use directly
         as it doesn't do any checks on what else should be done about [t = v] *)
     and add_term_eq_and_solve_new_eq_opt ~fuel new_eqs t v phi =
-      Debug.p "add_term_eq_and_merge_new_eq_opt %a->%a@\n" (Term.pp Var.pp) t Var.pp v ;
+      Debug.p "add_term_eq_and_solve_new_eq_opt %a->%a@\n" (Term.pp Var.pp) t Var.pp v ;
       let phi, new_eq_opt = add_term_eq t v phi in
       discharge_new_eq_opt ~fuel new_eqs v new_eq_opt phi
 
@@ -3371,13 +3465,20 @@ module Formula = struct
                           let* phi, new_eqs = phi_new_eqs_sat in
                           (* If t is an IsInstanceOf formula, and we've just found its truth value, propagate
                              the information into the below/notbelow type constraints on the relevant
-                             variable. *)
-                          let* phi =
+                             variable, and also add >0 facts where appropriate *)
+                          let* phi, atoms_opt1, new_eqs =
                             match Term.get_as_isinstanceof t with
-                            | Some (var, typ) ->
+                            | Some (var, typ, nullable) ->
                                 if is_neq_zero phi tx then (
                                   Debug.p "prop in term_eq adding below\n" ;
-                                  add_below var typ phi )
+                                  let* phi, new_eqs = and_below var typ (phi, new_eqs) in
+                                  let* atoms_opt1 =
+                                    if not nullable then
+                                      Atom.eval_with_normalized_terms ~is_neq_zero:(is_neq_zero phi)
+                                        (LessThan (Const Q.zero, Var var))
+                                    else Sat None
+                                  in
+                                  Sat (phi, atoms_opt1, new_eqs) )
                                 else if
                                   match tx with
                                   | Linear l ->
@@ -3388,19 +3489,27 @@ module Formula = struct
                                       false
                                 then (
                                   Debug.p "prop in term_eq adding notbelow\n" ;
-                                  add_notbelow var typ phi )
+                                  let* phi, new_eqs = and_notbelow var typ (phi, new_eqs) in
+                                  let* atoms_opt1 =
+                                    if nullable then
+                                      Atom.eval_with_normalized_terms ~is_neq_zero:(is_neq_zero phi)
+                                        (LessThan (Const Q.zero, Var var))
+                                    else Sat None
+                                  in
+                                  Sat (phi, atoms_opt1, new_eqs) )
                                 else (
                                   Debug.p "%a is neither zero nor non-zero, leaving phi alone\n"
                                     (Term.pp Var.pp) tx ;
-                                  Sat phi )
+                                  Sat (phi, None, new_eqs) )
                             | None ->
-                                Sat phi
+                                Sat (phi, None, new_eqs)
                           in
                           (* Now check if the new equality on [x] introduced contradictions in [t=x] or new atoms *)
-                          let* atoms_opt =
+                          let* atoms_opt2 =
                             Atom.eval_with_normalized_terms ~is_neq_zero:(is_neq_zero phi)
                               (Equal (t, Term.simplify_linear tx))
                           in
+                          let atoms_opt = Option.merge atoms_opt1 atoms_opt2 ~f:List.append in
                           match atoms_opt with
                           | None ->
                               (* need to add back that [x] occurs in [term_eqs(t)] since we removed [x] from
@@ -3563,17 +3672,26 @@ module Formula = struct
                       phi_new_eqs_sat
                   | Range | DomainAndRange -> (
                       Debug.p "range or both\n" ;
-                      let* phi =
+                      let* phi, atoms_opt1, new_eqs =
                         match Term.get_as_isinstanceof t with
-                        | Some (var, typ) ->
-                            add_below var typ phi
+                        | Some (var, typ, nullable) ->
+                            Debug.p "prop in term_eq adding below\n" ;
+                            let* phi, new_eqs = and_below var typ (phi, new_eqs) in
+                            let* atoms_opt1 =
+                              if not nullable then
+                                Atom.eval_with_normalized_terms ~is_neq_zero:(is_neq_zero phi)
+                                  (LessThan (Const Q.zero, Var var))
+                              else Sat None
+                            in
+                            Sat (phi, atoms_opt1, new_eqs)
                         | None ->
-                            Sat phi
+                            Sat (phi, None, new_eqs)
                       in
-                      let* atoms_opt =
+                      let* atoms_opt2 =
                         Atom.eval_with_normalized_terms ~is_neq_zero:(is_neq_zero phi)
                           (Equal (t, Var v))
                       in
+                      let atoms_opt = Option.merge atoms_opt1 atoms_opt2 ~f:List.append in
                       match atoms_opt with
                       | None ->
                           Sat (phi, new_eqs)
@@ -3605,8 +3723,18 @@ module Formula = struct
     and solve_lin_ineq new_eqs l1 l2 phi =
       (* [l1 ≤ l2] becomes [(l2-l1) ≥ 0], encoded as [l = w] with [w] a fresh restricted variable *)
       let l = LinArith.subtract l2 l1 |> normalize_linear phi |> normalize_restricted phi in
-      let w = Var.mk_fresh_restricted () in
-      with_base_fuel (solve_tableau_eq new_eqs w l phi)
+      let l_c_sign = Q.sign (LinArith.get_constant_part l) in
+      let l_restricted = LinArith.is_restricted l in
+      match LinArith.classify_minimized_maximized l with
+      | (`Minimized | `Constant) when l_restricted && l_c_sign >= 0 ->
+          Debug.p "Skip adding %a≥0: known@\n" (LinArith.pp Var.pp) l ;
+          Sat (phi, new_eqs) (* already trivially known: don't add to formula to avoid divergence *)
+      | (`Maximized | `Constant) when l_restricted && l_c_sign < 0 ->
+          Debug.p "Skip adding %a≥0: unsat@\n" (LinArith.pp Var.pp) l ;
+          Unsat
+      | _ ->
+          let w = Var.mk_fresh_restricted () in
+          with_base_fuel (solve_tableau_eq new_eqs w l phi)
 
 
     and solve_lin_eq new_eqs t1 t2 phi =
@@ -3620,6 +3748,7 @@ module Formula = struct
        or is [normalize_atom] already just as strong? *)
     and normalize_atom (phi : t) (atom : Atom.t) =
       let atom' = Atom.map_terms atom ~f:(fun t -> normalize_var_const phi t) in
+      Debug.p "Normalizer.mormalize_atom atom'=%a" (Atom.pp_with_pp_var Var.pp) atom' ;
       Atom.eval ~is_neq_zero:(is_neq_zero phi) atom'
 
 
@@ -3681,6 +3810,41 @@ module Formula = struct
     and and_atom atom (phi, new_eqs) add_term =
       (* L.debug Analysis Quiet "JV: Calling and_normalized_atoms from and_atom \n"; *)
       normalize_atom phi atom >>= and_normalized_atoms (phi, new_eqs) ~orig_atom:[atom] ~add_term:add_term
+
+    and and_below v t (phi, new_eqs) =
+      let phi, should_zero = add_below v t phi in
+      if should_zero then
+        if Language.curr_language_is Erlang then Unsat
+        else
+          let* _, phi_neweqs = and_atom (Atom.Equal (Var v, Term.zero)) (phi, new_eqs) false in
+          Sat phi_neweqs
+      else Sat (phi, new_eqs)
+
+
+    and and_notbelow v t (phi, new_eqs) =
+      let phi, should_zero = add_notbelow v t phi in
+      if should_zero then
+        if Language.curr_language_is Erlang then Unsat
+        else
+          let* _, phi_neweqs = and_atom (Atom.Equal (Var v, Term.zero)) (phi, new_eqs) false in
+          Sat phi_neweqs
+      else Sat (phi, new_eqs)
+
+
+    (* [and_dynamic_type] wraps [add_dynamic_type]. In particular, if the call to the former
+        returns [(phi, true)], then [and_dynamic_type] also adds and propagates the assertion that
+        the value to which we added the type must actually be null.
+    *)
+    let and_dynamic_type v t ?source_file (phi, new_eqs) =
+      let phi, should_zero = add_dynamic_type v t ?source_file phi in
+      if should_zero then
+        if Language.curr_language_is Erlang then Unsat
+        else
+          (* Should use one of the other operations here? and_var_linarith, perhaps? *)
+          let+ _, phi_neweqs = and_atom (Atom.Equal (Var v, Term.zero)) (phi, new_eqs) false in
+          phi_neweqs
+      else Sat (phi, new_eqs)
+
 
     let and_var_term ~fuel v t (phi, new_eqs) =
       (* L.debug Analysis Quiet "JV: and_var_term: %a=%a in %a,@;new_eqs=%a@\n" Var.pp v (Term.pp Var.pp) t
@@ -3767,8 +3931,11 @@ let termset_is_empty (conds: Term.Set.t) = (Term.Set.is_empty conds)
 *)
 
 let pp_with_pp_var pp_var fmt {conditions; phi} =
-  F.fprintf fmt "@[<hv>conditions: %a@;phi: %a@] \n"
-    (Atom.Set.pp_with_pp_var pp_var) conditions
+  let pp_conditions fmt conditions =
+    if Atom.Set.is_empty conditions then F.pp_print_string fmt "(empty)"
+    else Atom.Set.pp_with_pp_var pp_var fmt conditions
+  in
+  F.fprintf fmt "@[<hv>conditions: %a@;phi: %a@]" pp_conditions conditions
     (Formula.pp_with_pp_var pp_var) phi
 
 
@@ -4074,7 +4241,8 @@ module DynamicTypes = struct
         None
 
 
-  let evaluate_instanceof formula v typ =
+  let evaluate_instanceof formula v typ _nullable =
+    (* TODO: exploit nullable here *)
     match Var.Map.find_opt v formula.phi.type_constraints with
     | None ->
         None
@@ -4098,8 +4266,8 @@ module DynamicTypes = struct
   let really_simplify formula =
     let simplify_term (t : Term.t) =
       match t with
-      | IsInstanceOf (v, typ) -> (
-        match evaluate_instanceof formula v typ with None -> t | Some t' -> t' )
+      | IsInstanceOf {var= v; typ; nullable} -> (
+        match evaluate_instanceof formula v typ nullable with None -> t | Some t' -> t' )
       | t ->
           t
     in
@@ -4158,18 +4326,14 @@ module DynamicTypes = struct
   let and_callee_type_constraints v type_constraints_foreign (phi, new_eqs) =
     match type_constraints_foreign with
     | InstanceOf.Known {typ= t; source_file} ->
-        let+ phi = Formula.add_dynamic_type v t ?source_file phi in
-        (phi, new_eqs)
+        Formula.Normalizer.and_dynamic_type v t ?source_file (phi, new_eqs)
     | InstanceOf.Unknown {below; notbelow} ->
-        let* phi =
-          PulseSatUnsat.list_fold below ~init:phi ~f:(fun phi upper_bound ->
-              Formula.add_below v upper_bound phi )
+        let* phi, new_eqs =
+          PulseSatUnsat.list_fold below ~init:(phi, new_eqs) ~f:(fun (phi, new_eqs) upper_bound ->
+              Formula.Normalizer.and_below v upper_bound (phi, new_eqs) )
         in
-        let* phi =
-          PulseSatUnsat.list_fold notbelow ~init:phi ~f:(fun phi not_upper ->
-              Formula.add_notbelow v not_upper phi )
-        in
-        Sat (phi, new_eqs)
+        PulseSatUnsat.list_fold notbelow ~init:(phi, new_eqs) ~f:(fun (phi, new_eqs) not_upper ->
+            Formula.Normalizer.and_notbelow v not_upper (phi, new_eqs) )
 end
 
 type dynamic_type_data = InstanceOf.dynamic_type_data =
@@ -4177,39 +4341,32 @@ type dynamic_type_data = InstanceOf.dynamic_type_data =
 
 let get_dynamic_type = DynamicTypes.get_dynamic_type
 
-let add_dynamic_type_unsafe v t ?source_file location {conditions; phi} =
-  match Formula.add_dynamic_type v t ?source_file phi with
-  | Sat phi ->
-      {conditions; phi}
-  | _ ->
-      (* It seems this "can't happen" case does, in fact, sometimes happen
-         Just return original phi and log to html and scuba
-      *)
+let add_dynamic_type_unsafe v t ?source_file _location {conditions; phi} =
+  let phi, should_zero = Formula.add_dynamic_type v t ?source_file phi in
+  ( if not should_zero then
+      (* This situation corresponds (roughly) to the ones in which we'd previously have
+         returned Unsat (which was not supposed to happen in calls to the unsafe version)
+         For now we keep the logging and default behaviour
+         TODO: revisit this *)
       let prev_fact = Var.Map.find_opt v phi.type_constraints in
       L.d_printfln "failed to add dynamic type %a to value %a. Previous constraints were %a\n"
         (Typ.pp_full Pp.text) t PulseAbstractValue.pp v
         (Pp.option InstanceOf.pp_instance_fact)
-        prev_fact ;
-      ScubaLogging.log_message_with_location ~label:"add_dynamic_type_unsafe"
-        ~loc:(F.asprintf "%a" Location.pp_file_pos location)
-        ~message:"Failed to add inconsistent dynamic type." ;
-      {conditions; phi}
+        prev_fact ) ;
+  {conditions; phi}
 
 
 let copy_type_constraints v_src v_target {conditions; phi} =
   {conditions; phi= Formula.copy_type_constraints v_src v_target phi}
 
 
-let and_equal_instanceof v1 v2 t formula =
-  let* formula, new_eqs =
-    match DynamicTypes.evaluate_instanceof formula v2 t with
-    | None ->
-        Sat (formula, RevList.empty)
-    | Some bool_term ->
-        and_atom (Atom.equal (Var v1) bool_term) formula false
+let and_equal_instanceof v1 v2 t ~nullable formula =
+  let+ formula, new_eqs' =
+    and_atom (Atom.equal (Var v1) (IsInstanceOf {var= v2; typ= t; nullable})) formula false
   in
-  let* formula, new_eqs' = and_atom (Atom.equal (Var v1) (IsInstanceOf (v2, t))) formula false in
-  Sat (formula, RevList.append new_eqs new_eqs')
+  Debug.p "formula is %a" pp formula ;
+  (formula, new_eqs')
+
 
 let normalize ?location formula =
   (* Sat (formula, RevList.empty) *)
@@ -4218,9 +4375,11 @@ let normalize ?location formula =
   DynamicTypes.simplify ?location formula
 
 
-let and_dynamic_type_is v t ?source_file formula =
-  let+ phi = Formula.add_dynamic_type v t ?source_file formula.phi in
-  ({formula with phi}, RevList.empty)
+let and_dynamic_type v t ?source_file formula =
+  let+ phi, new_eqns =
+    Formula.Normalizer.and_dynamic_type v t ?source_file (formula.phi, RevList.empty)
+  in
+  ({formula with phi}, new_eqns)
 
 
 (** translate each variable in [formula_foreign] according to [f] then incorporate each fact into
@@ -4738,3 +4897,62 @@ let absval_of_string formula s =
         and_equal (AbstractValueOperand v) (ConstOperand (Cstr s)) formula |> assert_sat |> fst
       in
       (formula, v)
+
+
+type term = Term.t
+
+let explain_as_term formula x =
+  Option.first_some
+    (as_constant_q formula x |> Option.map ~f:(fun q -> Term.Const q))
+    (as_constant_string formula x |> Option.map ~f:(fun s -> Term.String s))
+
+
+let pp_term = Term.pp
+
+let pp_formula_explained pp_var fmt {phi} =
+  let ({ Formula.var_eqs= _
+       ; const_eqs= _
+       ; type_constraints
+       ; linear_eqs
+       ; term_eqs= _ (* still get printed but the API doesn't use [term_eqs] directly *)
+       ; tableau
+       ; intervals= _
+       ; atoms
+       ; linear_eqs_occurrences= _
+       ; tableau_occurrences= _
+       ; term_eqs_occurrences= _
+       ; atoms_occurrences= _
+       ; term_conditions= _
+       ; term_conditions2= _ } [@warning "+missing-record-field-pattern"] ) =
+    phi
+  in
+  let is_map_non_empty m = not (Var.Map.is_empty m) in
+  let should_print_linear linear = Option.is_none @@ LinArith.get_as_const linear in
+  let should_print_term_eq term _ =
+    match Term.linearize term with Term.Linear _ -> false | _ -> true
+  in
+  let should_print_atom atom =
+    match atom with Atom.Equal (IsInt _, Const _) -> false | _ -> true
+  in
+  let pp_if should_print pp fmt x = if should_print x then F.fprintf fmt "@;∧ %a" pp x in
+  pp_if is_map_non_empty (InstanceOf.pp_with_pp_var pp_var) fmt type_constraints ;
+  pp_if
+    (Var.Map.exists (fun _ linear -> should_print_linear linear))
+    (pp_var_map
+       ~filter:(fun (_, linear) -> should_print_linear linear)
+       ~arrow:" = " (LinArith.pp pp_var) pp_var )
+    fmt linear_eqs ;
+  pp_if is_map_non_empty (Tableau.pp pp_var) fmt tableau ;
+  pp_if
+    (Formula.term_eqs_exists should_print_term_eq)
+    (Formula.pp_term_eqs_with_pp_var ~filter:should_print_term_eq pp_var)
+    fmt phi ;
+  pp_if
+    (fun atoms -> Atom.Set.exists should_print_atom atoms)
+    (Atom.Set.pp_with_pp_var ~filter:should_print_atom pp_var)
+    fmt atoms
+
+
+let pp_conditions_explained pp_var fmt {conditions} =
+  if not (Atom.Set.is_empty conditions) then
+    F.fprintf fmt "@;∧ %a" (Atom.Set.pp_with_pp_var pp_var) conditions

@@ -29,6 +29,8 @@ module Syntax : sig
 
   val unreachable : 'a model_monad
 
+  val report : Diagnostic.t -> unit model_monad
+
   val list_fold :
     'a list -> init:'accum -> f:('accum -> 'a -> 'accum model_monad) -> 'accum model_monad
 
@@ -115,8 +117,6 @@ module Syntax : sig
   val eval_access : ?desc:string -> access_mode -> aval -> Access.t -> aval model_monad
 
   val eval_deref_access : access_mode -> aval -> Access.t -> aval model_monad
-
-  val and_dynamic_type_is : aval -> Typ.t -> unit model_monad
 
   val get_dynamic_type :
     ask_specialization:bool -> aval -> Formula.dynamic_type_data option model_monad

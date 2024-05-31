@@ -52,6 +52,34 @@ let is_const_version_available tenv pname =
                 List.exists ~f:(is_const_version pname_method) methods ) )
 
 
+let matches_iter =
+  QualifiedCppName.Match.of_fuzzy_qual_names
+    [ "std::__detail::_Node_iterator"
+    ; "std::__wrap_iter"
+    ; "std::_Rb_tree_iterator"
+    ; "__gnu_cxx::__normal_iterator" ]
+
+
+module GlobalForStats = struct
+  type t = {node_is_not_stuck: bool; one_call_is_stuck: bool}
+
+  let empty = {node_is_not_stuck= false; one_call_is_stuck= false}
+
+  let global = ref empty
+
+  let () = AnalysisGlobalState.register_ref ~init:(fun () -> empty) global
+
+  let init_before_call () = global := {!global with node_is_not_stuck= false}
+
+  let is_node_not_stuck () = !global.node_is_not_stuck
+
+  let node_is_not_stuck () = global := {!global with node_is_not_stuck= true}
+
+  let is_one_call_stuck () = !global.one_call_is_stuck
+
+  let one_call_is_stuck () = global := {!global with one_call_is_stuck= true}
+end
+
 let unknown_call tenv ({PathContext.timestamp} as path) call_loc (reason : CallEvent.t)
     callee_pname_opt ~ret ~actuals ~formals_opt astate0 =
   let hist =
@@ -67,13 +95,6 @@ let unknown_call tenv ({PathContext.timestamp} as path) call_loc (reason : CallE
      same value for the same inputs *)
   let is_functional = ref true in
   let should_havoc actual_typ formal_typ_opt =
-    let matches_iter =
-      QualifiedCppName.Match.of_fuzzy_qual_names
-        [ "std::__detail::_Node_iterator"
-        ; "std::__wrap_iter"
-        ; "std::_Rb_tree_iterator"
-        ; "__gnu_cxx::__normal_iterator" ]
-    in
     match actual_typ.Typ.desc with
     | _ when not Config.pulse_havoc_arguments ->
         `DoNotHavoc
@@ -305,6 +326,7 @@ let apply_callee tenv ({PathContext.timestamp} as path) ~caller_proc_desc callee
   | AbortProgram astate
   | ExitProgram astate
   | LatentAbortProgram {astate}
+  | LatentSpecializedTypeIssue {astate}
   | LatentInvalidAccess {astate} ->
       map_call_result astate ~f:(fun _return_val_opt (subst, hist_map) astate_post_call ->
           let** astate_summary =
@@ -345,6 +367,17 @@ let apply_callee tenv ({PathContext.timestamp} as path) ~caller_proc_desc callee
                        ~f:(fun _ ->
                          L.die InternalError
                            "LatentAbortProgram cannot be applied to non-fatal errors" ) ) )
+          | LatentSpecializedTypeIssue {specialized_type; trace} ->
+              let trace =
+                Trace.ViaCall
+                  { f= Call callee_pname
+                  ; location= call_loc
+                  ; history= ValueHistory.epoch
+                  ; in_call= trace }
+              in
+              (* The decision to report or further propagate the issue is done
+                 at summary creation time based on the current specialization *)
+              Sat (Ok (LatentSpecializedTypeIssue {astate= astate_summary; specialized_type; trace}))
           | LatentInvalidAccess
               { address= address_callee
               ; must_be_valid= callee_access_trace, must_be_valid_reason
@@ -534,7 +567,10 @@ let add_need_dynamic_type_specialization needs execution_states =
             LatentAbortProgram {latent_abort_program with astate}
         | LatentInvalidAccess latent_invalid_access ->
             let astate = update_summary latent_invalid_access.astate in
-            LatentInvalidAccess {latent_invalid_access with astate} ) )
+            LatentInvalidAccess {latent_invalid_access with astate}
+        | LatentSpecializedTypeIssue latent_specialized_type_issue ->
+            let astate = update_summary latent_specialized_type_issue.astate in
+            LatentSpecializedTypeIssue {latent_specialized_type_issue with astate} ) )
 
 
 let maybe_dynamic_type_specialization_is_needed already_specialized contradiction astate =
@@ -578,10 +614,11 @@ let maybe_dynamic_type_specialization_is_needed already_specialized contradictio
       `UseCurrentSummary
 
 
-let call tenv path ~caller_proc_desc
-    ~(analyze_dependency : ?specialization:Specialization.t -> Procname.t -> PulseSummary.t option)
-    call_loc callee_pname ~ret ~actuals ~formals_opt ~call_kind (astate : AbductiveDomain.t)
-    ?call_flags non_disj_caller =
+let call tenv err_log path ~caller_proc_desc
+    ~(analyze_dependency :
+       ?specialization:Specialization.t -> Procname.t -> PulseSummary.t AnalysisResult.t ) call_loc
+    callee_pname ~ret ~actuals ~formals_opt ~call_kind (astate : AbductiveDomain.t) ?call_flags
+    non_disj_caller =
   let has_continue_program results =
     let f one_result =
       match one_result with
@@ -628,7 +665,12 @@ let call tenv path ~caller_proc_desc
     in
     let request_specialization specialization =
       let specialized_summary : PulseSummary.t =
-        analyze_dependency ~specialization:(Pulse specialization) callee_pname |> Option.value_exn
+        match analyze_dependency ~specialization:(Pulse specialization) callee_pname with
+        | Ok summary ->
+            summary
+        | Error no_summary ->
+            L.die InternalError "No summary found by specialization: %a"
+              AnalysisResult.pp_no_summary no_summary
       in
       let is_limit_not_reached =
         Specialization.Pulse.is_pulse_specialization_limit_not_reached
@@ -725,8 +767,8 @@ let call tenv path ~caller_proc_desc
               ~is_pulse_specialization_limit_not_reached ~specialization already_given
               specialized_pre_post_lists )
   in
-  match (analyze_dependency callee_pname : PulseSummary.t option) with
-  | Some summary ->
+  match analyze_dependency callee_pname with
+  | Ok summary ->
       let is_pulse_specialization_limit_not_reached =
         Specialization.Pulse.is_pulse_specialization_limit_not_reached summary.specialized
       in
@@ -736,8 +778,10 @@ let call tenv path ~caller_proc_desc
         iter_call ~max_iteration ~nth_iteration:0 ~is_pulse_specialization_limit_not_reached
           already_given summary.main
       in
+      let has_continue_program = has_continue_program res in
+      if has_continue_program then GlobalForStats.node_is_not_stuck () ;
       let res, non_disj =
-        if Config.pulse_force_continue && not (has_continue_program res) then (
+        if Config.pulse_force_continue && not has_continue_program then (
           (* When a function call does not have a post of type ContinueProgram, we may want to treat
              the call as unknown to make the analysis continue. This may introduce false positives but
              could uncover additional true positives too. *)
@@ -749,9 +793,23 @@ let call tenv path ~caller_proc_desc
         else (res, non_disj)
       in
       (res, non_disj, contradiction, resolution_status)
-  | None ->
+  | Error no_summary ->
       (* no spec found for some reason (unknown function, ...) *)
-      L.d_printfln_escaped "No spec found for %a@\n" Procname.pp callee_pname ;
+      L.d_printfln_escaped "No spec found for %a: %a@\n" Procname.pp callee_pname
+        AnalysisResult.pp_no_summary no_summary ;
+      let astate =
+        match no_summary with
+        | MutualRecursionCycle ->
+            let astate, trace =
+              AbductiveDomain.record_recursive_call path call_loc callee_pname astate
+            in
+            if Procname.equal callee_pname (Procdesc.get_proc_name caller_proc_desc) then
+              PulseReport.report tenv ~is_suppressed:false ~latent:false caller_proc_desc err_log
+                (MutualRecursionCycle {cycle= trace; location= call_loc}) ;
+            astate
+        | AnalysisFailed | InBlockList | UnknownProcedure ->
+            astate
+      in
       let res, (non_disj, contradiction) =
         call_aux_unknown tenv path ~caller_proc_desc call_loc callee_pname ~ret ~actuals
           ~formals_opt ~call_kind astate ?call_flags non_disj_caller

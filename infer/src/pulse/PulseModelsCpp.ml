@@ -417,7 +417,7 @@ end
 module Function = struct
   let operator_call FuncArg.{arg_payload= lambda_ptr_hist; typ} actuals : model =
    fun { path
-       ; analysis_data= {analyze_dependency; tenv; proc_desc}
+       ; analysis_data= {analyze_dependency; tenv; err_log; proc_desc}
        ; location
        ; ret= (ret_id, _) as ret } astate non_disj ->
     let ( let<*> ) x f = bind_sat_result non_disj (Sat x) f in
@@ -443,7 +443,7 @@ module Function = struct
           :: List.map actuals ~f:(fun FuncArg.{arg_payload; typ} -> (arg_payload, typ))
         in
         let astate, non_disj, _, _ =
-          PulseCallOperations.call tenv path ~caller_proc_desc:proc_desc ~analyze_dependency
+          PulseCallOperations.call tenv err_log path ~caller_proc_desc:proc_desc ~analyze_dependency
             location callee_proc_name ~ret ~actuals ~formals_opt:None ~call_kind:`ResolvedProcname
             astate non_disj
         in
@@ -662,7 +662,7 @@ end
 module GenericMapCollection = struct
   let pair_field = Fieldname.make PulseOperations.pulse_model_type "__infer_map_pair"
 
-  let pair_access = MemoryAccess.FieldAccess pair_field
+  let pair_access = Access.FieldAccess pair_field
 
   let pair_type key_t value_t =
     Typ.CppClass
@@ -674,11 +674,11 @@ module GenericMapCollection = struct
 
   let pair_first_field key_t value_t = Fieldname.make (pair_type key_t value_t) "first"
 
-  let pair_first_access key_t value_t = MemoryAccess.FieldAccess (pair_first_field key_t value_t)
+  let pair_first_access key_t value_t = Access.FieldAccess (pair_first_field key_t value_t)
 
   let pair_second_field key_t value_t = Fieldname.make (pair_type key_t value_t) "second"
 
-  let pair_second_access key_t value_t = MemoryAccess.FieldAccess (pair_second_field key_t value_t)
+  let pair_second_access key_t value_t = Access.FieldAccess (pair_second_field key_t value_t)
 
   let extract_key_and_value_types {FuncArg.typ= map_typ} =
     let rec extract_helper {Typ.desc} =
@@ -872,17 +872,18 @@ module GenericMapCollection = struct
        write_deref ~ref:it ~obj:pair
 end
 
-let get_cpp_matchers config ~model =
-  let open ProcnameDispatcher.Call in
+let get_cpp_matchers =
   let cpp_separator_regex = Str.regexp_string "::" in
-  List.filter_map
-    ~f:(fun m ->
-      match Str.split cpp_separator_regex m with
-      | [] ->
-          None
-      | first :: rest ->
-          Some (List.fold rest ~f:( &:: ) ~init:(-first) &--> model m) )
-    config
+  fun config ~model ->
+    let open ProcnameDispatcher.Call in
+    List.filter_map
+      ~f:(fun m ->
+        match Str.split cpp_separator_regex m with
+        | [] ->
+            None
+        | first :: rest ->
+            Some (List.fold rest ~f:( &:: ) ~init:(-first) &--> model m) )
+      config
 
 
 let abort_matchers : matcher list =

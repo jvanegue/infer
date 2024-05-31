@@ -11,18 +11,13 @@ module F = Format
 module Callees = struct
   type call_kind = Static | Virtual | Closure [@@deriving equal, compare]
 
-  type resolution =
-    | ResolvedUsingDynamicType (* the most precise resolution *)
-    | ResolvedUsingStaticType (* may not be exact *)
-    | Unresolved
-      (* the worst resolution because we don't have enough type
-         information or the capture was incomplete *)
+  type resolution = ResolvedUsingDynamicType | ResolvedUsingStaticType | Unresolved
   [@@deriving equal, compare]
 
   module CallSite = struct
     type t =
       { callsite_loc: Location.t
-      ; caller_name: (string[@compare.ignore])
+      ; caller_name: (Procname.t[@compare.ignore])
       ; caller_loc: (Location.t[@compare.ignore]) }
     [@@deriving compare]
 
@@ -66,29 +61,50 @@ module Callees = struct
     let widen ~prev ~next ~num_iters:_ = join prev next
   end
 
-  include AbstractDomain.Map (CallSite) (Status)
+  module Map = AbstractDomain.Map (CallSite) (Status)
 
-  let compare = compare Status.compare
+  let record ~caller callsite_loc kind resolution history =
+    let callsite =
+      { CallSite.caller_name= Procdesc.get_proc_name caller
+      ; caller_loc= Procdesc.get_loc caller
+      ; callsite_loc }
+    in
+    Map.add callsite {kind; resolution} history
 
-  let equal = equal Status.equal
 
-  let record ~caller_name ~caller_loc ~callsite_loc kind resolution history =
-    let callsite = {CallSite.caller_name; caller_loc; callsite_loc} in
-    add callsite {kind; resolution} history
+  let to_jsonbug_kind = function Static -> `Static | Virtual -> `Virtual | Closure -> `Closure
+
+  let to_jsonbug_resolution = function
+    | ResolvedUsingDynamicType ->
+        `ResolvedUsingDynamicType
+    | ResolvedUsingStaticType ->
+        `ResolvedUsingStaticType
+    | Unresolved ->
+        `Unresolved
 
 
-  type item =
-    { callsite_loc: Location.t
-    ; caller_name: string
-    ; caller_loc: Location.t
-    ; kind: call_kind
-    ; resolution: resolution }
-
-  let report_as_extra_info history =
-    fold
-      (fun {callsite_loc; caller_name; caller_loc} ({kind; resolution} : Status.t) acc : item list ->
-        {callsite_loc; caller_name; caller_loc; kind; resolution} :: acc )
+  let to_jsonbug_transitive_callees history =
+    Map.fold
+      (fun {callsite_loc; caller_name; caller_loc} ({kind; resolution} : Status.t) acc :
+           Jsonbug_t.transitive_callee list ->
+        let callsite_filename = SourceFile.to_abs_path callsite_loc.file in
+        let callsite_absolute_position_in_file = callsite_loc.line in
+        let callsite_relative_position_in_caller = callsite_loc.line - caller_loc.line in
+        { callsite_filename
+        ; callsite_absolute_position_in_file
+        ; caller_name= Procname.get_method caller_name
+        ; callsite_relative_position_in_caller
+        ; kind= to_jsonbug_kind kind
+        ; resolution= to_jsonbug_resolution resolution }
+        :: acc )
       history []
+
+
+  include Map
+
+  let compare = Map.compare Status.compare
+
+  let equal = Map.equal Status.equal
 end
 
 module Accesses = AbstractDomain.FiniteSetOfPPSet (PulseTrace.Set)
@@ -117,19 +133,9 @@ let remember_dropped_elements ~dropped {accesses; callees; missed_captures} =
 
 let apply_summary ~callee_pname ~call_loc ~summary {accesses; callees; missed_captures} =
   let accesses =
-    PulseTrace.Set.map_callee (PulseCallEvent.Call callee_pname) call_loc summary.accesses
+    PulseTrace.Set.map_callee (Call callee_pname) call_loc summary.accesses
     |> PulseTrace.Set.union accesses
   in
   let callees = Callees.join callees summary.callees in
   let missed_captures = MissedCaptures.join missed_captures summary.missed_captures in
-  {accesses; callees; missed_captures}
-
-
-let transfer_transitive_info_to_caller ~caller callee_proc_name call_loc ~callee_summary =
-  let accesses =
-    PulseTrace.Set.map_callee (Call callee_proc_name) call_loc callee_summary.accesses
-    |> PulseTrace.Set.union caller.accesses
-  in
-  let callees = Callees.join caller.callees callee_summary.callees in
-  let missed_captures = Typ.Name.Set.union caller.missed_captures callee_summary.missed_captures in
   {accesses; callees; missed_captures}

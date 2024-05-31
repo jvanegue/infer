@@ -34,40 +34,14 @@ let report tenv ~is_suppressed ~latent proc_desc err_log diagnostic =
     in
     let extras =
       let transitive_callees, transitive_missed_captures =
-        let get_kind = function
-          | TransitiveInfo.Callees.Static ->
-              `Static
-          | TransitiveInfo.Callees.Virtual ->
-              `Virtual
-          | TransitiveInfo.Callees.Closure ->
-              `Closure
+        let to_jsonbug_missed_capture class_name =
+          {Jsonbug_t.class_name= Typ.Name.name class_name}
         in
-        let get_resolution = function
-          | TransitiveInfo.Callees.ResolvedUsingDynamicType ->
-              `ResolvedUsingDynamicType
-          | TransitiveInfo.Callees.ResolvedUsingStaticType ->
-              `ResolvedUsingStaticType
-          | TransitiveInfo.Callees.Unresolved ->
-              `Unresolved
-        in
-        let get_item {TransitiveInfo.Callees.callsite_loc; caller_name; caller_loc; kind; resolution}
-            : Jsonbug_t.transitive_callee =
-          let callsite_filename = SourceFile.to_abs_path callsite_loc.file in
-          let callsite_absolute_position_in_file = callsite_loc.line in
-          let callsite_relative_position_in_caller = callsite_loc.line - caller_loc.line in
-          { callsite_filename
-          ; callsite_absolute_position_in_file
-          ; caller_name
-          ; callsite_relative_position_in_caller
-          ; kind= get_kind kind
-          ; resolution= get_resolution resolution }
-        in
-        let get_missed_capture_item class_name = {Jsonbug_t.class_name= Typ.Name.name class_name} in
         match diagnostic with
         | TransitiveAccess {transitive_callees; transitive_missed_captures} ->
-            ( TransitiveInfo.Callees.report_as_extra_info transitive_callees |> List.map ~f:get_item
+            ( TransitiveInfo.Callees.to_jsonbug_transitive_callees transitive_callees
             , Typ.Name.Set.elements transitive_missed_captures
-              |> List.map ~f:get_missed_capture_item )
+              |> List.map ~f:to_jsonbug_missed_capture )
         | _ ->
             ([], [])
       in
@@ -187,12 +161,15 @@ let is_constant_deref_without_invalidation_diagnostic (diagnostic : Diagnostic.t
   | ConfigUsage _
   | ConstRefableParameter _
   | CSharpResourceLeak _
+  | DynamicTypeMismatch _
   | ErlangError _
   | InfiniteError _
   | TransitiveAccess _
   | JavaResourceLeak _
+  | HackCannotInstantiateAbstractClass _
   | HackUnawaitedAwaitable _
   | MemoryLeak _
+  | MutualRecursionCycle _
   | ReadonlySharedPtrParameter _
   | ReadUninitialized _
   | RetainCycle _
@@ -262,7 +239,9 @@ let summary_error_of_error proc_desc location (error : AccessResult.error) : _ S
   match error with
   | WithSummary (error, summary) ->
       Sat (error, summary)
-  | PotentialInvalidAccess {astate} | ReportableError {astate} ->
+  | PotentialInvalidAccess {astate}
+  | PotentialInvalidSpecializedCall {astate}
+  | ReportableError {astate} ->
       summary_of_error_post proc_desc location (fun summary -> (error, summary)) astate
 
 
@@ -292,6 +271,8 @@ let report_summary_error tenv proc_desc err_log ((access_error : AccessResult.er
              ; access_trace
              ; must_be_valid_reason= snd must_be_valid } ) ;
       Some (LatentInvalidAccess {astate= summary; address; must_be_valid; calling_context= []})
+  | PotentialInvalidSpecializedCall {specialized_type; trace} ->
+      Some (LatentSpecializedTypeIssue {astate= summary; specialized_type; trace})
   | ReportableError {diagnostic} -> (
       let is_nullptr_dereference =
         match diagnostic with AccessToInvalidAddress _ -> true | _ -> false

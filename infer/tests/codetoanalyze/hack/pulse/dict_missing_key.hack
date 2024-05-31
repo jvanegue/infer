@@ -146,3 +146,92 @@ function container_param(dict<string, int> $p): int {
 function call_container_param_ok(): int {
   return container_param(dict[]);
 }
+
+class DictField {
+  public dict<string, int> $f = dict[];
+
+  public function read_dict_hi(): int {
+    return $this->f['hi'];
+  }
+
+  public function call_read_dict_hi_ok(): int {
+    $this->f = dict['hi' => 42];
+    return $this->read_dict_hi();
+  }
+
+  public function call_read_dict_hi2_ok(): int {
+    $this->f['hi'] = 42;
+    return $this->read_dict_hi();
+  }
+
+  public function call_read_dict_hi_bad(): int {
+    $this->f = dict['bye' => 42];
+    return $this->read_dict_hi();
+  }
+}
+
+class NestedDictField {
+  public function __construct(public DictField $g) {}
+
+  public function read_dict_hi(): int {
+    return $this->g->f['hi'];
+  }
+
+  public function call_read_dict_hi_bad(): int {
+    $this->g->f = dict['bye' => 42];
+    return $this->read_dict_hi();
+  }
+}
+
+function suppress_args_param(dict<string, int> $args): int {
+  return $args['bye'];
+}
+
+function call_suppress_args_param_ok(): int {
+  return suppress_args_param(dict['hi' => 42]);
+}
+
+class BlockListedField {
+  public dict<string, int> $block_listed_field = dict[];
+
+  public function read_dict_hi(): int {
+    return $this->block_listed_field['hi'];
+  }
+
+  public function call_read_dict_hi_ok(): int {
+    $this->block_listed_field = dict['bye' => 42];
+    return $this->read_dict_hi();
+  }
+}
+
+abstract final class ConstKey {
+  const string HI = 'hi';
+
+  const string BYE = 'bye';
+}
+
+class DictFieldUsingConstKey {
+  public dict<string, int> $f = dict[ConstKey::HI => 42];
+
+  public static function read_dict_hi_ok(): int {
+    $o = new DictFieldUsingConstKey();
+    return $o->f[ConstKey::HI];
+  }
+
+  public function read_dict_hi_bad_FN(): int {
+    $o = new DictFieldUsingConstKey();
+    return $o->f[ConstKey::BYE];
+  }
+}
+
+abstract final class StaticDictField {
+  const dict<string, int> f = dict['hi' => 42];
+
+  public static function call_read_dict_hi_ok(): int {
+    return self::f['hi'];
+  }
+
+  public static function call_read_dict_hi_bad_FN(): int {
+    return self::f['bye'];
+  }
+}

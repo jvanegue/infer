@@ -144,6 +144,8 @@ val annotation_reachability_expensive : bool
 
 val annotation_reachability_no_allocation : bool
 
+val annotation_reachability_report_source_and_sink : bool
+
 val append_buck_flavors : string list
 
 val biabduction_abs_struct : int
@@ -223,8 +225,6 @@ val buck2_query_deps : bool
 
 val buck2_root : string
 
-val buck2_use_bxl : bool
-
 val buck_block_list : string list
 
 val buck_build_args : string list
@@ -295,11 +295,11 @@ val compaction_minimum_interval_s : int
 
 val complete_capture_from : string option
 
-val config_impact_config_field_patterns : Re.Str.regexp list
+val config_impact_config_field_patterns : Str.regexp list
 
-val config_impact_config_function_patterns : Re.Str.regexp list
+val config_impact_config_function_patterns : Str.regexp list
 
-val config_impact_config_param_patterns : Re.Str.regexp list
+val config_impact_config_param_patterns : Str.regexp list
 
 val config_impact_current : string option
 
@@ -356,6 +356,8 @@ val deduplicate : bool
 val dependency_mode : bool
 
 val developer_mode : bool
+
+val dict_missing_key_var_block_list : Str.regexp option
 
 val differential_filter_files : string option
 
@@ -484,6 +486,10 @@ val keep_going : bool
 
 val kotlin_capture : bool
 
+val lineage_source : string option
+
+val lineage_sink : string option
+
 val lineage_dedup : bool
 
 val lineage_field_depth : int
@@ -522,7 +528,7 @@ val lock_model : Yojson.Safe.t
 
 val log_pulse_disjunct_increase_after_model_call : bool
 
-val log_pulse_unreachable_nodes : bool
+val log_pulse_coverage : bool
 
 val log_missing_deps : bool
 
@@ -748,13 +754,13 @@ val reanalyze : bool
 
 val relative_path_backtrack : int
 
-val remodel_class : string option
-
 val replay_analysis_schedule : bool
 
 val replay_ondemand_should_error : bool
 
 val report : bool
+
+val report_block_list_spec : Report_block_list_spec_t.report_block_list_specs
 
 val report_block_list_files_containing : string list
 
@@ -850,6 +856,8 @@ val sqlite_page_size : int
 
 val sqlite_vfs : string option
 
+val starvation_c_function_pointer_models : Yojson.Safe.t
+
 val starvation_skip_analysis : Yojson.Safe.t
 
 val starvation_strict_mode : bool
@@ -859,6 +867,8 @@ val starvation_whole_program : bool
 val stats_dir_current : string option
 
 val stats_dir_previous : string option
+
+val struct_as_cpp_class : bool
 
 val store_analysis_schedule : bool
 

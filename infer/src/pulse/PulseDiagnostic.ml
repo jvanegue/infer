@@ -132,6 +132,7 @@ type t =
   | ConstRefableParameter of {param: Var.t; typ: Typ.t; location: Location.t}
   | CSharpResourceLeak of
       {class_name: CSharpClassName.t; allocation_trace: Trace.t; location: Location.t}
+  | DynamicTypeMismatch of {location: Location.t}
   | ErlangError of ErlangError.t
   | InfiniteError of {location: Location.t}
   | TransitiveAccess of
@@ -142,13 +143,16 @@ type t =
       ; transitive_missed_captures: Typ.Name.Set.t [@ignore] }
   | JavaResourceLeak of
       {class_name: JavaClassName.t; allocation_trace: Trace.t; location: Location.t}
+  | HackCannotInstantiateAbstractClass of
+      {type_name: Typ.Name.t; trace: Trace.t; location: Location.t}
     (* TODO: add more data to HackUnawaitedAwaitable tracking the parameter type *)
   | HackUnawaitedAwaitable of {allocation_trace: Trace.t; location: Location.t}
   | MemoryLeak of {allocator: Attribute.allocator; allocation_trace: Trace.t; location: Location.t}
+  | MutualRecursionCycle of {cycle: Trace.t; location: Location.t}
   | ReadonlySharedPtrParameter of
       {param: Var.t; typ: Typ.t; location: Location.t; used_locations: Location.t list}
   | ReadUninitialized of ReadUninitialized.t
-  | RetainCycle of {values: retain_cycle_data list; location: Location.t}
+  | RetainCycle of {values: retain_cycle_data list; location: Location.t; unknown_access_type: bool}
   | StackVariableAddressEscape of {variable: Var.t; history: ValueHistory.t; location: Location.t}
   | TaintFlow of
       { expr: DecompilerExpr.t
@@ -186,6 +190,8 @@ let pp fmt diagnostic =
   | CSharpResourceLeak {class_name; allocation_trace; location} ->
       F.fprintf fmt "ResourceLeak {@[class_name=%a;@;allocation_trace:%a;@;location:%a@]}"
         CSharpClassName.pp class_name (Trace.pp ~pp_immediate) allocation_trace Location.pp location
+  | DynamicTypeMismatch {location} ->
+      F.fprintf fmt "DynamicTypeMismatch {@[location:%a@]}" Location.pp location
   | ErlangError erlang_error ->
      ErlangError.pp fmt erlang_error
   | InfiniteError {location} ->
@@ -203,6 +209,9 @@ let pp fmt diagnostic =
         (fun fmt ->
           if Typ.Name.Set.is_empty transitive_missed_captures then ()
           else Typ.Name.Set.pp fmt transitive_missed_captures )
+  | HackCannotInstantiateAbstractClass {type_name; trace; location} ->
+      F.fprintf fmt "HackCannotInstantiateAbstractClass {@[type_name:%a;@;trace:%a@@;location:%a@]"
+        Typ.Name.pp type_name (Trace.pp ~pp_immediate) trace Location.pp location
   | HackUnawaitedAwaitable {allocation_trace; location} ->
       F.fprintf fmt "UnawaitedAwaitable {@[allocation_trace:%a;@;location:%a@]}"
         (Trace.pp ~pp_immediate) allocation_trace Location.pp location
@@ -210,6 +219,9 @@ let pp fmt diagnostic =
       F.fprintf fmt "MemoryLeak {@[allocator=%a;@;allocation_trace=%a;@;location=%a@]}"
         Attribute.pp_allocator allocator (Trace.pp ~pp_immediate) allocation_trace Location.pp
         location
+  | MutualRecursionCycle {cycle; location} ->
+      F.fprintf fmt "MutualRecursionCycle {@[cycle=%a;@;location=%a@]}" (Trace.pp ~pp_immediate)
+        cycle Location.pp location
   | ReadonlySharedPtrParameter {param; typ; location; used_locations} ->
       F.fprintf fmt
         "ReadonlySharedPtrParameter {@[param=%a;@;typ=%a;@;location=%a;@;used_locations=%a@]}"
@@ -218,15 +230,18 @@ let pp fmt diagnostic =
         used_locations
   | ReadUninitialized read_uninitialized ->
       F.fprintf fmt "ReadUninitialized %a" ReadUninitialized.pp read_uninitialized
-  | RetainCycle {values; location} ->
+  | RetainCycle {values; location; unknown_access_type} ->
       let values_loc = List.map ~f:(fun {expr; location; _} -> (expr, location)) values in
       let assignment_traces = List.map ~f:(fun {trace; _} -> trace) values in
-      F.fprintf fmt "RetainCycle {@[assignment_traces=[@[<v>%a@]];@;values=%a;@;location=%a@]}"
+      F.fprintf fmt
+        "RetainCycle {@[assignment_traces=[@[<v>%a@]];@;\
+         values=%a;@;\
+         location=%a; unknown_access_type:%b@]}"
         (Pp.seq ~sep:";@;" (Pp.option (Trace.pp ~pp_immediate)))
         assignment_traces
         (Pp.comma_seq
            (Pp.pair ~fst:DecompilerExpr.pp_with_abstract_value ~snd:(Pp.option Location.pp)) )
-        values_loc Location.pp location
+        values_loc Location.pp location unknown_access_type
   | StackVariableAddressEscape {variable; history; location} ->
       F.fprintf fmt "StackVariableAddressEscape {@[variable=%a;@;history=%a;@;location:%a@]}" Var.pp
         variable ValueHistory.pp history Location.pp location
@@ -266,6 +281,7 @@ let get_location = function
   | ReadUninitialized {calling_context= []; trace= access_trace}
   | TransitiveAccess {call_trace= access_trace} ->
       Trace.get_outer_location access_trace
+  | DynamicTypeMismatch {location}
   | ErlangError (Badarg {location; calling_context= []})
   | ErlangError (Badkey {location; calling_context= []})
   | ErlangError (Badmap {location; calling_context= []})
@@ -294,8 +310,10 @@ let get_location = function
   | ConstRefableParameter {location}
   | CSharpResourceLeak {location}
   | JavaResourceLeak {location}
+  | HackCannotInstantiateAbstractClass {location}
   | HackUnawaitedAwaitable {location}
   | MemoryLeak {location}
+  | MutualRecursionCycle {location}
   | ReadonlySharedPtrParameter {location}
   | RetainCycle {location}
   | StackVariableAddressEscape {location}
@@ -338,13 +356,16 @@ let aborts_execution = function
          pulse is confused and the current abstract state has stopped making sense; either way,
          abort! *)
       true
+  | DynamicTypeMismatch _
   | ConfigUsage _
   | ConstRefableParameter _
   | CSharpResourceLeak _
   | JavaResourceLeak _
   | TransitiveAccess _
+  | HackCannotInstantiateAbstractClass _
   | HackUnawaitedAwaitable _
   | MemoryLeak _
+  | MutualRecursionCycle _
   | ReadonlySharedPtrParameter _
   | ReadUninitialized _
   | RetainCycle _
@@ -565,7 +586,7 @@ let get_message_and_suggestion diagnostic =
           let suggestion = Invalidation.suggest invalidation in
           (message, suggestion) )
   | ConfigUsage {pname; config; branch_location} ->
-      F.asprintf "Function %a used config %a at %a." Procname.pp pname ConfigName.pp config
+      F.asprintf "Function %a used config %a at %a." Procname.describe pname ConfigName.pp config
         Location.pp branch_location
       |> no_suggestion
   | ConstRefableParameter {param} ->
@@ -594,6 +615,8 @@ let get_message_and_suggestion diagnostic =
       F.asprintf "Resource dynamically allocated %a is not closed after the last access at %a"
         pp_allocation_trace allocation_trace Location.pp location
       |> no_suggestion
+  | DynamicTypeMismatch {location} ->
+      F.asprintf "bad dynamic type at %a" Location.pp location |> no_suggestion
   | ErlangError (Badarg {calling_context= _; location}) ->
       F.asprintf "bad arg at %a" Location.pp location |> no_suggestion
   | ErlangError (Badkey {calling_context= _; location}) ->
@@ -645,6 +668,18 @@ let get_message_and_suggestion diagnostic =
               location
       in
       F.asprintf "%s. Transitive access %a. %s" tag pp call_trace description |> no_suggestion
+  | HackCannotInstantiateAbstractClass {type_name; trace} ->
+      let pp_trace fmt (trace : Trace.t) =
+        match trace with
+        | Immediate {location} ->
+            F.fprintf fmt "on %a" Location.pp_line location
+        | ViaCall {f; location; _} ->
+            F.fprintf fmt "indirectly via call to %a on %a" CallEvent.describe f Location.pp_line
+              location
+      in
+      F.asprintf "Abstract class %s is being instantiated %a" (Typ.Name.name type_name) pp_trace
+        trace
+      |> no_suggestion
   | HackUnawaitedAwaitable {location; allocation_trace} ->
       (* NOTE: this is very similar to the MemoryLeak case *)
       let allocation_line =
@@ -678,6 +713,18 @@ let get_message_and_suggestion diagnostic =
       F.asprintf "Memory dynamically allocated %a is not freed after the last access at %a"
         pp_allocation_trace allocation_trace Location.pp location
       |> no_suggestion
+  | MutualRecursionCycle {cycle} ->
+      let advice =
+        "Make sure this is intentional and cannot lead to non-termination or stack overflow."
+      in
+      let pp_cycle fmt (cycle : PulseMutualRecursion.t) =
+        match cycle with
+        | Immediate _ ->
+            F.fprintf fmt "recursive call to %a. " PulseMutualRecursion.pp cycle
+        | ViaCall _ ->
+            F.fprintf fmt "mutual recursion cycle: %a@\n" PulseMutualRecursion.pp cycle
+      in
+      F.asprintf "%a%s" pp_cycle cycle advice |> no_suggestion
   | ReadonlySharedPtrParameter {param; location; used_locations} ->
       let pp_used_locations f =
         match used_locations with
@@ -799,10 +846,10 @@ let get_message_and_suggestion diagnostic =
       let open PulseAttribute in
       ( F.asprintf
           "the return value `%a` is not modified after it is copied in the callee `%a` at `%a:%d`. "
-          CopiedInto.pp copied_into Procname.pp callee SourceFile.pp file line
+          CopiedInto.pp copied_into Procname.describe callee SourceFile.pp file line
       , Some
           (F.asprintf "Either change the return type of `%a` or revise the function body."
-             Procname.pp callee ) )
+             Procname.describe callee ) )
   | UnnecessaryCopy {copied_into; source_typ; source_opt; location; copied_location= None; from}
     -> (
       let open PulseAttribute in
@@ -988,6 +1035,9 @@ let get_trace = function
              F.fprintf fmt "allocated by constructor %a() here" CSharpClassName.pp class_name )
            allocation_trace
       @@ [Errlog.make_trace_element 0 location "memory becomes unreachable here" []]
+  | DynamicTypeMismatch {location} ->
+      let nesting = 0 in
+      [Errlog.make_trace_element nesting location "" []]
   | ErlangError (Badarg {calling_context; location}) ->
       get_trace_calling_context calling_context
       @@ [Errlog.make_trace_element 0 location "bad arg here" []]
@@ -1032,6 +1082,11 @@ let get_trace = function
       Trace.add_to_errlog ~nesting:1
         ~pp_immediate:(fun fmt -> F.fprintf fmt "access occurs here")
         call_trace []
+  | HackCannotInstantiateAbstractClass {type_name; trace} ->
+      Trace.add_to_errlog ~nesting:0
+        ~pp_immediate:(fun fmt ->
+          F.fprintf fmt "abstract class %s is instantiated here" (Typ.Name.name type_name) )
+        trace []
   | HackUnawaitedAwaitable {location; allocation_trace} ->
       (* NOTE: this is very similar to the MemoryLeak case *)
       let access_start_location = Trace.get_start_location allocation_trace in
@@ -1050,6 +1105,13 @@ let get_trace = function
              F.fprintf fmt "allocated by `%a` here" Attribute.pp_allocator allocator )
            allocation_trace
       @@ [Errlog.make_trace_element 0 location "memory becomes unreachable here" []]
+  | MutualRecursionCycle {cycle} ->
+      let inner_call = PulseMutualRecursion.get_inner_call cycle in
+      Trace.add_to_errlog ~nesting:0
+        ~pp_immediate:(fun fmt ->
+          F.fprintf fmt "recursive call to %a here" CallEvent.pp (CallEvent.Call inner_call) )
+        cycle
+      @@ []
   | ReadonlySharedPtrParameter {param; typ; location; used_locations} ->
       let nesting = 0 in
       Errlog.make_trace_element nesting location (get_param_typ param typ) []
@@ -1128,8 +1190,12 @@ let get_issue_type ~latent issue_type =
       IssueType.pulse_const_refable
   | CSharpResourceLeak _, false | JavaResourceLeak _, false ->
       IssueType.pulse_resource_leak
+  | HackCannotInstantiateAbstractClass _, false ->
+      IssueType.pulse_cannot_instantiate_abstract_class
   | HackUnawaitedAwaitable _, false ->
       IssueType.pulse_unawaited_awaitable
+  | DynamicTypeMismatch _, false ->
+      IssueType.pulse_dynamic_type_mismatch
   | ErlangError (Badarg _), _ ->
       IssueType.bad_arg ~latent
   | ErlangError (Badkey _), _ ->
@@ -1162,6 +1228,8 @@ let get_issue_type ~latent issue_type =
         L.die InternalError
           "Memory leaks should not have a Java resource, Hack async, C sharp, or Objective-C alloc \
            as allocator" )
+  | MutualRecursionCycle _, _ ->
+      IssueType.mutual_recursion_cycle
   | ReadonlySharedPtrParameter _, false ->
       IssueType.readonly_shared_ptr_param
   | ReadUninitialized {typ= Value}, _ ->
@@ -1170,8 +1238,8 @@ let get_issue_type ~latent issue_type =
       IssueType.pulse_uninitialized_const
   | ReadUninitialized {typ= DictMissingKey _}, _ ->
       IssueType.pulse_dict_missing_key
-  | RetainCycle _, false ->
-      IssueType.retain_cycle
+  | RetainCycle {unknown_access_type}, false ->
+      if unknown_access_type then IssueType.retain_cycle_no_weak_info else IssueType.retain_cycle
   | StackVariableAddressEscape _, false ->
       IssueType.stack_variable_address_escape
   | TaintFlow {flow_kind= TaintedFlow}, _ ->
@@ -1207,8 +1275,10 @@ let get_issue_type ~latent issue_type =
   | ( ( ConfigUsage _
       | ConstRefableParameter _
       | CSharpResourceLeak _
+      | DynamicTypeMismatch _
       | JavaResourceLeak _
       | TransitiveAccess _
+      | HackCannotInstantiateAbstractClass _
       | HackUnawaitedAwaitable _
       | MemoryLeak _
       | ReadonlySharedPtrParameter _

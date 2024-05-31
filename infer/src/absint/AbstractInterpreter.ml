@@ -117,11 +117,16 @@ module type NodeTransferFunctions = sig
     -> Domain.t
   (** specifies how to symbolically execute the instructions of a node, using [exec_instr] to go
       over a single instruction *)
+
+  val pp_domain : Pp.print_kind -> F.formatter -> Domain.t -> unit
+  (** some checkers may want to do custom pretty printing for HTML debug *)
 end
 
 (** most transfer functions will use this simple [Instrs.fold] approach *)
 module SimpleNodeTransferFunctions (T : TransferFunctions.SIL) = struct
   include T
+
+  let pp_domain = Pp.escape_xml Domain.pp
 
   let join_all x ~into =
     List.fold x ~init:into ~f:(fun acc astate ->
@@ -143,6 +148,8 @@ end
 
 module BackwardNodeTransferFunction (T : TransferFunctions) = struct
   include T
+
+  let pp_domain = Pp.escape_xml Domain.pp
 
   (*
      In a backward block, each instruction should receive the normal states from is successor instr,
@@ -348,14 +355,21 @@ struct
          if leq ~lhs:post ~rhs:prev then prev
          else (post_disj, add_dropped_disjuncts dropped next_non_disj)
 
-        let pp f (disjuncts, non_disj) =
+    let pp_ (pp_kind : Pp.print_kind) f (disjuncts, non_disj) =
+
       let pp_disjuncts f disjuncts =
         List.iteri (List.rev disjuncts) ~f:(fun i disjunct ->
-            F.fprintf f "#%d: @[%a@]@;" i T.DisjDomain.pp disjunct )
+            F.fprintf f "#%d: @[%a@]@;" i (T.pp_disjunct pp_kind) disjunct )
       in
-      F.fprintf f "@[<v>%d disjuncts:@;%a@;@[<hv 2>Non-disj state:@ %a@]@]" (List.length disjuncts)
-        pp_disjuncts disjuncts T.NonDisjDomain.pp non_disj
+      F.fprintf f "@[<v>%d disjuncts:@;%a%a@]" (List.length disjuncts) pp_disjuncts disjuncts
+        (Pp.html_collapsible_block ~name:"Non-disjunctive state" pp_kind T.NonDisjDomain.pp)
+        non_disj
+
+
+    let pp = pp_ TEXT
   end
+
+  let pp_domain = Domain.pp_
 
   let join_all_disj_astates ~into astates =
     let leq ~lhs ~rhs = T.DisjDomain.equal_fast lhs rhs in
@@ -429,7 +443,8 @@ struct
             L.d_printfln "@[<v2>Reached max disjuncts limit, skipping disjunct #%d@;@]" i ;
             (post_astate, pre_disjunct :: dropped, n_disjuncts) )
           else
-            L.with_indent "Executing instruction from disjunct #%d" i ~f:(fun () ->
+            L.with_indent ~escape_result:false "Executing instruction from disjunct #%d" i
+              ~f:(fun () ->
                 (* check timeout once per disjunct to execute instead of once for all disjuncts *)
                 Timer.check_timeout () ;
                 let disjuncts', non_disj' =
@@ -542,7 +557,7 @@ module AbstractInterpreterCommon (TransferFunctions : NodeTransferFunctions) = s
   (** extract the precondition of node [n] from [inv_map] *)
   let extract_pre node_id inv_map = extract_state node_id inv_map |> Option.map ~f:State.pre
 
-  let pp_domain_html = Pp.html_collapsible_block ~name:"Show/hide the state" Domain.pp
+  let pp_domain_html = TransferFunctions.pp_domain HTML
 
   let debug_absint_operation op =
     let pp_op fmt op =

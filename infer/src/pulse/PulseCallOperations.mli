@@ -9,11 +9,25 @@ open! IStd
 open PulseBasicInterface
 open PulseDomainInterface
 
+module GlobalForStats : sig
+  val init_before_call : unit -> unit
+
+  val is_node_not_stuck : unit -> bool
+
+  val node_is_not_stuck : unit -> unit
+
+  val is_one_call_stuck : unit -> bool
+
+  val one_call_is_stuck : unit -> unit
+end
+
 val call :
      Tenv.t
+  -> Errlog.t
   -> PathContext.t
   -> caller_proc_desc:Procdesc.t
-  -> analyze_dependency:(?specialization:Specialization.t -> Procname.t -> PulseSummary.t option)
+  -> analyze_dependency:
+       (?specialization:Specialization.t -> Procname.t -> PulseSummary.t AnalysisResult.t)
   -> Location.t
   -> Procname.t
   -> ret:Ident.t * Typ.t

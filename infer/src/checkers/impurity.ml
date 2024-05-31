@@ -29,7 +29,7 @@ let get_matching_dest_addr_opt ~edges_pre ~edges_post : (Access.t * AbstractValu
       x
 
 
-let ignore_array_index (access : Access.t) : unit MemoryAccess.t =
+let ignore_array_index (access : Access.t) : unit Access.access =
   match access with
   | ArrayAccess (typ, _) ->
       ArrayAccess (typ, ())
@@ -37,8 +37,6 @@ let ignore_array_index (access : Access.t) : unit MemoryAccess.t =
       FieldAccess fname
   | Dereference ->
       Dereference
-  | TakeAddress ->
-      TakeAddress
 
 
 let add_invalid_and_modified ~pvar ~access ~check_empty attrs access_list acc =
@@ -50,8 +48,8 @@ let add_invalid_and_modified ~pvar ~access ~check_empty attrs access_list acc =
     match Attributes.get_invalid attrs with
     | None | Some (Invalidation.ConstantDereference _, _) ->
         modified
-    | Some invalid ->
-        ImpurityDomain.Invalid invalid :: modified
+    | Some (invalidation, trace) ->
+        ImpurityDomain.Invalid (invalidation, trace) :: modified
   in
   if check_empty && List.is_empty invalid_and_modified then
     L.(die InternalError) "Address is modified without being written to or invalidated."
@@ -146,7 +144,7 @@ let get_modified_globals pname (summary : AbductiveDomain.Summary.t) pre_heap po
            globals. *)
         add_to_modified pname
           ~pvar:(Option.value_exn (Var.get_pvar var))
-          ~access:MemoryAccess.Dereference ~addr pre_heap post modified_globals
+          ~access:Access.Dereference ~addr pre_heap post modified_globals
       else modified_globals )
     (summary :> AbductiveDomain.t)
     ImpurityDomain.ModifiedVarMap.bottom
@@ -165,7 +163,10 @@ let extract_impurity tenv pname formals (exec_state : ExecutionDomain.summary) :
         (astate, true)
     | ContinueProgram astate | ExceptionRaised astate | InfiniteProgram astate ->
         (astate, false)
-    | AbortProgram astate | LatentAbortProgram {astate} | LatentInvalidAccess {astate} ->
+    | AbortProgram astate
+    | LatentAbortProgram {astate}
+    | LatentInvalidAccess {astate}
+    | LatentSpecializedTypeIssue {astate} ->
         (astate, false)
   in
   let pre_heap = (AbductiveDomain.Summary.get_pre astate).BaseDomain.heap in

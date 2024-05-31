@@ -68,6 +68,7 @@ type t = private
         (** a set of abstract values that are used as receiver of method calls in the instructions
             reached so far *)
   ; transitive_info: TransitiveInfo.t  (** record transitive information inter-procedurally *)
+  ; recursive_calls: Trace.Set.t
   ; skipped_calls: SkippedCalls.t  (** metadata: procedure calls for which no summary was found *)
   }
 [@@deriving equal]
@@ -84,7 +85,9 @@ module Stack : sig
 
   val remove_vars : Var.t list -> t -> t
 
-  val fold : (Var.t -> PulseBaseStack.value -> 'a -> 'a) -> t -> 'a -> 'a
+  val fold :
+    ?pre_or_post:[`Pre | `Post] -> (Var.t -> PulseBaseStack.value -> 'a -> 'a) -> t -> 'a -> 'a
+  (** [pre_or_post] defaults to [`Post] *)
 
   val find_opt : Var.t -> t -> PulseBaseStack.value option
 
@@ -115,13 +118,21 @@ module Memory : sig
       returns what it points to or creates a fresh value if that edge didn't exist. *)
 
   val fold_edges :
-    AbstractValue.t -> (t, PulseAccess.t * (AbstractValue.t * ValueHistory.t), _) Container.fold
+       ?pre_or_post:[`Pre | `Post]
+    -> AbstractValue.t
+    -> (t, PulseAccess.t * (AbstractValue.t * ValueHistory.t), _) Container.fold
+  (** [pre_or_post] defaults to [`Post] *)
 
   val find_edge_opt :
     AbstractValue.t -> PulseAccess.t -> t -> (AbstractValue.t * ValueHistory.t) option
 
   val exists_edge :
-    AbstractValue.t -> t -> f:(PulseAccess.t * (AbstractValue.t * ValueHistory.t) -> bool) -> bool
+       ?pre_or_post:[`Pre | `Post]
+    -> AbstractValue.t
+    -> t
+    -> f:(PulseAccess.t * (AbstractValue.t * ValueHistory.t) -> bool)
+    -> bool
+  (** [pre_or_post] defaults to [`Post] *)
 end
 
 (** Safe version of {!PulseBaseAddressAttributes} *)
@@ -272,6 +283,16 @@ val is_local : Var.t -> t -> bool
 
 val find_post_cell_opt : AbstractValue.t -> t -> BaseDomain.cell option
 
+val fold_all :
+     ?var_filter:(Var.t -> bool)
+  -> init:'accum
+  -> finish:('accum -> 'final)
+  -> f:(Var.t -> 'accum -> AbstractValue.t -> Access.t list -> ('accum, 'final) Continue_or_stop.t)
+  -> ?f_revisit:(Var.t -> 'accum -> AbstractValue.t -> Access.t list -> 'accum)
+  -> t
+  -> [`Post | `Pre]
+  -> 'final
+
 val reachable_addresses_from :
      ?edge_filter:(Access.t -> bool)
   -> AbstractValue.t Seq.t
@@ -300,13 +321,14 @@ val set_path_condition : Formula.t -> t -> t
 val record_transitive_access : Location.t -> t -> t
 
 val record_call_resolution :
-     caller_name:string
-  -> caller_loc:Location.t
-  -> callsite_loc:Location.t
+     caller:Procdesc.t
+  -> Location.t
   -> TransitiveInfo.Callees.call_kind
   -> TransitiveInfo.Callees.resolution
   -> t
   -> t
+
+val record_recursive_call : PathContext.t -> Location.t -> Procname.t -> t -> t * Trace.t
 
 val add_need_dynamic_type_specialization : AbstractValue.t -> t -> t
 
@@ -403,7 +425,7 @@ end
 val transfer_transitive_info_to_caller : Procname.t -> Location.t -> Summary.t -> t -> t
 
 module Topl : sig
-  val small_step : Location.t -> PulseTopl.event -> t -> t
+  val small_step : Tenv.t -> Location.t -> PulseTopl.event -> t -> t
 
   val large_step :
        call_location:Location.t

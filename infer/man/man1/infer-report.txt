@@ -194,6 +194,7 @@ OPTIONS
              MIXED_SELF_WEAKSELF (enabled by default),
              MODIFIES_IMMUTABLE (enabled by default),
              MULTIPLE_WEAKSELF (enabled by default),
+             MUTUAL_RECURSION_CYCLE (disabled by default),
              Missing_fld (enabled by default),
              NIL_BLOCK_CALL (enabled by default),
              NIL_BLOCK_CALL_LATENT (disabled by default),
@@ -227,6 +228,7 @@ OPTIONS
              PULSE_CANNOT_INSTANTIATE_ABSTRACT_CLASS (disabled by default),
              PULSE_CONST_REFABLE (enabled by default),
              PULSE_DICT_MISSING_KEY (disabled by default),
+             PULSE_DYNAMIC_TYPE_MISMATCH (disabled by default),
              PULSE_READONLY_SHARED_PTR_PARAM (enabled by default),
              PULSE_REFERENCE_STABILITY (disabled by default),
              PULSE_RESOURCE_LEAK (enabled by default),
@@ -250,6 +252,7 @@ OPTIONS
              REGEX_OP_ON_UI_THREAD (enabled by default),
              RESOURCE_LEAK (enabled by default),
              RETAIN_CYCLE (enabled by default),
+             RETAIN_CYCLE_NO_WEAK_INFO (disabled by default),
              SCOPE_LEAKAGE (enabled by default),
              SENSITIVE_DATA_FLOW (disabled by default),
              SHELL_INJECTION (enabled by default),
@@ -368,6 +371,23 @@ OPTIONS
            Do not report any issues on files whose relative path matches the
            specified OCaml regex, even if they match the allow list specified
            by --report-allow-list-path-regex
+
+       --report-block-list-spec json
+           Do not report the issues in this list.
+                  Example format:
+                   "report-block-list-spec": [
+                       { "bug_type": "CXX_REF_CAPTURED_IN_BLOCK",
+                         "procedure_name": "foo",
+                         "file": "path/to/File.m"
+                         "comment": "This is a fp because..."
+                       },
+                       { "bug_type": "RETAIN_CYCLE",
+                         "class_name": "MyClass",
+                         "procedure_name": "my_method"
+                         "file": "path/to/File.m"
+                       }
+                   ]
+               
 
        --report-console-limit int
            Maximum number of issues to display on standard output. Unset with

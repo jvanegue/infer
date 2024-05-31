@@ -32,7 +32,7 @@ module LazyHeapPath : sig
 
   val unsupported : t
 
-  val push : AbstractValue.t MemoryAccess.t -> t -> t
+  val push : Access.t -> t -> t
 
   val force : t -> HeapPath.t option
   (** returns None if the stored path contains unsupported memory accesses *)
@@ -44,8 +44,7 @@ end = struct
         F.pp_print_string fmt "unsupported"
     | Supported {stack; pvar} ->
         Pvar.pp Pp.text fmt pvar ;
-        List.iter stack ~f:(fun access ->
-            F.fprintf fmt " -> %a" (MemoryAccess.pp AbstractValue.pp) access )
+        List.iter stack ~f:(fun access -> F.fprintf fmt " -> %a" Access.pp access)
 
 
   let from_pvar pvar = Supported {stack= []; pvar}
@@ -67,9 +66,9 @@ end = struct
         List.fold_left stack ~init:(Some (HeapPath.Pvar pvar)) ~f:(fun opt_path access ->
             Option.bind opt_path ~f:(fun path ->
                 match access with
-                | MemoryAccess.FieldAccess fieldname ->
+                | Access.FieldAccess fieldname ->
                     Some (HeapPath.FieldAccess (fieldname, path))
-                | MemoryAccess.Dereference ->
+                | Access.Dereference ->
                     Some (HeapPath.Dereference path)
                 | _ ->
                     None ) )
@@ -305,7 +304,7 @@ let pp_call_state fmt
     pp_aliases aliases
 
 
-let pp_call_state = Pp.html_collapsible_block ~name:"Show/hide the call state" pp_call_state
+let pp_call_state = Pp.html_collapsible_block ~name:"Show/hide the call state" HTML pp_call_state
 
 let to_callee_addr call_state x = AddressMap.find_opt x call_state.rev_subst
 
@@ -523,7 +522,7 @@ let translate_access_to_caller astate subst (access_callee : Access.t) : _ * Acc
         subst_find_or_new astate subst val_callee ~default_hist_caller:ValueHistory.epoch
       in
       (subst, ArrayAccess (typ, val_caller))
-  | FieldAccess _ | TakeAddress | Dereference ->
+  | FieldAccess _ | Dereference ->
       (subst, access_callee)
 
 
@@ -606,7 +605,7 @@ let rec materialize_pre_from_address callee call_location ~pre ~addr_pre cell_id
                         array_indices_to_visit=
                           {addr_pre_dest; pre_hist; access_callee; addr_hist_caller}
                           :: call_state.array_indices_to_visit }
-                | FieldAccess _ | TakeAddress | Dereference ->
+                | FieldAccess _ | Dereference ->
                     (* only array accessess depend on abstract values and need translation *)
                     let access_caller = access_callee in
                     let astate, addr_hist_dest_caller =
@@ -1296,7 +1295,7 @@ let apply_summary tenv path callee_proc_name call_location ~callee_summary ~capt
   in
   let pp_formals = Pp.seq ~sep:"," (fun f (var, _) -> Var.pp f (Var.of_pvar var)) in
   let pp_summary =
-    Pp.html_collapsible_block ~name:"Show/hide the summary" AbductiveDomain.Summary.pp
+    Pp.html_collapsible_block ~name:"Show/hide the summary" HTML AbductiveDomain.Summary.pp
   in
   L.with_indent ~collapsible:true "Applying pre/post for %a(%a):" Procname.pp callee_proc_name
     pp_formals formals ~f:(fun () ->

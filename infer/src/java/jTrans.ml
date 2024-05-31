@@ -80,9 +80,11 @@ let get_exit_location source_file bytecode =
   {Location.line= last_line_number; col= -1; file= source_file; macro_file_opt= None; macro_line= -1}
 
 
-let retrieve_fieldname fieldname =
-  let subs = Str.split (Str.regexp (Str.quote ".")) (Fieldname.to_string fieldname) in
-  List.last_exn subs
+let retrieve_fieldname =
+  let dot_regexp = Str.regexp (Str.quote ".") in
+  fun fieldname ->
+    let subs = Str.split dot_regexp (Fieldname.to_string fieldname) in
+    List.last_exn subs
 
 
 let get_field_name program static tenv cn fs =
@@ -896,7 +898,12 @@ let get_array_length context pc expr_list content_type =
     List.fold_right ~f:get_array_type_len sil_len_exprs ~init:(content_type, None)
   in
   let array_size =
-    Exp.Sizeof {typ= array_type; nbytes= None; dynamic_length= array_len; subtype= Subtype.exact}
+    Exp.Sizeof
+      { typ= array_type
+      ; nbytes= None
+      ; dynamic_length= array_len
+      ; subtype= Subtype.exact
+      ; nullable= false }
   in
   (instrs, array_size)
 
@@ -980,7 +987,12 @@ let instruction (context : JContext.t) pc instr : translation =
     let class_type = JTransType.get_class_type program tenv cn in
     let class_type_np = JTransType.get_class_type_no_pointer program tenv cn in
     let sizeof_exp =
-      Exp.Sizeof {typ= class_type_np; nbytes= None; dynamic_length= None; subtype= Subtype.exact}
+      Exp.Sizeof
+        { typ= class_type_np
+        ; nbytes= None
+        ; dynamic_length= None
+        ; subtype= Subtype.exact
+        ; nullable= false }
     in
     let args = [(sizeof_exp, class_type)] in
     let ret_id = Ident.create_fresh Ident.knormal in

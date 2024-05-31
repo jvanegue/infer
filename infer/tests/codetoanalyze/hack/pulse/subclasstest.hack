@@ -10,6 +10,9 @@ final class C extends D {}
 class E extends D {}
 class F extends E {}
 
+interface I {}
+interface J {}
+
 class Wrapper {
   public async function fail(): Awaitable<int> {
     return 99;
@@ -68,8 +71,86 @@ class Wrapper {
       if ($m is E) {
         $_ = $this->fail();
         // can't happen because $m can't be C and E at the same time
-        // note that that generall depends on the assumption that types form a tree
-        // rather than a DAG. If C & D were interfaces it would be wrong
+        // note that that depends on the concrete/abstract types form a tree
+        // rather than a more general DAG.
+      }
+    }
+    return;
+  }
+
+  public async function incomparableOneNullableOK(mixed $m): Awaitable<void> {
+    if ($m is C) {
+      if ($m is ?E) {
+        $_ = $this->fail();
+        // still can't happen
+      }
+    }
+    return;
+  }
+
+  public async function incomparableOneNullableOK2(mixed $m): Awaitable<void> {
+    if ($m is ?C) {
+      if ($m is E) {
+        $_ = $this->fail();
+        // as above with nullable in other position
+      }
+    }
+    return;
+  }
+
+  public async function incomparableTwoNullablesBad(mixed $m): Awaitable<void> {
+    if ($m is ?C) {
+      if ($m is ?E) {
+        $_ = $this->fail();
+        // now $m could be null, so this is reachable
+      }
+    }
+    return;
+  }
+
+  // I and J are incomparable interfaces
+  public async function belowIncomparableInterfacesBad(
+    mixed $m,
+  ): Awaitable<void> {
+    if ($m is I) {
+      if ($m is J) {
+        $_ = $this->fail();
+        // only upwards-closed world assumption
+        // there could be a concrete type that is both I and J
+      }
+    }
+    return;
+  }
+
+  // C is final, doesn't implement I
+  public async function finalClassKnowInterfacesOK(mixed $m): Awaitable<void> {
+    if ($m is C) {
+      if ($m is I) {
+        $_ = $this->fail();
+        // if it's less than C then it's equal to C and so can't be I
+      }
+    }
+    return;
+  }
+
+  public async function finalClassKnowInterfacesOK2(mixed $m): Awaitable<void> {
+    if ($m is I) {
+      if ($m is C) {
+        $_ = $this->fail();
+        // same as above with tests in the other order
+      }
+    }
+    return;
+  }
+
+  // D is not final, doesn't implement I
+  public async function nonFinalClassDunnoInterfacesBad(
+    mixed $m,
+  ): Awaitable<void> {
+    if ($m is D) {
+      if ($m is I) {
+        $_ = $this->fail();
+        // if it's less than D then it *might* still be something that implements I
       }
     }
     return;
@@ -96,4 +177,87 @@ class Wrapper {
     }
     return;
   }
+
+  public async function nullIsNonnullOK(): Awaitable<void> {
+    $x = null;
+    if ($x is D) {
+      $_ = $this->fail(); // never happens
+    }
+    return;
+  }
+
+  public async function nullIsNonnullBad(): Awaitable<void> {
+    $x = null;
+    if ($x is D) {
+      return; // never happens
+    }
+    $_ = $this->fail();
+  }
+
+  public async function nullIsNullableBad(): Awaitable<void> {
+    $x = null;
+    if ($x is ?D) {
+      $_ = $this->fail(); // always happens
+    }
+    return;
+  }
+
+  public async function nullIsNullableOK(): Awaitable<void> {
+    $x = null;
+    if ($x is ?D) {
+      return; // always happens
+    }
+    $_ = $this->fail();
+  }
+
+  public async function objectIsNullableOK(): Awaitable<void> {
+    $x = new D();
+    if ($x is ?D) {
+      return; // always happens
+    }
+    $_ = $this->fail();
+  }
+
+  // E subtype of D
+  public async function assumeParameterTypeOK_FP(E $x): Awaitable<void> {
+    if ($x is D) {
+      return; // always happens
+    }
+    $_ = $this->fail();
+  }
+
+  public async function assumeParameterTypeGuardedOK_FP(E $x): Awaitable<void> {
+    if ($x is null) {
+      return;
+    }
+    if ($x is D) {
+      return; // always happens
+    }
+    $_ = $this->fail();
+  }
+
+  public async function assumeNullableParameterTypeBad(?E $x): Awaitable<void> {
+    if ($x is D) {
+      return; // often happens
+    }
+    $_ = $this->fail(); // can happen if $x is null
+  }
+
+  public async function assumeNullableParameterTypeOK_FP(
+    ?E $x,
+  ): Awaitable<void> {
+    if ($x is ?D) {
+      return; // always
+    }
+    $_ = $this->fail();
+  }
+
+  // C incompatible with E
+  public async function assumeParameterTypeOK2_FP(E $x): Awaitable<void> {
+    if ($x is C) {
+      $_ = $this->fail(); // never happens
+    }
+    return;
+  }
+
 }

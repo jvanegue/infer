@@ -708,7 +708,8 @@ module InstrBridge = struct
       ->
         let typ = TypBridge.to_sil lang typ in
         let sizeof =
-          SilExp.Sizeof {typ; nbytes= None; dynamic_length= None; subtype= Subtype.exact}
+          SilExp.Sizeof
+            {typ; nbytes= None; dynamic_length= None; subtype= Subtype.exact; nullable= false}
         in
         let class_type = SilTyp.mk_ptr typ in
         let args = [(sizeof, class_type)] in
@@ -716,11 +717,21 @@ module InstrBridge = struct
         let loc = LocationBridge.to_sil sourcefile loc in
         let builtin_new = SilExp.Const (SilConst.Cfun BuiltinDecl.__new) in
         Call ((ret, class_type), builtin_new, args, loc, CallFlags.default)
-    | Let {id; exp= Call {proc; args= [target; Typ typ]}; loc}
+    | Let {id; exp= Call {proc; args= target :: Typ typ :: rest}; loc}
       when ProcDecl.is_instanceof_builtin proc ->
         let typ = TypBridge.to_sil lang typ in
+        let nullable =
+          match rest with
+          | [] ->
+              false
+          | [Const (Int n)] ->
+              Z.equal n Z.one
+          | _ ->
+              L.die InternalError "non-matching args to instanceof"
+        in
         let sizeof =
-          SilExp.Sizeof {typ; nbytes= None; dynamic_length= None; subtype= Subtype.subtypes_instof}
+          SilExp.Sizeof
+            {typ; nbytes= None; dynamic_length= None; subtype= Subtype.subtypes_instof; nullable}
         in
         let target = ExpBridge.to_sil lang decls_env procname target in
         let args = [(target, StdTyp.void_star); (sizeof, StdTyp.void)] in
@@ -734,7 +745,8 @@ module InstrBridge = struct
         let typ = SilTyp.mk_array element_typ in
         let e = ExpBridge.to_sil lang decls_env procname exp in
         let sizeof =
-          SilExp.Sizeof {typ; nbytes= None; dynamic_length= Some e; subtype= Subtype.exact}
+          SilExp.Sizeof
+            {typ; nbytes= None; dynamic_length= Some e; subtype= Subtype.exact; nullable= false}
         in
         (* TODO(T133560394): check if we need to remove Array constructors in the type typ *)
         let class_type = SilTyp.mk_ptr typ in
@@ -748,7 +760,8 @@ module InstrBridge = struct
       ->
         let typ = TypBridge.to_sil lang typ in
         let sizeof =
-          SilExp.Sizeof {typ; nbytes= None; dynamic_length= None; subtype= Subtype.exact}
+          SilExp.Sizeof
+            {typ; nbytes= None; dynamic_length= None; subtype= Subtype.exact; nullable= false}
         in
         let class_type = SilTyp.mk_ptr typ in
         let args = [(sizeof, class_type)] in
@@ -783,7 +796,10 @@ module InstrBridge = struct
                 ; attributes= [] } )
           | None ->
               let msg =
-                lazy (F.asprintf "the expression in %a should start with a regular call" pp i)
+                lazy
+                  (F.asprintf
+                     "no procdecl for %a the expression in %a should start with a regular call"
+                     ProcSig.pp procsig pp i )
               in
               raise (TextualTransformError [{loc; msg}])
         in

@@ -8,7 +8,8 @@
 open! IStd
 module F = Format
 
-type captured_data = {capture_mode: CapturedVar.capture_mode; is_weak: bool}
+type captured_data =
+  {capture_mode: CapturedVar.capture_mode; is_weak: bool; is_function_pointer: bool}
 [@@deriving compare, equal, yojson_of, sexp, hash, normalize]
 
 (** Names for fields of class/struct/union *)
@@ -31,6 +32,8 @@ val is_capture_field_in_closure : t -> bool
 val is_weak_capture_field_in_closure : t -> bool
 
 val is_capture_field_in_closure_by_ref : t -> bool
+
+val is_capture_field_function_pointer : t -> bool
 
 val is_java : t -> bool
 
@@ -64,8 +67,10 @@ val to_simplified_string : t -> string
     - In C: "<StructName>.<FieldName>" or "<UnionName>.<FieldName>"
     - In Erlang: "<FieldName>" *)
 
-val patterns_match : Re.Str.regexp list -> t -> bool
+val patterns_match : Str.regexp list -> t -> bool
 (** Test whether a field full string matches to one of the regular expressions. *)
 
 val pp : F.formatter -> t -> unit
 (** Pretty print a field name. *)
+
+val add_underscore : t -> t

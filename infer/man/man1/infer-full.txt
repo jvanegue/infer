@@ -141,6 +141,12 @@ OPTIONS
            checkers (Conversely: --no-annotation-reachability-only)
            See also infer-analyze(1).
 
+       --annotation-reachability-report-source-and-sink
+           Activates: Reports methods that are marked as both a source and a
+           sink at the same time. (Conversely:
+           --no-annotation-reachability-report-source-and-sink)
+           See also infer-analyze(1).
+
        --append-buck-flavors +string
            Additional Buck flavors to append to targets discovered by the
            --buck-compilation-database option.
@@ -318,11 +324,6 @@ OPTIONS
        --buck2-root dir
            Specify the parent directory of buck-out (used only for buck2).
            See also infer-capture(1) and infer-run(1).
-
-       --buck2-use-bxl
-           Activates: Use BXL script when capturing with buck2. (Conversely:
-           --no-buck2-use-bxl)
-           See also infer-capture(1).
 
        --bufferoverrun
            Activates: bufferoverrun checker: InferBO is a detector for
@@ -570,6 +571,10 @@ OPTIONS
            needed. (Conversely: --no-dependencies)
            See also infer-capture(1).
 
+       --dict-missing-key-var-block-list +string
+           Skip analyzing the variables in the dict-missing-key checker.
+           See also infer-analyze(1).
+
        --differential-filter-files string
            Specify the file containing the list of source files for which a
            differential report is desired. Source files should be specified
@@ -684,6 +689,7 @@ OPTIONS
              MIXED_SELF_WEAKSELF (enabled by default),
              MODIFIES_IMMUTABLE (enabled by default),
              MULTIPLE_WEAKSELF (enabled by default),
+             MUTUAL_RECURSION_CYCLE (disabled by default),
              Missing_fld (enabled by default),
              NIL_BLOCK_CALL (enabled by default),
              NIL_BLOCK_CALL_LATENT (disabled by default),
@@ -717,6 +723,7 @@ OPTIONS
              PULSE_CANNOT_INSTANTIATE_ABSTRACT_CLASS (disabled by default),
              PULSE_CONST_REFABLE (enabled by default),
              PULSE_DICT_MISSING_KEY (disabled by default),
+             PULSE_DYNAMIC_TYPE_MISMATCH (disabled by default),
              PULSE_READONLY_SHARED_PTR_PARAM (enabled by default),
              PULSE_REFERENCE_STABILITY (disabled by default),
              PULSE_RESOURCE_LEAK (enabled by default),
@@ -740,6 +747,7 @@ OPTIONS
              REGEX_OP_ON_UI_THREAD (enabled by default),
              RESOURCE_LEAK (enabled by default),
              RETAIN_CYCLE (enabled by default),
+             RETAIN_CYCLE_NO_WEAK_INFO (disabled by default),
              SCOPE_LEAKAGE (enabled by default),
              SENSITIVE_DATA_FLOW (disabled by default),
              SHELL_INJECTION (enabled by default),
@@ -1203,15 +1211,15 @@ OPTIONS
            (Conversely: --no-log-missing-deps)
            See also infer-analyze(1).
 
+       --log-pulse-coverage
+           Activates: Log precisely where coverage stops, at the end of file
+           stats/stats.txt. (Conversely: --no-log-pulse-coverage)
+           See also infer-analyze(1).
+
        --log-pulse-disjunct-increase-after-model-call
            Activates: Log which model did increase the current number of
            Pulse disjuncts. (Conversely:
            --no-log-pulse-disjunct-increase-after-model-call)
-           See also infer-analyze(1).
-
-       --log-pulse-unreachable-nodes
-           Activates: Log for each function and each summary, the ratio of
-           unreached nodes. (Conversely: --no-log-pulse-unreachable-nodes)
            See also infer-analyze(1).
 
        --loop-hoisting
@@ -1928,6 +1936,24 @@ OPTIONS
            by --report-allow-list-path-regex
            See also infer-report(1) and infer-run(1).
 
+       --report-block-list-spec json
+           Do not report the issues in this list.
+                  Example format:
+                   "report-block-list-spec": [
+                       { "bug_type": "CXX_REF_CAPTURED_IN_BLOCK",
+                         "procedure_name": "foo",
+                         "file": "path/to/File.m"
+                         "comment": "This is a fp because..."
+                       },
+                       { "bug_type": "RETAIN_CYCLE",
+                         "class_name": "MyClass",
+                         "procedure_name": "my_method"
+                         "file": "path/to/File.m"
+                       }
+                   ]
+               
+           See also infer-report(1) and infer-run(1).
+
        --report-console-limit int
            Maximum number of issues to display on standard output. Unset with
            --report-console-limit-reset to show all.
@@ -2186,6 +2212,14 @@ OPTIONS
            results database successfully as fewer datatypes are involved.
            (Conversely: --no-store-analysis-schedule)
            See also infer-analyze(1).
+
+       --struct-as-cpp-class
+           Activates: Translate C structs as C++ classes. This can be useful
+           when analyzing C/C++ code to make sure struct global variables
+           shared between C and C++ source files are treated as same
+           variables
+                (Conversely: --no-struct-as-cpp-class)
+           See also infer-capture(1).
 
        --tenv-json file
            Path to TEnv json file
@@ -2667,6 +2701,9 @@ INTERNAL OPTIONS
            Activates: Show internal exceptions (Conversely:
            --no-developer-mode)
 
+       --dict-missing-key-var-block-list-reset
+           Set --dict-missing-key-var-block-list to the empty list.
+
        --differential-filter-files-reset
            Cancel the effect of --differential-filter-files.
 
@@ -2866,6 +2903,20 @@ INTERNAL OPTIONS
            be used in the Lineage analysis
            NOTE: This is used internally by other checkers and shouldn't
            need to be activated directly. (Conversely: --no-lineage-shape)
+
+       --lineage-sink string
+           [EXPERIMENTAL; UNSTABLE API] Lineage sink for taint finding,
+           format [module:]function/arity${ret,argN}
+
+       --lineage-sink-reset
+           Cancel the effect of --lineage-sink.
+
+       --lineage-source string
+           [EXPERIMENTAL; UNSTABLE API] Lineage source for taint finding,
+           format [module:]function/arity${ret,argN}
+
+       --lineage-source-reset
+           Cancel the effect of --lineage-source.
 
        --liveness-block-list-var-regex-reset
            Cancel the effect of --liveness-block-list-var-regex.
@@ -3161,15 +3212,6 @@ INTERNAL OPTIONS
            --incremental-analysis and --continue-analysis. (Conversely:
            --no-reanalyze)
 
-       --remodel-class string
-           Specify a Remodel class name. For sub-classes of the Remodel class
-           in ObjC, setters and getters for properties are auto-generated and
-           they store/load values into/from field names of "_<property
-           name>".
-
-       --remodel-class-reset
-           Cancel the effect of --remodel-class.
-
        --report-allow-list-path-regex-reset
            Set --report-allow-list-path-regex to the empty list.
 
@@ -3295,6 +3337,16 @@ INTERNAL OPTIONS
 
        --sqlite-vfs-reset
            Cancel the effect of --sqlite-vfs.
+
+       --starvation-c-function-pointer-models json
+           Specify target function for function pointers in C. For example
+               given C code like this:
+           
+                 void (*LOCK_M2_INDIRECTLY)(void) =  &lock_m2_indirectly;
+           
+               you could model it as `{'LOCK_M2_INDIRECTLY':
+           'lock_m2_indirectly'}`
+               
 
        --starvation-skip-analysis json
            Specify combinations of class/method list that should be skipped

@@ -53,7 +53,7 @@ module Term : sig
     | BitShiftRight of t * t
     | BitXor of t * t
     | StringConcat of t * t
-    | IsInstanceOf of Var.t * Typ.t
+    | IsInstanceOf of {var: Var.t; typ: Typ.t; nullable: bool}
     | IsInt of t
  [@@deriving compare, equal, yojson_of]
 
@@ -147,14 +147,13 @@ val and_equal_vars : Var.t -> Var.t -> t -> (t * new_eqs) SatUnsat.t
 
 val and_not_equal : operand -> operand -> t -> (t * new_eqs) SatUnsat.t
 
-val and_equal_instanceof : Var.t -> Var.t -> Typ.t -> t -> (t * new_eqs) SatUnsat.t
+val and_equal_instanceof : Var.t -> Var.t -> Typ.t -> nullable:bool -> t -> (t * new_eqs) SatUnsat.t
 
 type dynamic_type_data = {typ: Typ.t; source_file: SourceFile.t option}
 
 val get_dynamic_type : Var.t -> t -> dynamic_type_data option
 
-val and_dynamic_type_is :
-  Var.t -> Typ.t -> ?source_file:SourceFile.t -> t -> (t * new_eqs) SatUnsat.t
+val and_dynamic_type : Var.t -> Typ.t -> ?source_file:SourceFile.t -> t -> (t * new_eqs) SatUnsat.t
 
 val add_dynamic_type_unsafe : Var.t -> Typ.t -> ?source_file:SourceFile.t -> Location.t -> t -> t
 
@@ -230,3 +229,13 @@ val absval_of_int : t -> IntLit.t -> t * Var.t
     return the same abstract variable. *)
 
 val absval_of_string : t -> string -> t * Var.t
+
+type term
+
+val explain_as_term : t -> Var.t -> term option
+
+val pp_term : (F.formatter -> Var.t -> unit) -> F.formatter -> term -> unit
+
+val pp_conditions_explained : (F.formatter -> Var.t -> unit) -> F.formatter -> t -> unit
+
+val pp_formula_explained : (F.formatter -> Var.t -> unit) -> F.formatter -> t -> unit

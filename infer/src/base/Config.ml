@@ -603,14 +603,6 @@ and analysis_schedule_file =
     ^ ResultsDirEntryName.get_path ~results_dir:"infer-out" AnalysisDependencyGraph )
 
 
-and _annotation_reachability_apply_class_annotations =
-  CLOpt.mk_bool ~long:""
-    ~deprecated:["-annotation-reachability-apply-class-annotations"]
-    ~deprecated_no:["-no-annotation-reachability-apply-class-annotations"]
-    ~in_help:InferCommand.[(Analyze, manual_java)]
-    "Applies annotations of a class/interface to all its methods" ~default:true
-
-
 and annotation_reachability_apply_superclass_annotations =
   CLOpt.mk_bool ~long:"annotation-reachability-apply-superclass-annotations"
     ~in_help:InferCommand.[(Analyze, manual_java)]
@@ -681,6 +673,12 @@ and annotation_reachability_no_allocation =
     ~default:false
     "check if methods annotated with @NoAllocation can allocate (with annotation reachability \
      checker)"
+
+
+and annotation_reachability_report_source_and_sink =
+  CLOpt.mk_bool ~long:"annotation-reachability-report-source-and-sink"
+    ~in_help:InferCommand.[(Analyze, manual_java)]
+    "Reports methods that are marked as both a source and a sink at the same time." ~default:false
 
 
 and append_buck_flavors =
@@ -1087,10 +1085,10 @@ and buck2_root =
     "Specify the parent directory of $(b, buck-out) (used only for $(b, buck2))."
 
 
-and buck2_use_bxl =
-  CLOpt.mk_bool ~long:"buck2-use-bxl" ~default:false
+and _buck2_use_bxl =
+  CLOpt.mk_bool ~long:"" ~deprecated:["-buck2-use-bxl"] ~deprecated_no:["-no-buck2-use-bxl"]
     ~in_help:InferCommand.[(Capture, manual_buck)]
-    "Use BXL script when capturing with buck2."
+    ~default:false "[DOES NOTHING] Use BXL script when capturing with buck2."
 
 
 and buck_block_list =
@@ -1539,6 +1537,12 @@ and dependencies =
     ~in_help:InferCommand.[(Capture, manual_java)]
     "Translate all the dependencies during the capture. The classes in the given jar file will be \
      translated. No sources needed."
+
+
+and dict_missing_key_var_block_list =
+  CLOpt.mk_string_list ~long:"dict-missing-key-var-block-list" ~meta:"string"
+    ~in_help:InferCommand.[(Analyze, manual_generic)]
+    "Skip analyzing the variables in the dict-missing-key checker."
 
 
 and differential_filter_files =
@@ -2007,6 +2011,18 @@ and kotlin_capture =
     "Enable Kotlin capture (experimental, do not use)."
 
 
+and lineage_source =
+  CLOpt.mk_string_opt ~long:"lineage-source"
+    "[EXPERIMENTAL; UNSTABLE API] Lineage source for taint finding, format \
+     [module:]function/arity${ret,argN}"
+
+
+and lineage_sink =
+  CLOpt.mk_string_opt ~long:"lineage-sink"
+    "[EXPERIMENTAL; UNSTABLE API] Lineage sink for taint finding, format \
+     [module:]function/arity${ret,argN}"
+
+
 and lineage_dedup =
   CLOpt.mk_bool ~deprecated:["-simple-lineage-dedup"] ~long:"lineage-dedup" ~default:true
     ~in_help:InferCommand.[(Analyze, manual_lineage)]
@@ -2155,14 +2171,14 @@ and _log_events =
 
 and log_pulse_disjunct_increase_after_model_call =
   CLOpt.mk_bool ~long:"log-pulse-disjunct-increase-after-model-call" ~default:false
-    ~in_help:InferCommand.[(Analyze, manual_generic)]
+    ~in_help:InferCommand.[(Analyze, manual_pulse)]
     "Log which model did increase the current number of Pulse disjuncts."
 
 
-and log_pulse_unreachable_nodes =
-  CLOpt.mk_bool ~long:"log-pulse-unreachable-nodes" ~default:false
-    ~in_help:InferCommand.[(Analyze, manual_generic)]
-    "Log for each function and each summary, the ratio of unreached nodes."
+and log_pulse_coverage =
+  CLOpt.mk_bool ~long:"log-pulse-coverage" ~default:false
+    ~in_help:InferCommand.[(Analyze, manual_pulse)]
+    "Log precisely where coverage stops, at the end of file stats/stats.txt."
 
 
 and log_missing_deps =
@@ -3046,8 +3062,8 @@ and relative_path_backtrack =
      convert /my/source/File.java with project root /my/root into ../source/File.java"
 
 
-and remodel_class =
-  CLOpt.mk_string_opt ~long:"remodel-class"
+and _remodel_class =
+  CLOpt.mk_string_opt ~long:"" ~deprecated:["-remodel-class"]
     "Specify a Remodel class name. For sub-classes of the Remodel class in ObjC, setters and \
      getters for properties are auto-generated and they store/load values into/from field names of \
      \"_<property name>\"."
@@ -3106,6 +3122,26 @@ and ( report_block_list_files_containing
       ~meta:"path_regex" ()
   , mk_filtering_option ~suffix:"suppress-errors" ~help:"do not report a type of errors"
       ~meta:"error_name" () )
+
+
+and report_block_list_spec =
+  CLOpt.mk_json ~long:"report-block-list-spec"
+    ~in_help:InferCommand.[(Report, manual_generic); (Run, manual_generic)]
+    {|Do not report the issues in this list.
+       Example format:
+        "report-block-list-spec": [
+            { "bug_type": "CXX_REF_CAPTURED_IN_BLOCK",
+              "procedure_name": "foo",
+              "file": "path/to/File.m"
+              "comment": "This is a fp because..."
+            },
+            { "bug_type": "RETAIN_CYCLE",
+              "class_name": "MyClass",
+              "procedure_name": "my_method"
+              "file": "path/to/File.m"
+            }
+        ]
+    |}
 
 
 and report_console_limit =
@@ -3430,6 +3466,15 @@ and sqlite_page_size =
 
 and sqlite_vfs = CLOpt.mk_string_opt ~long:"sqlite-vfs" "VFS for SQLite"
 
+and starvation_c_function_pointer_models =
+  CLOpt.mk_json ~long:"starvation-c-function-pointer-models"
+    "Specify target function for function pointers in C. For example\n\
+    \    given C code like this:\n\n\
+    \      void (*LOCK_M2_INDIRECTLY)(void) =  &lock_m2_indirectly;\n\n\
+    \    you could model it as `{'LOCK_M2_INDIRECTLY': 'lock_m2_indirectly'}`\n\
+    \    "
+
+
 and starvation_skip_analysis =
   CLOpt.mk_json ~long:"starvation-skip-analysis"
     "Specify combinations of class/method list that should be skipped during starvation analysis"
@@ -3457,6 +3502,14 @@ and stats_dir_previous =
   CLOpt.mk_path_opt ~long:"stats-dir-previous"
     ~in_help:InferCommand.[(ReportDiff, manual_generic)]
     "The infer-out/stats from a previous run. See $(b,--stats-dir-current)."
+
+
+and struct_as_cpp_class =
+  CLOpt.mk_bool ~long:"struct-as-cpp-class" ~default:false
+    ~in_help:InferCommand.[(Capture, manual_clang)]
+    "Translate C structs as C++ classes. This can be useful when analyzing C/C++ code to make sure \
+     struct global variables shared between C and C++ source files are treated as same variables\n\
+    \    "
 
 
 and store_analysis_schedule =
@@ -3816,9 +3869,12 @@ let post_parsing_initialization command_opt =
   Option.value ~default:InferCommand.Run command_opt
 
 
-let join_patterns ~pattern_opt ~pattern_list =
-  let patterns = Option.to_list !pattern_opt @ RevList.to_list !pattern_list in
+let join_patterns_list patterns =
   if List.is_empty patterns then None else Some (String.concat ~sep:"\\|" patterns |> Str.regexp)
+
+
+let join_patterns ~pattern_opt ~pattern_list =
+  join_patterns_list (Option.to_list !pattern_opt @ RevList.to_list !pattern_list)
 
 
 let command =
@@ -3851,6 +3907,8 @@ and annotation_reachability_cxx_sources = !annotation_reachability_cxx_sources
 and annotation_reachability_expensive = !annotation_reachability_expensive
 
 and annotation_reachability_no_allocation = !annotation_reachability_no_allocation
+
+and annotation_reachability_report_source_and_sink = !annotation_reachability_report_source_and_sink
 
 and append_buck_flavors = RevList.to_list !append_buck_flavors
 
@@ -3929,8 +3987,6 @@ and buck2_isolation_dir = !buck2_isolation_dir
 and buck2_query_deps = !buck2_query_deps
 
 and buck2_root = match !buck2_root with Some root -> root | None -> !project_root
-
-and buck2_use_bxl = !buck2_use_bxl
 
 and buck_block_list = RevList.to_list !buck_block_list
 
@@ -4038,15 +4094,15 @@ and compaction_minimum_interval_s = !compaction_minimum_interval_s
 and complete_capture_from = !complete_capture_from
 
 and config_impact_config_field_patterns =
-  RevList.rev_map !config_impact_config_field_patterns ~f:Re.Str.regexp
+  RevList.rev_map !config_impact_config_field_patterns ~f:Str.regexp
 
 
 and config_impact_config_function_patterns =
-  RevList.rev_map !config_impact_config_function_patterns ~f:Re.Str.regexp
+  RevList.rev_map !config_impact_config_function_patterns ~f:Str.regexp
 
 
 and config_impact_config_param_patterns =
-  RevList.rev_map !config_impact_config_param_patterns ~f:Re.Str.regexp
+  RevList.rev_map !config_impact_config_param_patterns ~f:Str.regexp
 
 
 and config_impact_current = !config_impact_current
@@ -4102,6 +4158,10 @@ and debug_mode = !debug
 and deduplicate = !deduplicate
 
 and dependency_mode = !dependencies
+
+and dict_missing_key_var_block_list =
+  join_patterns_list (RevList.to_list !dict_missing_key_var_block_list)
+
 
 and developer_mode = !developer_mode
 
@@ -4250,6 +4310,10 @@ and keep_going = !keep_going
 
 and kotlin_capture = !kotlin_capture
 
+and lineage_source = !lineage_source
+
+and lineage_sink = !lineage_sink
+
 and lineage_dedup = !lineage_dedup
 
 and lineage_field_depth = !lineage_field_depth
@@ -4290,7 +4354,7 @@ and lock_model = !lock_model
 
 and log_pulse_disjunct_increase_after_model_call = !log_pulse_disjunct_increase_after_model_call
 
-and log_pulse_unreachable_nodes = !log_pulse_unreachable_nodes
+and log_pulse_coverage = !log_pulse_coverage
 
 and log_missing_deps = !log_missing_deps
 
@@ -4621,13 +4685,16 @@ and reanalyze = !reanalyze
 
 and relative_path_backtrack = !relative_path_backtrack
 
-and remodel_class = !remodel_class
-
 and replay_analysis_schedule = !replay_analysis_schedule
 
 and replay_ondemand_should_error = !replay_ondemand_should_error
 
 and report = !report
+
+and report_block_list_spec =
+  Report_block_list_spec_j.report_block_list_specs_of_string
+    (Yojson.Safe.to_string !report_block_list_spec)
+
 
 and report_block_list_files_containing = RevList.to_list !report_block_list_files_containing
 
@@ -4687,13 +4754,7 @@ and siof_check_iostreams = !siof_check_iostreams
 
 and siof_safe_methods = RevList.to_list !siof_safe_methods
 
-and skip_analysis_in_path =
-  match RevList.to_list !skip_analysis_in_path with
-  | [] ->
-      None
-  | regexps ->
-      Some (Str.regexp (String.concat ~sep:"\\|" regexps))
-
+and skip_analysis_in_path = join_patterns_list (RevList.to_list !skip_analysis_in_path)
 
 and skip_analysis_in_path_skips_compilation = !skip_analysis_in_path_skips_compilation
 
@@ -4737,6 +4798,8 @@ and sqlite_page_size = !sqlite_page_size
 
 and sqlite_vfs = !sqlite_vfs
 
+and starvation_c_function_pointer_models = !starvation_c_function_pointer_models
+
 and starvation_skip_analysis = !starvation_skip_analysis
 
 and starvation_strict_mode = !starvation_strict_mode
@@ -4746,6 +4809,8 @@ and starvation_whole_program = !starvation_whole_program
 and stats_dir_current = !stats_dir_current
 
 and stats_dir_previous = !stats_dir_previous
+
+and struct_as_cpp_class = !struct_as_cpp_class
 
 and store_analysis_schedule = !store_analysis_schedule
 

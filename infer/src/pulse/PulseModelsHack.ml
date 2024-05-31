@@ -26,11 +26,14 @@ let mixed_type_name = TextualSil.hack_mixed_type_name
 
 let hack_string_type_name = TextualSil.hack_string_type_name
 
+let string_val_field = Fieldname.make hack_string_type_name "val"
+
 let read_string_value address astate = PulseArithmetic.as_constant_string astate address
 
 let read_string_value_dsl aval : string option DSL.model_monad =
   let open PulseModelsDSL.Syntax in
-  let operation astate = (read_string_value (fst aval) astate, astate) in
+  let* inner_val = eval_deref_access Read aval (FieldAccess string_val_field) in
+  let operation astate = (read_string_value (fst inner_val) astate, astate) in
   let* opt_string = exec_operation operation in
   ret opt_string
 
@@ -201,6 +204,16 @@ module Vec = struct
 
   let hack_array_get_one_dim vec key : DSL.aval DSL.model_monad =
     let open DSL.Syntax in
+    let* key_type = get_dynamic_type ~ask_specialization:false key in
+    let* () =
+      option_iter key_type ~f:(fun {Formula.typ} ->
+          match typ with
+          | {desc= Tstruct type_name} when not (Typ.Name.equal type_name hack_int_type_name) ->
+              let* {location} = get_data in
+              report (Diagnostic.DynamicTypeMismatch {location})
+          | _ ->
+              ret () )
+    in
     let field = Fieldname.make hack_int_type_name "val" in
     let* index = eval_deref_access Read key (FieldAccess field) in
     get_vec_dsl vec index
@@ -266,9 +279,8 @@ let int_to_hack_int n : DSL.aval DSL.model_monad =
 
 let hack_string_dsl str_val : DSL.aval DSL.model_monad =
   let open DSL.Syntax in
-  let* () = and_dynamic_type_is str_val (Typ.mk_struct hack_string_type_name) in
-  let* () = and_positive str_val in
-  ret str_val
+  let* ret_val = constructor hack_string_type_name [("val", str_val)] in
+  ret ret_val
 
 
 let hack_string str_val : model =
@@ -907,7 +919,8 @@ let hhbc_cmp_same x y : model =
   in
   let* res =
     disjuncts
-      [ (let* () = prune_eq x y in
+      [ (let* () = prune_eq_zero x in
+         let* () = prune_eq_zero y in
          make_hack_bool true )
       ; (let* () = prune_eq_zero x in
          let* () = prune_ne_zero y in
@@ -915,8 +928,7 @@ let hhbc_cmp_same x y : model =
       ; (let* () = prune_ne_zero x in
          let* () = prune_eq_zero y in
          make_hack_bool false )
-      ; (let* () = prune_ne x y in
-         let* () = prune_ne_zero x in
+      ; (let* () = prune_ne_zero x in
          let* () = prune_ne_zero y in
          let* x_dynamic_type_data = get_dynamic_type ~ask_specialization:true x in
          let* y_dynamic_type_data = get_dynamic_type ~ask_specialization:true y in
@@ -942,20 +954,27 @@ let hhbc_cmp_same x y : model =
                value_equality_test x_val y_val )
              else if Typ.Name.equal x_typ_name hack_string_type_name then (
                L.d_printfln "hhbc_cmp_same: both are strings" ;
-               let* opt_str_x = read_string_value_dsl x in
-               let* opt_str_y = read_string_value_dsl y in
-               match Option.both opt_str_x opt_str_y with
-               | Some (str_x, str_y) ->
-                   String.equal str_x str_y |> make_hack_bool
-               | None ->
-                   make_hack_random_bool )
+               let* x_val = eval_deref_access Read x (FieldAccess string_val_field) in
+               let* y_val = eval_deref_access Read y (FieldAccess string_val_field) in
+               disjuncts
+                 [ (let* () = prune_eq x_val y_val in
+                    make_hack_bool true )
+                 ; (let* () = prune_ne x_val y_val in
+                    make_hack_bool false ) ] )
              else (
                L.d_printfln "hhbc_cmp_same: not a known primitive type" ;
-               (* TODO(dpichardie) cover the comparisons of vec, keyset, dict and
-                  shape, taking into account the difference between == and ===. *)
-               (* TODO(dpichardie) cover the specificities of == that compare objects properties
-                  (structural equality). *)
-               make_hack_random_bool )
+               disjuncts
+                 [ (let* () = prune_eq x y in
+                    (* CAUTION: Note that the pruning on a pointer may result in incorrect semantics
+                       if the pointer is given as a parameter. In that case, the pruning may work as
+                       a value assignment to the pointer. *)
+                    make_hack_bool true )
+                 ; (let* () = prune_ne x y in
+                    (* TODO(dpichardie) cover the comparisons of vec, keyset, dict and
+                       shape, taking into account the difference between == and ===. *)
+                    (* TODO(dpichardie) cover the specificities of == that compare objects properties
+                       (structural equality). *)
+                    make_hack_random_bool ) ] )
          | Some {Formula.typ= x_typ}, Some {Formula.typ= y_typ} when not (Typ.equal x_typ y_typ) ->
              L.d_printfln "hhbc_cmp_same: known different dynamic types: false result" ;
              make_hack_bool false
@@ -1215,7 +1234,7 @@ let hhbc_iter_init iteraddr keyaddr eltaddr arg : model =
        ~default:(fun () -> VecIter.iter_init_vec iteraddr keyaddr eltaddr arg)
 
 
-let hhbc_iter_next iter keyaddr eltaddr : model =
+let hhbc_iter_next iter keyaddr eltaddr _base : model =
   let open DSL.Syntax in
   start_model
   @@ dynamic_dispatch iter
@@ -1398,9 +1417,12 @@ let hhbc_cast_string arg : model =
 let hhbc_concat arg1 arg2 : model =
   let open DSL.Syntax in
   start_model
-  @@ let* res = eval_string_concat arg1 arg2 in
-     let* res = hack_string_dsl res in
-     assign_ret res
+  @@
+  let* arg1_val = eval_deref_access Read arg1 (FieldAccess string_val_field) in
+  let* arg2_val = eval_deref_access Read arg2 (FieldAccess string_val_field) in
+  let* res = eval_string_concat arg1_val arg2_val in
+  let* res = hack_string_dsl res in
+  assign_ret res
 
 
 let matchers : matcher list =
@@ -1466,5 +1488,5 @@ let matchers : matcher list =
   ; -"$builtins" &:: "hhbc_iter_init" <>$ capt_arg_payload $+ capt_arg_payload $+ capt_arg_payload
     $+ capt_arg_payload $--> hhbc_iter_init
   ; -"$builtins" &:: "hhbc_iter_next" <>$ capt_arg_payload $+ capt_arg_payload $+ capt_arg_payload
-    $--> hhbc_iter_next ]
+    $+ capt_arg_payload $--> hhbc_iter_next ]
   |> List.map ~f:(ProcnameDispatcher.Call.contramap_arg_payload ~f:ValueOrigin.addr_hist)

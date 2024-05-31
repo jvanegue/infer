@@ -125,6 +125,9 @@ OPTIONS
            --parameter-not-null-checked, --pulse, --racerd, --siof,
            --self-in-block, --starvation (Conversely: --default-checkers)
 
+       --dict-missing-key-var-block-list +string
+           Skip analyzing the variables in the dict-missing-key checker.
+
        --files-to-analyze-index file
            File containing a list of source files where analysis should start
            from. When used, the set of files given to this argument must be a
@@ -229,15 +232,6 @@ OPTIONS
        --log-missing-deps
            Activates: Log analysis dependencies that cannot be found.
            (Conversely: --no-log-missing-deps)
-
-       --log-pulse-disjunct-increase-after-model-call
-           Activates: Log which model did increase the current number of
-           Pulse disjuncts. (Conversely:
-           --no-log-pulse-disjunct-increase-after-model-call)
-
-       --log-pulse-unreachable-nodes
-           Activates: Log for each function and each summary, the ratio of
-           unreached nodes. (Conversely: --no-log-pulse-unreachable-nodes)
 
        --loop-hoisting
            Activates: loop-hoisting checker: Detect opportunities to hoist
@@ -664,6 +658,11 @@ JAVA OPTIONS
            allocate (with annotation reachability checker) (Conversely:
            --no-annotation-reachability-no-allocation)
 
+       --annotation-reachability-report-source-and-sink
+           Activates: Reports methods that are marked as both a source and a
+           sink at the same time. (Conversely:
+           --no-annotation-reachability-report-source-and-sink)
+
        --external-java-packages +prefix
            Specify a list of Java package prefixes for external Java
            packages. If set, the analysis will not report non-actionable
@@ -733,6 +732,15 @@ LINEAGE OPTIONS
            set.
 
 PULSE CHECKER OPTIONS
+       --log-pulse-coverage
+           Activates: Log precisely where coverage stops, at the end of file
+           stats/stats.txt. (Conversely: --no-log-pulse-coverage)
+
+       --log-pulse-disjunct-increase-after-model-call
+           Activates: Log which model did increase the current number of
+           Pulse disjuncts. (Conversely:
+           --no-log-pulse-disjunct-increase-after-model-call)
+
        --pulse-cut-to-one-path-procedures-pattern string
            Regex of methods for which pulse will only explore one path. Can
            be used on pathologically large procedures to prevent too-big

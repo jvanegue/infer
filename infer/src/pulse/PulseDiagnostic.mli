@@ -79,6 +79,7 @@ type t =
   | ConstRefableParameter of {param: Var.t; typ: Typ.t; location: Location.t}
   | CSharpResourceLeak of
       {class_name: CSharpClassName.t; allocation_trace: Trace.t; location: Location.t}
+  | DynamicTypeMismatch of {location: Location.t}
   | ErlangError of ErlangError.t
   | InfiniteError of {location: Location.t}
   | TransitiveAccess of
@@ -89,12 +90,15 @@ type t =
       ; transitive_missed_captures: Typ.Name.Set.t }
   | JavaResourceLeak of
       {class_name: JavaClassName.t; allocation_trace: Trace.t; location: Location.t}
+  | HackCannotInstantiateAbstractClass of
+      {type_name: Typ.Name.t; trace: Trace.t; location: Location.t}
   | HackUnawaitedAwaitable of {allocation_trace: Trace.t; location: Location.t}
   | MemoryLeak of {allocator: Attribute.allocator; allocation_trace: Trace.t; location: Location.t}
+  | MutualRecursionCycle of {cycle: Trace.t; location: Location.t}
   | ReadonlySharedPtrParameter of
       {param: Var.t; typ: Typ.t; location: Location.t; used_locations: Location.t list}
   | ReadUninitialized of ReadUninitialized.t
-  | RetainCycle of {values: retain_cycle_data list; location: Location.t}
+  | RetainCycle of {values: retain_cycle_data list; location: Location.t; unknown_access_type: bool}
   | StackVariableAddressEscape of {variable: Var.t; history: ValueHistory.t; location: Location.t}
   | TaintFlow of
       { expr: DecompilerExpr.t

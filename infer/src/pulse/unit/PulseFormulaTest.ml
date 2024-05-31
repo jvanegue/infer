@@ -51,7 +51,7 @@ let of_binop bop f1 f2 phi =
 [@@@warning "-unused-value-declaration"]
 
 let instanceof typ x_var y_var phi =
-  let+ phi, _new_eqs = and_equal_instanceof y_var x_var typ phi in
+  let+ phi, _new_eqs = and_equal_instanceof y_var x_var typ ~nullable:false phi in
   phi
 
 
@@ -98,6 +98,12 @@ let ( = ) f1 f2 phi =
   let* phi, op1 = f1 phi in
   let* phi, op2 = f2 phi in
   and_equal op1 op2 phi >>| fst
+
+
+let ( =. ) f1 f2 phi =
+  let* phi, op1 = f1 phi in
+  let* phi, op2 = f2 phi in
+  prune_binop ~negated:false Binop.Eq op1 op2 phi >>| fst
 
 
 let ( <> ) f1 f2 phi =
@@ -193,7 +199,7 @@ let normalize phi = normalize_with phi ttrue
 let normalize_with_all_types_Nil phi =
   match
     SatUnsat.list_fold [x_var; y_var; z_var; w_var] ~init:ttrue ~f:(fun phi v ->
-        let* phi, _ = and_dynamic_type_is v nil_typ phi in
+        let* phi, _ = and_dynamic_type v nil_typ phi in
         Sat phi )
   with
   | Unsat ->
@@ -201,6 +207,8 @@ let normalize_with_all_types_Nil phi =
   | Sat init_phi ->
       normalize_with phi init_phi
 
+
+let () = Language.curr_language := Language.Erlang
 
 let simplify ~keep phi =
   let keep = AbstractValue.Set.of_list keep in
@@ -236,9 +244,13 @@ let%test_module "normalization" =
     let%expect_test _ =
       normalize_with_all_types_Nil
         (instanceof cons_typ x_var y_var && instanceof nil_typ x_var y_var) ;
-      [%expect {|
+      [%expect
+        {|
         Formula:
-          unsat
+          conditions: (empty)
+          phi: type_constraints: x:ErlangNil, SourceFile [None]∧y:ErlangNil, SourceFile [None]
+                                 ∧z:ErlangNil, SourceFile [None]∧w:ErlangNil, SourceFile [None]
+               && term_eqs: (x instanceof ErlangCons nullable=false)=y∧(x instanceof ErlangNil nullable=false)=y
         Result: same|}]
 
 
@@ -603,6 +615,19 @@ let%test_module "inequalities" =
                && term_eqs: 0=a2∧1=a1∧32=x∧64=y
                && intervals: a2=0 ∧ x=32 ∧ y=64
         Result: same|}]
+
+
+    let%expect_test "(negated) inequality followed by pruned equality" =
+      normalize (lt x (i 2) = i 0 && x =. i 2) ;
+      [%expect
+        {|
+         Formula:
+           conditions: {x = 2}
+           phi: var_eqs: a1=v6
+                && linear_eqs: a1 = 0 ∧ x = 2
+                && term_eqs: 0=a1∧2=x
+                && intervals: a1=0 ∧ x=2
+         Result: same |}]
   end )
 
 
@@ -671,7 +696,7 @@ let%test_module "conjunctive normal form" =
         {|
           Formula:
             conditions: (empty)
-            phi: var_eqs: a1=x=v6=v7=v8=v9=v10 && linear_eqs: a1 = 0 && term_eqs: 0=a1 && intervals: a1=0
+            phi: var_eqs: x=v6=v7=v8=v9=v10 && linear_eqs: x = 0 && term_eqs: 0=x && intervals: x=0
           Result: same |}]
 
 
@@ -689,9 +714,9 @@ let%test_module "conjunctive normal form" =
         {|
           Formula:
             conditions: (empty)
-            phi: var_eqs: a4=a2=x ∧ a3=a1 ∧ v6=v7
-                 && linear_eqs: a3 = a4 -1 ∧ v6 = 1
-                 && term_eqs: 1=v6∧[a4 -1]=a3
+            phi: var_eqs: v6=v7
+                 && linear_eqs: x = a1 +1 ∧ v6 = 1
+                 && term_eqs: 1=v6∧[a1 +1]=x∧(0<x)=v6∧(0≤x)=v6
                  && intervals: v8≠0
                  && atoms: {v8 ≠ 0}
           Result: same|}]

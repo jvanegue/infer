@@ -14,27 +14,19 @@ module Callees : sig
 
   val pp : Format.formatter -> t -> unit
 
+  (** NOTE: only [Closure] is recorded for now *)
   type call_kind = Static | Virtual | Closure
 
-  type resolution = ResolvedUsingDynamicType | ResolvedUsingStaticType | Unresolved
+  type resolution =
+    | ResolvedUsingDynamicType  (** the most precise resolution *)
+    | ResolvedUsingStaticType  (** may not be exact *)
+    | Unresolved
+        (** the worst resolution because we don't have enough type information or the capture was
+            incomplete *)
 
-  val record :
-       caller_name:string
-    -> caller_loc:Location.t
-    -> callsite_loc:Location.t
-    -> call_kind
-    -> resolution
-    -> t
-    -> t
+  val record : caller:Procdesc.t -> Location.t -> call_kind -> resolution -> t -> t
 
-  type item =
-    { callsite_loc: Location.t
-    ; caller_name: string
-    ; caller_loc: Location.t
-    ; kind: call_kind
-    ; resolution: resolution }
-
-  val report_as_extra_info : t -> item list
+  val to_jsonbug_transitive_callees : t -> Jsonbug_t.transitive_callee list
 end
 
 type t =
@@ -50,6 +42,3 @@ include AbstractDomain.WithBottom with type t := t
 val apply_summary : callee_pname:Procname.t -> call_loc:Location.t -> summary:t -> t -> t
 
 val remember_dropped_elements : dropped:t -> t -> t
-
-val transfer_transitive_info_to_caller :
-  caller:t -> Procname.t -> Location.t -> callee_summary:t -> t

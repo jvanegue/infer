@@ -419,15 +419,19 @@ module Resource = struct
   (* I think this function needs to match all the cases *)
 
   let model_with_analysis args
-      {analysis_data= {analyze_dependency; tenv; proc_desc}; path; callee_procname; location; ret}
-      astate non_disj =
+      { analysis_data= {analyze_dependency; tenv; err_log; proc_desc}
+      ; path
+      ; callee_procname
+      ; location
+      ; ret } astate non_disj =
     let actuals =
       List.map args ~f:(fun ProcnameDispatcher.Call.FuncArg.{arg_payload; typ} ->
           (arg_payload, typ) )
     in
     let res, non_disj, _, is_known_call =
-      PulseCallOperations.call tenv path ~caller_proc_desc:proc_desc ~analyze_dependency location
-        callee_procname ~ret ~actuals ~formals_opt:None ~call_kind:`ResolvedProcname astate non_disj
+      PulseCallOperations.call tenv err_log path ~caller_proc_desc:proc_desc ~analyze_dependency
+        location callee_procname ~ret ~actuals ~formals_opt:None ~call_kind:`ResolvedProcname astate
+        non_disj
     in
     match is_known_call with
     | `KnownCall ->
@@ -482,7 +486,7 @@ module Resource = struct
     PulseOperations.csharp_resource_release ~recursive:false (fst this) astate |> Basic.ok_continue
 end
 
-let string_length_access = MemoryAccess.FieldAccess PulseOperations.ModeledField.string_length
+let string_length_access = Access.FieldAccess PulseOperations.ModeledField.string_length
 
 let string_is_null_or_whitespace ~desc ((addr, hist) as addr_hist) : model_no_non_disj =
  fun {path; location; ret= ret_id, _} astate ->
