@@ -13,7 +13,10 @@ type 'payload t =
   ; err_log: Errlog.t
   ; exe_env: Exe_env.t
   ; analyze_dependency: ?specialization:Specialization.t -> Procname.t -> 'payload AnalysisResult.t
+  ; add_errlog: Procname.t -> Errlog.t -> unit
   ; update_stats: ?add_symops:int -> ?failure_kind:Exception.failure_kind -> unit -> unit }
+
+let for_procedure proc_desc err_log data = {data with proc_desc; err_log}
 
 type 'payload file_t =
   { source_file: SourceFile.t

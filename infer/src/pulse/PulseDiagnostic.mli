@@ -44,6 +44,7 @@ module ErlangError : sig
     | Badrecord of {calling_context: calling_context; location: Location.t}
     | Badreturn of {calling_context: calling_context; location: Location.t}
     | Case_clause of {calling_context: calling_context; location: Location.t}
+    | Else_clause of {calling_context: calling_context; location: Location.t}
     | Function_clause of {calling_context: calling_context; location: Location.t}
     | If_clause of {calling_context: calling_context; location: Location.t}
     | Try_clause of {calling_context: calling_context; location: Location.t}
@@ -90,11 +91,10 @@ type t =
       ; transitive_missed_captures: Typ.Name.Set.t }
   | JavaResourceLeak of
       {class_name: JavaClassName.t; allocation_trace: Trace.t; location: Location.t}
-  | HackCannotInstantiateAbstractClass of
-      {type_name: Typ.Name.t; trace: Trace.t; location: Location.t}
+  | HackCannotInstantiateAbstractClass of {type_name: Typ.Name.t; trace: Trace.t}
   | HackUnawaitedAwaitable of {allocation_trace: Trace.t; location: Location.t}
   | MemoryLeak of {allocator: Attribute.allocator; allocation_trace: Trace.t; location: Location.t}
-  | MutualRecursionCycle of {cycle: Trace.t; location: Location.t}
+  | MutualRecursionCycle of {cycle: PulseMutualRecursion.t; location: Location.t}
   | ReadonlySharedPtrParameter of
       {param: Var.t; typ: Typ.t; location: Location.t; used_locations: Location.t list}
   | ReadUninitialized of ReadUninitialized.t

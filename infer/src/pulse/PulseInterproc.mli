@@ -45,9 +45,9 @@ val merge_contradictions : contradiction option -> contradiction option -> contr
     a single one, using this [merge_contradictions] function. *)
 
 val apply_summary :
-     Tenv.t
+     _ InterproceduralAnalysis.t
   -> PathContext.t
-  -> Procname.t
+  -> callee_proc_name:Procname.t
   -> Location.t
   -> callee_summary:AbductiveDomain.Summary.t
   -> captured_formals:(Pvar.t * Typ.t) list

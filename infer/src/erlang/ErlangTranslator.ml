@@ -630,8 +630,8 @@ and translate_expression env {Ast.location; simple_expression} =
         translate_expression_map_update env ret_var map updates
     | Match {pattern; body} ->
         translate_expression_match env ret_var pattern body
-    | Maybe body ->
-        translate_expression_maybe env body ret_var
+    | Maybe {body; else_cases} ->
+        translate_expression_maybe env body else_cases ret_var
     | MaybeMatch _ ->
         (* MaybeMatch can only be on the top level of a Maybe expression and is
            handled separately when processing the Maybe. *)
@@ -1168,19 +1168,20 @@ and translate_expression_match (env : (_, _) Env.t) ret_var pattern body : Block
   Block.all env [body_block; pattern_block; store_return_block]
 
 
-and translate_expression_maybe (env : (_, _) Env.t) body ret_var : Block.t =
+and translate_expression_maybe (env : (_, _) Env.t) body else_cases ret_var : Block.t =
+  let short_circuit_result = mk_fresh_id () in
   let rev_blocks, last_expr_result =
     let f (rev_blocks, _) (one_expr : Ast.expression) =
       match one_expr.simple_expression with
       | MaybeMatch {body; pattern} ->
           (* MaybeMatch can only appear on the top level of a Maybe and is treated in
              a special way: if the pattern does not match, we store the result of the
-             body in the return value before we go to exit_failure. *)
+             body in a special variable before we go to exit_failure. *)
           let body_id, body_block = translate_expression_to_fresh_id env body in
           let pattern_block = translate_pattern env body_id pattern in
-          let store_ret = Node.make_load env ret_var (Var body_id) any_typ in
-          pattern_block.exit_failure |~~> [store_ret] ;
-          let pattern_block = {pattern_block with exit_failure= store_ret} in
+          let store_result = Node.make_load env short_circuit_result (Var body_id) any_typ in
+          pattern_block.exit_failure |~~> [store_result] ;
+          let pattern_block = {pattern_block with exit_failure= store_result} in
           (pattern_block :: body_block :: rev_blocks, body_id)
       | _ ->
           (* All other expressions are treated simply as if we were in a block. *)
@@ -1189,14 +1190,28 @@ and translate_expression_maybe (env : (_, _) Env.t) body ret_var : Block.t =
     in
     List.fold body ~init:([], mk_fresh_id ()) ~f
   in
-  let store_last_expr = Block.make_load env ret_var (Var last_expr_result) any_typ in
-  let maybe_block = Block.all env (List.rev (store_last_expr :: rev_blocks)) in
-  (* Since we don't support else clauses yet, we redirect both success and
-     failure exits to a new, dummy exit_success. But later, failure should
-     go to the else clauses. *)
+  let maybe_block = Block.all env (List.rev rev_blocks) in
+  let store_last_expr = Node.make_load env ret_var (Var last_expr_result) any_typ in
+  let else_blocks =
+    match else_cases with
+    | [] ->
+        (* If there are no else clauses, just return short circuit result *)
+        Block.make_load env ret_var (Var short_circuit_result) any_typ
+    | _ ->
+        let cases =
+          Block.any env (List.map ~f:(translate_case_clause env [short_circuit_result]) else_cases)
+        in
+        let crash_node = Node.make_fail env BuiltinDecl.__erlang_error_else_clause in
+        cases.exit_failure |~~> [crash_node] ;
+        {cases with exit_failure= crash_node}
+  in
   let exit_node = Node.make_nop env in
-  maybe_block.exit_success |~~> [exit_node] ;
-  maybe_block.exit_failure |~~> [exit_node] ;
+  (* In case of success, simply return last expression *)
+  maybe_block.exit_success |~~> [store_last_expr] ;
+  (* In case of short circuit, go to else clauses *)
+  maybe_block.exit_failure |~~> [else_blocks.start] ;
+  store_last_expr |~~> [exit_node] ;
+  else_blocks.exit_success |~~> [exit_node] ;
   {maybe_block with exit_success= exit_node; exit_failure= Node.make_nop env}
 
 

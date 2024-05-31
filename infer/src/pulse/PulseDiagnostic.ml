@@ -67,6 +67,7 @@ module ErlangError = struct
     | Badrecord of {calling_context: calling_context; location: Location.t}
     | Badreturn of {calling_context: calling_context; location: Location.t}
     | Case_clause of {calling_context: calling_context; location: Location.t}
+    | Else_clause of {calling_context: calling_context; location: Location.t}
     | Function_clause of {calling_context: calling_context; location: Location.t}
     | If_clause of {calling_context: calling_context; location: Location.t}
     | Try_clause of {calling_context: calling_context; location: Location.t}
@@ -84,6 +85,7 @@ module ErlangError = struct
                                                   | Badrecord {calling_context; location}
                                                   | Badreturn {calling_context; location}
                                                   | Case_clause {calling_context; location}
+                                                  | Else_clause {calling_context; location}
                                                   | Function_clause {calling_context; location}
                                                   | If_clause {calling_context; location}
                                                   | Try_clause {calling_context; location} ) =
@@ -143,12 +145,11 @@ type t =
       ; transitive_missed_captures: Typ.Name.Set.t [@ignore] }
   | JavaResourceLeak of
       {class_name: JavaClassName.t; allocation_trace: Trace.t; location: Location.t}
-  | HackCannotInstantiateAbstractClass of
-      {type_name: Typ.Name.t; trace: Trace.t; location: Location.t}
+  | HackCannotInstantiateAbstractClass of {type_name: Typ.Name.t; trace: Trace.t}
     (* TODO: add more data to HackUnawaitedAwaitable tracking the parameter type *)
   | HackUnawaitedAwaitable of {allocation_trace: Trace.t; location: Location.t}
   | MemoryLeak of {allocator: Attribute.allocator; allocation_trace: Trace.t; location: Location.t}
-  | MutualRecursionCycle of {cycle: Trace.t; location: Location.t}
+  | MutualRecursionCycle of {cycle: PulseMutualRecursion.t; location: Location.t}
   | ReadonlySharedPtrParameter of
       {param: Var.t; typ: Typ.t; location: Location.t; used_locations: Location.t list}
   | ReadUninitialized of ReadUninitialized.t
@@ -209,9 +210,9 @@ let pp fmt diagnostic =
         (fun fmt ->
           if Typ.Name.Set.is_empty transitive_missed_captures then ()
           else Typ.Name.Set.pp fmt transitive_missed_captures )
-  | HackCannotInstantiateAbstractClass {type_name; trace; location} ->
-      F.fprintf fmt "HackCannotInstantiateAbstractClass {@[type_name:%a;@;trace:%a@@;location:%a@]"
-        Typ.Name.pp type_name (Trace.pp ~pp_immediate) trace Location.pp location
+  | HackCannotInstantiateAbstractClass {type_name; trace} ->
+      F.fprintf fmt "HackCannotInstantiateAbstractClass {@[type_name:%a;@;trace:%a@]" Typ.Name.pp
+        type_name (Trace.pp ~pp_immediate) trace
   | HackUnawaitedAwaitable {allocation_trace; location} ->
       F.fprintf fmt "UnawaitedAwaitable {@[allocation_trace:%a;@;location:%a@]}"
         (Trace.pp ~pp_immediate) allocation_trace Location.pp location
@@ -220,7 +221,7 @@ let pp fmt diagnostic =
         Attribute.pp_allocator allocator (Trace.pp ~pp_immediate) allocation_trace Location.pp
         location
   | MutualRecursionCycle {cycle; location} ->
-      F.fprintf fmt "MutualRecursionCycle {@[cycle=%a;@;location=%a@]}" (Trace.pp ~pp_immediate)
+      F.fprintf fmt "MutualRecursionCycle {@[cycle=%a;@;location=%a@]}" PulseMutualRecursion.pp
         cycle Location.pp location
   | ReadonlySharedPtrParameter {param; typ; location; used_locations} ->
       F.fprintf fmt
@@ -278,6 +279,7 @@ let pp fmt diagnostic =
 
 let get_location = function
   | AccessToInvalidAddress {calling_context= []; access_trace}
+  | HackCannotInstantiateAbstractClass {trace= access_trace}
   | ReadUninitialized {calling_context= []; trace= access_trace}
   | TransitiveAccess {call_trace= access_trace} ->
       Trace.get_outer_location access_trace
@@ -289,6 +291,7 @@ let get_location = function
   | ErlangError (Badrecord {location; calling_context= []})
   | ErlangError (Badreturn {location; calling_context= []})
   | ErlangError (Case_clause {location; calling_context= []})
+  | ErlangError (Else_clause {location; calling_context= []})
   | ErlangError (Function_clause {location; calling_context= []})
   | ErlangError (If_clause {location; calling_context= []})
   | ErlangError (Try_clause {location; calling_context= []}) ->
@@ -301,6 +304,7 @@ let get_location = function
   | ErlangError (Badrecord {calling_context= (_, location) :: _})
   | ErlangError (Badreturn {calling_context= (_, location) :: _})
   | ErlangError (Case_clause {calling_context= (_, location) :: _})
+  | ErlangError (Else_clause {calling_context= (_, location) :: _})
   | ErlangError (Function_clause {calling_context= (_, location) :: _})
   | ErlangError (If_clause {calling_context= (_, location) :: _})
   | ErlangError (Try_clause {calling_context= (_, location) :: _})
@@ -310,7 +314,6 @@ let get_location = function
   | ConstRefableParameter {location}
   | CSharpResourceLeak {location}
   | JavaResourceLeak {location}
-  | HackCannotInstantiateAbstractClass {location}
   | HackUnawaitedAwaitable {location}
   | MemoryLeak {location}
   | MutualRecursionCycle {location}
@@ -349,6 +352,7 @@ let aborts_execution = function
       | Badrecord _
       | Badreturn _
       | Case_clause _
+      | Else_clause _
       | Function_clause _
       | If_clause _
       | Try_clause _ ) ->
@@ -632,6 +636,8 @@ let get_message_and_suggestion diagnostic =
       |> no_suggestion
   | ErlangError (Case_clause {calling_context= _; location}) ->
       F.asprintf "no matching case clause at %a" Location.pp location |> no_suggestion
+  | ErlangError (Else_clause {calling_context= _; location}) ->
+      F.asprintf "no matching else clause at %a" Location.pp location |> no_suggestion
   | ErlangError (Function_clause {calling_context= _; location}) ->
       F.asprintf "no matching function clause at %a" Location.pp location |> no_suggestion
   | ErlangError (If_clause {calling_context= _; location}) ->
@@ -714,17 +720,7 @@ let get_message_and_suggestion diagnostic =
         pp_allocation_trace allocation_trace Location.pp location
       |> no_suggestion
   | MutualRecursionCycle {cycle} ->
-      let advice =
-        "Make sure this is intentional and cannot lead to non-termination or stack overflow."
-      in
-      let pp_cycle fmt (cycle : PulseMutualRecursion.t) =
-        match cycle with
-        | Immediate _ ->
-            F.fprintf fmt "recursive call to %a. " PulseMutualRecursion.pp cycle
-        | ViaCall _ ->
-            F.fprintf fmt "mutual recursion cycle: %a@\n" PulseMutualRecursion.pp cycle
-      in
-      F.asprintf "%a%s" pp_cycle cycle advice |> no_suggestion
+      PulseMutualRecursion.get_error_message cycle |> no_suggestion
   | ReadonlySharedPtrParameter {param; location; used_locations} ->
       let pp_used_locations f =
         match used_locations with
@@ -1059,6 +1055,9 @@ let get_trace = function
   | ErlangError (Case_clause {calling_context; location}) ->
       get_trace_calling_context calling_context
       @@ [Errlog.make_trace_element 0 location "no matching case clause here" []]
+  | ErlangError (Else_clause {calling_context; location}) ->
+      get_trace_calling_context calling_context
+      @@ [Errlog.make_trace_element 0 location "no matching else clause here" []]
   | ErlangError (Function_clause {calling_context; location}) ->
       get_trace_calling_context calling_context
       @@ [Errlog.make_trace_element 0 location "no matching function clause here" []]
@@ -1106,12 +1105,7 @@ let get_trace = function
            allocation_trace
       @@ [Errlog.make_trace_element 0 location "memory becomes unreachable here" []]
   | MutualRecursionCycle {cycle} ->
-      let inner_call = PulseMutualRecursion.get_inner_call cycle in
-      Trace.add_to_errlog ~nesting:0
-        ~pp_immediate:(fun fmt ->
-          F.fprintf fmt "recursive call to %a here" CallEvent.pp (CallEvent.Call inner_call) )
-        cycle
-      @@ []
+      PulseMutualRecursion.to_errlog cycle
   | ReadonlySharedPtrParameter {param; typ; location; used_locations} ->
       let nesting = 0 in
       Errlog.make_trace_element nesting location (get_param_typ param typ) []
@@ -1210,6 +1204,8 @@ let get_issue_type ~latent issue_type =
       IssueType.bad_return ~latent
   | ErlangError (Case_clause _), _ ->
       IssueType.no_matching_case_clause ~latent
+  | ErlangError (Else_clause _), _ ->
+      IssueType.no_matching_else_clause ~latent
   | ErlangError (Function_clause _), _ ->
       IssueType.no_matching_function_clause ~latent
   | ErlangError (If_clause _), _ ->

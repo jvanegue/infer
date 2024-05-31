@@ -189,6 +189,8 @@ module type ERRORS = sig
 
   val case_clause : model_no_non_disj
 
+  val else_clause : model_no_non_disj
+
   val function_clause : model_no_non_disj
 
   val if_clause : model_no_non_disj
@@ -227,6 +229,10 @@ module ErrorsReport : ERRORS = struct
    fun {location} astate -> error (Case_clause {calling_context= []; location}) astate
 
 
+  let else_clause : model_no_non_disj =
+   fun {location} astate -> error (Else_clause {calling_context= []; location}) astate
+
+
   let function_clause : model_no_non_disj =
    fun {location} astate -> error (Function_clause {calling_context= []; location}) astate
 
@@ -255,6 +261,8 @@ module ErrorsSilent : ERRORS = struct
   let badreturn = stuck
 
   let case_clause = stuck
+
+  let else_clause = stuck
 
   let function_clause = stuck
 
@@ -1592,8 +1600,7 @@ module GenServer = struct
   let start_link module_atom args _ : model =
    (* gen_server:start_link(Module, _, _) -> {ok, Pid}
       where Pid is `GenServerPid of Module` *)
-   fun ({path; analysis_data= {analyze_dependency; tenv; err_log; proc_desc}; location; ret} as data)
-       astate non_disj ->
+   fun ({path; analysis_data; location; ret} as data) astate non_disj ->
     let module_name_opt =
       match get_erlang_type_or_any (fst module_atom) astate with
       | Atom ->
@@ -1614,9 +1621,8 @@ module GenServer = struct
             [(args, Typ.mk_struct (ErlangType (get_erlang_type_or_any (fst args) astate)))]
           in
           let res_list, non_disj, _, _ =
-            PulseCallOperations.call tenv err_log path ~caller_proc_desc:proc_desc
-              ~analyze_dependency location procname ~ret ~actuals ~formals_opt:None
-              ~call_kind:`ResolvedProcname astate non_disj
+            PulseCallOperations.call analysis_data path location procname ~ret ~actuals
+              ~formals_opt:None ~call_kind:`ResolvedProcname astate non_disj
           in
           (res_list, non_disj)
     in
@@ -1689,8 +1695,7 @@ module GenServer = struct
     (List.concat_map res_list ~f:post_process_handle_init, non_disj)
 
 
-  let handle_request req_type server_ref request
-      {path; analysis_data= {analyze_dependency; tenv; err_log; proc_desc}; location; ret} astate
+  let handle_request req_type server_ref request {path; analysis_data; location; ret} astate
       non_disj =
     let astate = AbductiveDomain.add_need_dynamic_type_specialization (fst server_ref) astate in
     let module_name_opt =
@@ -1760,9 +1765,8 @@ module GenServer = struct
               , [arg_req; arg_nondet ()] )
         in
         let execs, non_disj, _, _ =
-          PulseCallOperations.call tenv err_log path ~caller_proc_desc:proc_desc ~analyze_dependency
-            location procname ~ret ~actuals ~formals_opt:None ~call_kind:`ResolvedProcname astate
-            non_disj
+          PulseCallOperations.call analysis_data path location procname ~ret ~actuals
+            ~formals_opt:None ~call_kind:`ResolvedProcname astate non_disj
         in
         (execs, non_disj)
     | None ->
@@ -1873,6 +1877,8 @@ let matchers : matcher list =
         <>--> Errors.badreturn |> with_non_disj
       ; +BuiltinDecl.(match_builtin __erlang_error_case_clause)
         <>--> Errors.case_clause |> with_non_disj
+      ; +BuiltinDecl.(match_builtin __erlang_error_else_clause)
+        <>--> Errors.else_clause |> with_non_disj
       ; +BuiltinDecl.(match_builtin __erlang_error_function_clause)
         <>--> Errors.function_clause |> with_non_disj
       ; +BuiltinDecl.(match_builtin __erlang_error_if_clause)
