@@ -525,7 +525,6 @@ void	nondet_loop_non_terminate(int z)
 
 /* From: AProVE: Non-termination proving for C Programs (Hensel et al. TACAS 2022)*/
 /* pulse-inf: Works good! (flag bug) */
-/* NEW FALSE NEG??? */
 void hensel_tacas22_non_terminate(int x, int y)
 {
   y = 0;
@@ -714,7 +713,7 @@ void bitshift_right_loop_terminate(int i)
 }
 
 
-// Simple bitshift test - will not terminate as multipl
+// Simple bitshift test - will terminate as i will eventually reach 0
 void bitshift_left_loop_not_terminate(int i)
 {
   while (i)
@@ -731,7 +730,6 @@ void bitshift_loop_terminate(unsigned int i)
 
 // Iterate over an array using a bitshift to compute array index leading to a non-termination
 /* Pulse-inf: false negative. Unable to reason about bitshift */
-/* FALSE NEGATIVE */
 void iterate_bitshift_nonterminate(int array[256])
 {
   unsigned int i = 1;
@@ -819,6 +817,7 @@ void iterate_crc_terminate()
 
 /* From: libpng */
 /* Test from libpng with typedefs */
+/* Expected result: no bug */
 void	png_palette_terminate(int val)
 {
   int	num;
