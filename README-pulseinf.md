@@ -24,6 +24,10 @@ The results go into infer-run.log as well as on the standard output.
 
 The full structured list of bug reports is stored in pulseinf-report.json 
 
+# Run Pulse-♾️ on an SV-COMP NLA testsuite
+
+$ ./termination-run-svcomp.sh
+
 # Run Pulse-♾️ on an OSS project (ex: openssl)
 
 git clone https://github.com/openssl/openssl  
