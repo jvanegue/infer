@@ -190,7 +190,7 @@ module PulseTransferFunctions = struct
             
     in
     (* L.debug Analysis Quiet "JV PATHCTX: dbe len = %u pts len = 1 \n" (List.length dbe); *)
-    L.debug Analysis Quiet "widen: Prev MODIFIED %b \n" (used > 0 && cnt >= 0);
+    L.debug Analysis Quiet "widen: Prev MODIFIED %b (if true added Infinite state) \n" (used > 0 && cnt >= 0);
     
     let res = if (used > 0 && cnt >= 0) then
                 listpair_combine (plist @ dbe) (rplist @ [pts])

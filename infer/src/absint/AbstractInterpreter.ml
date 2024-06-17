@@ -359,15 +359,20 @@ struct
         
         let dbe,_ = (back_edges fp fn num_iters) in
 
-        L.debug Analysis Quiet "widen: New DBE length = %u \n" (List.length dbe);
+        let hasnew = not (phys_equal (fst prev) dbe) in
+        
+        L.debug Analysis Quiet "widen: New DBE length = %u hasnew = %b \n" (List.length dbe) hasnew;
         
         let post_disj,_,dropped =
           (* L.debug Analysis Quiet "JV Widen Just Before LEQ PulseExecutionDomain \n"; *)
-          join_up_to_with_leq ~limit:disjunct_limit T.DisjDomain.leq ~into:dbe (fst next)
+          if (hasnew) then
+            join_up_to_with_leq ~limit:disjunct_limit T.DisjDomain.leq ~into:dbe (fst next)
+          else
+            join_up_to_with_leq ~limit:disjunct_limit T.DisjDomain.leq ~into:(fst prev) (fst next)            
         in
          let next_non_disj = (T.NonDisjDomain.widen ~prev:(snd prev) ~next:(snd next) ~num_iters) in
-         let post = (post_disj, next_non_disj) in
-         if leq ~lhs:post ~rhs:prev then prev
+         (* let post = (post_disj, next_non_disj) in *)
+         if leq ~lhs:(post_disj, next_non_disj) ~rhs:prev then prev
          else (post_disj, add_dropped_disjuncts dropped next_non_disj)
       )
 
