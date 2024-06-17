@@ -384,6 +384,7 @@ let get_missed_captures ~get_summary procnames =
     | ExecutionDomain.ContinueProgram summary
     | ExceptionRaised summary
     | ExitProgram summary
+    | InfiniteProgram summary
     | AbortProgram summary ->
         AbductiveDomain.Summary.get_transitive_info summary
     | LatentAbortProgram {astate}

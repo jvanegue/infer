@@ -901,7 +901,7 @@ let pure_function =
     ~user_documentation:[%blob "./documentation/issues/PURE_FUNCTION.md"]
 
 let pulse_infinite =
-  register ~category:No_category ~enabled:true ~id:"PULSE_INFINITE" Error Pulse
+  register ~category:NoCategory ~enabled:true ~id:"PULSE_INFINITE" Error Pulse
     ~user_documentation:"None yet"
 
 let quandary_taint_error =
