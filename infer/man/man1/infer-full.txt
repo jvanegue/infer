@@ -92,42 +92,18 @@ OPTIONS
            "sanitizers": ["Sanitizer1"] }
            See also infer-analyze(1).
 
-       --annotation-reachability-cxx json
-           Specify annotation reachability analyses to be performed on
-           C/C++/ObjC code. Each entry is a JSON object whose key is the
-           issue name. "sources" and "sinks" can be specified either by
-           symbol (including regexps) or path prefix. "sinks" optionally can
-           specify "overrides" (by symbol or path prefix) that block the
-           reachability analysis when hit. Example:
-           {
-               "ISOLATED_REACHING_CONNECT": {
-                 "sources": {
-                   "desc": "Code that should not call connect [optional]",
-                   "paths": [ "isolated/" ]
-                 },
-                 "sinks": {
-                   "symbols": [ "connect" ],
-                   "overrides": { "symbol_regexps": [ ".*::Trusted::.*" ] }
-                 }
-               }
-             }
-           
-           This will cause us to create a new ISOLATED_REACHING_CONNECT
-           issue for every function whose source path starts with "isolated/"
-           that may reach the function named "connect", ignoring paths that
-           go through a symbol matching the OCaml regexp ".*::Trusted::.*".
-           See also infer-analyze(1).
-
-       --annotation-reachability-cxx-sources json
-           Override sources in all cxx annotation reachability specs with the
-           given sources spec
-           See also infer-analyze(1).
-
        --annotation-reachability-expensive
            Activates: check if methods annotated with @PerformanceCritical
            can call expensive methods (annotated @Expensive or modeled, with
            annotation reachability checker) (Conversely:
            --no-annotation-reachability-expensive)
+           See also infer-analyze(1).
+
+       --annotation-reachability-minimize-sources
+           Activates: do not report paths where a suffix is also a source to
+           sink path. For example if there is a source1() -> source2() ->
+           sink() path then only source2() -> sink() will be reported.
+           (Conversely: --no-annotation-reachability-minimize-sources)
            See also infer-analyze(1).
 
        --annotation-reachability-no-allocation
@@ -571,6 +547,15 @@ OPTIONS
            needed. (Conversely: --no-dependencies)
            See also infer-capture(1).
 
+       --detach-analysis-dependency
+           Activates: Detach analysis dependencies of checkers during the
+           analysis, so that each checker triggers themselves only when
+           analyzing a callee. This can save unnecessary analyses on the
+           situation that NOT all of the captured data should be analyzed,
+           e.g. --changed-files-index is given. (Conversely:
+           --no-detach-analysis-dependency)
+           See also infer-analyze(1).
+
        --dict-missing-key-var-block-list +string
            Skip analyzing the variables in the dict-missing-key checker.
            See also infer-analyze(1).
@@ -599,6 +584,8 @@ OPTIONS
              Assert_failure (enabled by default),
              BAD_ARG (enabled by default),
              BAD_ARG_LATENT (disabled by default),
+             BAD_GENERATOR (enabled by default),
+             BAD_GENERATOR_LATENT (disabled by default),
              BAD_KEY (enabled by default),
              BAD_KEY_LATENT (disabled by default),
              BAD_MAP (enabled by default),
@@ -629,7 +616,7 @@ OPTIONS
              CLASS_CAST_EXCEPTION (disabled by default),
              CONDITION_ALWAYS_FALSE (disabled by default),
              CONDITION_ALWAYS_TRUE (disabled by default),
-             CONFIG_IMPACT (disabled by default),
+             CONFIG_IMPACT (enabled by default),
              CONFIG_IMPACT_STRICT (disabled by default),
              CONFIG_USAGE (disabled by default),
              CONSTANT_ADDRESS_DEREFERENCE (disabled by default),
@@ -727,7 +714,7 @@ OPTIONS
              PULSE_DICT_MISSING_KEY (disabled by default),
              PULSE_DYNAMIC_TYPE_MISMATCH (disabled by default),
              PULSE_READONLY_SHARED_PTR_PARAM (enabled by default),
-             PULSE_REFERENCE_STABILITY (disabled by default),
+             PULSE_REFERENCE_STABILITY (enabled by default),
              PULSE_RESOURCE_LEAK (enabled by default),
              PULSE_TRANSITIVE_ACCESS (enabled by default),
              PULSE_UNAWAITED_AWAITABLE (enabled by default),
@@ -735,7 +722,7 @@ OPTIONS
              PULSE_UNINITIALIZED_VALUE (enabled by default),
              PULSE_UNNECESSARY_COPY (enabled by default),
              PULSE_UNNECESSARY_COPY_ASSIGNMENT (enabled by default),
-             PULSE_UNNECESSARY_COPY_ASSIGNMENT_CONST (disabled by default),
+             PULSE_UNNECESSARY_COPY_ASSIGNMENT_CONST (enabled by default),
              PULSE_UNNECESSARY_COPY_ASSIGNMENT_MOVABLE (enabled by default),
              PULSE_UNNECESSARY_COPY_INTERMEDIATE (enabled by default),
              PULSE_UNNECESSARY_COPY_INTERMEDIATE_CONST (disabled by
@@ -1039,8 +1026,8 @@ OPTIONS
        --issues-tests-fields ,-separated sequence of { bug_type | bucket |
        qualifier | suggestion | severity | line | column | procedure |
        procedure_start_line | file | bug_trace | key | hash | line_offset |
-       qualifier_contains_potential_exception_note | nullsafe_extra |
-       taint_extra | transitive_callees_extra }
+       qualifier_contains_potential_exception_note | taint_extra |
+       transitive_callees_extra }
            Fields to emit with --issues-tests
            See also infer-report(1).
 
@@ -1064,9 +1051,8 @@ OPTIONS
            failure (Conversely: --no-keep-going)
            See also infer-analyze(1) and infer-capture(1).
 
-       --kotlin-capture
-           Activates: Enable Kotlin capture (experimental, do not use).
-           (Conversely: --no-kotlin-capture)
+       --no-kotlin-capture
+           Deactivates: Enable Kotlin capture. (Conversely: --kotlin-capture)
            See also infer-capture(1).
 
        --lineage
@@ -1095,7 +1081,7 @@ OPTIONS
            [EXPERIMENTAL] Maximal width of structures for field sensitive
            lineage analysis. Structure that have a higher number of fields
            will be smashed into a single element. 0 will make the analysis
-           field insensitive. If not set, field width will be unlimited.
+           field insensitive.
            See also infer-analyze(1).
 
        --lineage-include-builtins
@@ -1126,12 +1112,17 @@ OPTIONS
            (Conversely: --no-lineage-only)
            See also infer-analyze(1).
 
-       --lineage-prevent-cycles
-           Activates: [EXPERIMENTAL] If set, Lineage will stop distinguishing
-           the fields of a variable when it notices recursive types (that is,
-           a sub-field having the same type as one of its "ancestors").
-           (Conversely: --no-lineage-prevent-cycles)
+       --no-lineage-prevent-cycles
+           Deactivates: [EXPERIMENTAL] If given, Lineage will not stop
+           traversing the fields of a variable when it notices recursive
+           types (that is, a sub-field having the same type as one of its
+           "ancestors"). (Conversely: --lineage-prevent-cycles)
            See also infer-analyze(1).
+
+       --lineage-sanitizers +string
+           [EXPERIMENTAL; UNSTABLE API] Lineage sanitizers, comma-separated
+           m:f/a
+           See also infer-report(1).
 
        --lineage-seed int
            Set the random seed used for hashing. (Various entities that get
@@ -1141,12 +1132,27 @@ OPTIONS
            different seed.
            See also infer-analyze(1).
 
+       --lineage-sink string
+           [EXPERIMENTAL; UNSTABLE API] Lineage sink for taint finding,
+           format [module:]function/arity.{ret,argN}
+           See also infer-report(1).
+
+       --lineage-source string
+           [EXPERIMENTAL; UNSTABLE API] Lineage source for taint finding,
+           format [module:]function/arity.{ret,argN}
+           See also infer-report(1).
+
        --lineage-variant-width int
            Maximal width of variant types for lineage analysis. A variant
            type is the type of a variable whose value is within a statically
            known atom set. The width of the type is the cardinal of that atom
            set.
            See also infer-analyze(1).
+
+       --list-categories
+           Activates: Show the list of all categories of issue types that
+           infer might report. (Conversely: --no-list-categories)
+           See also infer-help(1).
 
        --list-checkers
            Activates: Show the list of all available checkers. (Conversely:
@@ -1896,6 +1902,14 @@ OPTIONS
            Activates: Reactive mode: the analysis starts from the files
            captured since the infer command started (Conversely:
            --no-reactive | -R)
+           See also infer-analyze(1).
+
+       --reactive-capture
+           Activates: Reactive capture: capture and analysis are interleaved.
+           Currently this flag will only make the analysis generate a list of
+           type names that were not found in the global tenv. The feature is
+           only available for the Hack frontend for now. (Conversely:
+           --no-reactive-capture)
            See also infer-analyze(1).
 
        --replay-analysis-schedule
@@ -2894,11 +2908,18 @@ INTERNAL OPTIONS
        --lineage-field-max-cfg-size-reset
            Cancel the effect of --lineage-field-max-cfg-size.
 
-       --lineage-field-width-reset
-           Cancel the effect of --lineage-field-width.
+       --lineage-limit int
+           [EXPERIMENTAL; UNSTABLE API] Lineage pathfinding internal limit.
+           Behaviour unspecified, but lower values should skip more paths.
+
+       --lineage-limit-reset
+           Cancel the effect of --lineage-limit.
 
        --lineage-max-cfg-size-reset
            Cancel the effect of --lineage-max-cfg-size.
+
+       --lineage-sanitizers-reset
+           Set --lineage-sanitizers to the empty list.
 
        --lineage-shape
            Activates: lineage-shape checker: Computes shape informations to
@@ -2906,16 +2927,8 @@ INTERNAL OPTIONS
            NOTE: This is used internally by other checkers and shouldn't
            need to be activated directly. (Conversely: --no-lineage-shape)
 
-       --lineage-sink string
-           [EXPERIMENTAL; UNSTABLE API] Lineage sink for taint finding,
-           format [module:]function/arity${ret,argN}
-
        --lineage-sink-reset
            Cancel the effect of --lineage-sink.
-
-       --lineage-source string
-           [EXPERIMENTAL; UNSTABLE API] Lineage source for taint finding,
-           format [module:]function/arity${ret,argN}
 
        --lineage-source-reset
            Cancel the effect of --lineage-source.
@@ -3021,17 +3034,15 @@ INTERNAL OPTIONS
        --pulse-cut-to-one-path-procedures-pattern-reset
            Cancel the effect of --pulse-cut-to-one-path-procedures-pattern.
 
-       --pulse-force-continue
-           Activates: The code coming after a function call is not analyzed
+       --no-pulse-force-continue
+           Deactivates: The code coming after a function call is not analyzed
            if the callee has no summary of type ContinueProgram, which may
            happen if the callee implementation was hard to analyze. With this
            option, we force the analysis to continue, treating the callee as
            an unknown function. (Note that if the callee had latent issues,
            those keep being surfaced, as appropriate.) Activating this option
            will increase the coverage of code that is analyzed, but may
-           introduce false positives. It is intended to be used for
-           debugging, to quickly assess if a false negative may be caused by
-           lack of coverage. (Conversely: --no-pulse-force-continue)
+           introduce false positives. (Conversely: --pulse-force-continue)
 
        --no-pulse-havoc-arguments
            Deactivates: Heuristically havoc arguments to unknown functions.
@@ -3349,6 +3360,12 @@ INTERNAL OPTIONS
                you could model it as `{'LOCK_M2_INDIRECTLY':
            'lock_m2_indirectly'}`
                
+
+       --starvation-c-named-threads json
+           Associate functions to threads. If two functions are associated to
+           the same thread they cannot run together. For example {'foo':
+           'some_thread', 'bar': 'some_thread'} would indicate that foo and
+           bar cannot run in parallel.
 
        --starvation-skip-analysis json
            Specify combinations of class/method list that should be skipped

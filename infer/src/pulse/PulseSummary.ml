@@ -207,7 +207,7 @@ let init_fields_zero tenv path location ~zero addr typ astate =
   let rec init_fields_zero_helper addr typ astate =
     match get_fields typ with
     | Some fields ->
-        List.fold fields ~init:(Ok astate) ~f:(fun acc (field, field_typ, _) ->
+        List.fold fields ~init:(Ok astate) ~f:(fun acc {Struct.name= field; typ= field_typ} ->
             let* acc in
             let acc, field_addr = Memory.eval_edge addr (FieldAccess field) acc in
             init_fields_zero_helper field_addr field_typ acc )
@@ -376,3 +376,35 @@ let merge x y =
   if !merged_is_same_to_x then x
   else if !merged_is_same_to_y then y
   else {x with specialized= merged}
+
+
+let get_missed_captures ~get_summary procnames =
+  let module MissedCaptures = TransitiveInfo.MissedCaptures in
+  let from_execution = function
+    | ExecutionDomain.ContinueProgram summary
+    | ExceptionRaised summary
+    | ExitProgram summary
+    | AbortProgram summary ->
+        AbductiveDomain.Summary.get_transitive_info summary
+    | LatentAbortProgram {astate}
+    | LatentInvalidAccess {astate}
+    | LatentSpecializedTypeIssue {astate} ->
+        AbductiveDomain.Summary.get_transitive_info astate
+  in
+  let from_pre_post_list pre_post_list =
+    List.map pre_post_list ~f:(fun exec ->
+        (from_execution exec).PulseTransitiveInfo.missed_captures )
+    |> List.reduce ~f:MissedCaptures.join
+    |> Option.value ~default:MissedCaptures.bottom
+  in
+  let from_simple_summary {pre_post_list} = from_pre_post_list pre_post_list in
+  let from_summary summary =
+    Specialization.Pulse.Map.fold
+      (fun _ summary -> MissedCaptures.join (from_simple_summary summary))
+      summary.specialized
+      (from_simple_summary summary.main)
+  in
+  List.map procnames ~f:(fun procname ->
+      get_summary procname |> Option.value_map ~default:MissedCaptures.bottom ~f:from_summary )
+  |> List.reduce ~f:MissedCaptures.join
+  |> Option.value ~default:MissedCaptures.bottom

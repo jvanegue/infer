@@ -177,6 +177,8 @@ let get_module_attribute tenv ~tag =
 module type ERRORS = sig
   val badarg : model_no_non_disj
 
+  val badgenerator : model_no_non_disj
+
   val badkey : model_no_non_disj
 
   val badmap : model_no_non_disj
@@ -203,6 +205,10 @@ module ErrorsReport : ERRORS = struct
 
   let badarg : model_no_non_disj =
    fun {location} astate -> error (Badarg {calling_context= []; location}) astate
+
+
+  let badgenerator : model_no_non_disj =
+   fun {location} astate -> error (Badgenerator {calling_context= []; location}) astate
 
 
   let badkey : model_no_non_disj =
@@ -249,6 +255,8 @@ module ErrorsSilent : ERRORS = struct
   let stuck : model_no_non_disj = fun _data _astate -> []
 
   let badarg = stuck
+
+  let badgenerator = stuck
 
   let badkey = stuck
 
@@ -1022,6 +1030,34 @@ module Maps = struct
       [Ok (write_dynamic_type_and_return addr_map Map ret_id location astate)]
     in
     List.map ~f:Basic.map_continue astate_ok @ astate_badmap
+
+
+  let to_list ?(check_badmap = true) map : model_no_non_disj =
+   fun ({location; path; ret= ret_id, _} as data) astate ->
+    let astate_badmap = if check_badmap then make_astate_badmap map data astate else [] in
+    let astate_empty =
+      let> astate = make_astate_goodmap path location map astate in
+      let astate, _isempty_addr, (is_empty, _isempty_hist) =
+        load_field path is_empty_field location map astate
+      in
+      let> astate = PulseArithmetic.prune_positive is_empty astate |> SatUnsat.to_list in
+      let<+> astate, addr_nil = Lists.make_nil_raw location path astate in
+      PulseOperations.write_id ret_id addr_nil astate
+    in
+    let astate_nonempty =
+      let> astate = make_astate_goodmap path location map astate in
+      let astate, _isempty_addr, (is_empty, _isempty_hist) =
+        load_field path is_empty_field location map astate
+      in
+      let> astate = PulseArithmetic.prune_eq_zero is_empty astate |> SatUnsat.to_list in
+      let astate, _key_addr, key = load_field path key_field location map astate in
+      let astate, _value_addr, value = load_field path value_field location map astate in
+      let<*> astate, addr_tuple = Tuples.make_raw location path [key; value] astate in
+      let<*> astate, addr_nil = Lists.make_nil_raw location path astate in
+      let<+> astate, addr_cons = Lists.make_cons_raw path location addr_tuple addr_nil astate in
+      PulseOperations.write_id ret_id addr_cons astate
+    in
+    astate_nonempty @ astate_empty @ astate_badmap
 end
 
 module Strings = struct
@@ -1868,7 +1904,9 @@ let matchers : matcher list =
   Custom.matchers ()
   @ List.map
       ~f:(ProcnameDispatcher.Call.contramap_arg_payload ~f:ValueOrigin.addr_hist)
-      [ +BuiltinDecl.(match_builtin __erlang_error_badkey) <>--> Errors.badkey |> with_non_disj
+      [ +BuiltinDecl.(match_builtin __erlang_error_badgenerator)
+        <>--> Errors.badgenerator |> with_non_disj
+      ; +BuiltinDecl.(match_builtin __erlang_error_badkey) <>--> Errors.badkey |> with_non_disj
       ; +BuiltinDecl.(match_builtin __erlang_error_badmap) <>--> Errors.badmap |> with_non_disj
       ; +BuiltinDecl.(match_builtin __erlang_error_badmatch) <>--> Errors.badmatch |> with_non_disj
       ; +BuiltinDecl.(match_builtin __erlang_error_badrecord)
@@ -1916,9 +1954,12 @@ let matchers : matcher list =
       ; -"lists" &:: "foreach" <>$ arg $+ arg $--> Lists.foreach |> with_non_disj
       ; -"lists" &:: "reverse" <>$ arg $--> Lists.reverse |> with_non_disj
       ; +BuiltinDecl.(match_builtin __erlang_make_map) &++> Maps.make |> with_non_disj
+      ; +BuiltinDecl.(match_builtin __erlang_map_to_list)
+        <>$ arg $--> Maps.to_list ~check_badmap:false |> with_non_disj
       ; -"maps" &:: "is_key" <>$ arg $+ arg $--> Maps.is_key |> with_non_disj
       ; -"maps" &:: "get" <>$ arg $+ arg $--> Maps.get |> with_non_disj
       ; -"maps" &:: "put" <>$ arg $+ arg $+ arg $--> Maps.put |> with_non_disj
+      ; -"maps" &:: "to_list" <>$ arg $--> Maps.to_list ~check_badmap:true |> with_non_disj
       ; -"maps" &:: "new" <>$$--> Maps.new_ |> with_non_disj
       ; -"gen_server" &:: "start_link" <>$ arg $+ arg $+ arg $--> GenServer.start_link
       ; -"gen_server" &:: "call" <>$ arg $+ arg $--> GenServer.call2

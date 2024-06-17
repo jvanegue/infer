@@ -21,6 +21,8 @@ let pp_markdown_docs_path ~website_root ~basename ~pp =
 
 let escape_double_quotes s = String.substr_replace_all s ~pattern:"\"" ~with_:"\\\""
 
+let all_categories_basename = "all-categories"
+
 let all_checkers_basename = "all-checkers"
 
 let all_issues_basename = "all-issue-types"
@@ -31,6 +33,13 @@ let basename_of_checker {Checker.id} = basename_checker_prefix ^ id
 
 let abs_url_of_issue_type unique_id =
   Printf.sprintf "/%s/next/%s#%s" docs_dir all_issues_basename (String.lowercase unique_id)
+
+
+let abs_url_of_category category =
+  Printf.sprintf "/%s/next/%s#%s" docs_dir all_categories_basename
+    ( String.tr ~target:' ' ~replacement:'-'
+    @@ String.lowercase
+    @@ IssueType.string_of_category category )
 
 
 let get_checker_web_documentation (checker : Checker.config) =
@@ -51,8 +60,17 @@ let markdown_one_issue f (issue_type : IssueType.t) =
       "Checker %s can report user-facing issue %s but is not of type UserFacing in \
        src/base/Checker.ml. Please fix!"
       checker_config.id issue_type.unique_id ;
-  F.fprintf f "Reported as \"%s\" by [%s](/%s/next/%s).@\n@\n" issue_type.hum checker_config.id
-    docs_dir
+  let pp_category_link f category =
+    match category with
+    | IssueType.NoCategory ->
+        ()
+    | _ ->
+        F.fprintf f "Category: [%s](%s). "
+          (IssueType.string_of_category category)
+          (abs_url_of_category category)
+  in
+  F.fprintf f "*%aReported as \"%s\" by [%s](/%s/next/%s).*@\n@\n" pp_category_link
+    issue_type.category issue_type.hum checker_config.id docs_dir
     (basename_of_checker checker_config) ;
   match issue_type.user_documentation with
   | None ->
@@ -101,7 +119,7 @@ let list_checkers () =
   L.result "@]%!"
 
 
-let simple_template ?(toc = true) ~title short_intro =
+let simple_template ~toc ~title short_intro =
   F.sprintf {|---
 title: %s
 %s---
@@ -116,8 +134,15 @@ let all_checkers_header =
     "Here is an overview of the checkers currently available in Infer."
 
 
+let all_categories_header =
+  simple_template ~toc:true ~title:"List of all categories of issue types"
+    "Here are all the categories that issue types might belong to in Infer. Some issue types have \
+     no associated category at the moment. This usually indicates that the issue type is not yet \
+     mature enough to be used."
+
+
 let all_issues_header =
-  simple_template ~title:"List of all issue types"
+  simple_template ~toc:true ~title:"List of all issue types"
     "Here is an overview of the issue types currently reported by Infer."
 
 
@@ -140,7 +165,7 @@ let all_issues_website ~website_root =
 let list_issue_types () =
   L.progress
     "@[Format:@\n\
-     Issue type unique identifier:Human-readable version:Visibility:Default \
+     Issue type unique identifier:Human-readable version:Visibility:Category:Default \
      severity:Enabled:Checker@\n\
      @\n\
      @]%!" ;
@@ -165,6 +190,46 @@ let list_issue_types () =
            (IssueType.string_of_severity default_severity)
            enabled (Checker.get_id checker) ) ;
   L.result "@]%!"
+
+
+let for_each_issue_type_of_category category ~f =
+  let is_first = ref true in
+  List.iter (Lazy.force all_issues) ~f:(fun ({IssueType.category= category'} as issue_type) ->
+      if IssueType.equal_category category category' then (
+        f ~is_first:!is_first issue_type ;
+        is_first := false ) )
+
+
+let list_categories () =
+  L.result "@[<v>" ;
+  IssueType.all_of_category
+  |> List.iter ~f:(fun category ->
+         L.result "%s:" (IssueType.string_of_category category) ;
+         for_each_issue_type_of_category category ~f:(fun ~is_first {IssueType.unique_id} ->
+             if not is_first then L.result "," ;
+             L.result "%s" unique_id ) ;
+         L.result "@;" ) ;
+  L.result "@]%!"
+
+
+let markdown_one_category fmt category =
+  F.fprintf fmt "## %s@\n@\n%s@\n@\nIssue types in this category:@\n"
+    (IssueType.string_of_category category)
+    (IssueType.category_documentation category) ;
+  for_each_issue_type_of_category category ~f:(fun ~is_first:_ {IssueType.unique_id} ->
+      F.fprintf fmt "- [%s](%s)@\n" unique_id (abs_url_of_issue_type unique_id) ) ;
+  ()
+
+
+let all_categories_website ~website_root =
+  let categories_to_document =
+    IssueType.all_of_category
+    |> List.filter ~f:(fun category -> not (IssueType.equal_category category NoCategory))
+  in
+  pp_markdown_docs_path ~website_root ~basename:all_categories_basename ~pp:(fun f ->
+      F.fprintf f "%s@\n@\n%a@\n" all_categories_header
+        (Pp.seq ~sep:"\n" markdown_one_category)
+        categories_to_document )
 
 
 let pp_checker f checker =
@@ -232,7 +297,8 @@ let mk_checkers_json checkers_base_filenames =
              '@' ) )
     ; ( "doc_entries"
       , `List
-          ( `String all_checkers_basename :: `String all_issues_basename
+          ( `String all_checkers_basename :: `String all_categories_basename
+          :: `String all_issues_basename
           :: List.map checkers_base_filenames ~f:(fun filename -> `String filename) ) ) ]
 
 
@@ -339,5 +405,6 @@ let all_checkers_website ~website_root =
 let write_website ~website_root =
   write_checkers_json ~path:(website_root ^/ "checkers.json") ;
   all_checkers_website ~website_root ;
+  all_categories_website ~website_root ;
   all_issues_website ~website_root ;
   ()

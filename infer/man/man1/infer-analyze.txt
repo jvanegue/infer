@@ -125,6 +125,14 @@ OPTIONS
            --parameter-not-null-checked, --pulse, --racerd, --siof,
            --self-in-block, --starvation (Conversely: --default-checkers)
 
+       --detach-analysis-dependency
+           Activates: Detach analysis dependencies of checkers during the
+           analysis, so that each checker triggers themselves only when
+           analyzing a callee. This can save unnecessary analyses on the
+           situation that NOT all of the captured data should be analyzed,
+           e.g. --changed-files-index is given. (Conversely:
+           --no-detach-analysis-dependency)
+
        --dict-missing-key-var-block-list +string
            Skip analyzing the variables in the dict-missing-key checker.
 
@@ -351,6 +359,13 @@ OPTIONS
            captured since the infer command started (Conversely:
            --no-reactive | -R)
 
+       --reactive-capture
+           Activates: Reactive capture: capture and analysis are interleaved.
+           Currently this flag will only make the analysis generate a list of
+           type names that were not found in the global tenv. The feature is
+           only available for the Hack frontend for now. (Conversely:
+           --no-reactive-capture)
+
        --no-report
            Deactivates: Run the reporting phase once the analysis has
            completed (Conversely: --report)
@@ -544,35 +559,6 @@ BUFFER OVERRUN OPTIONS
            --no-bo-sound-unknown-sets-join)
 
 CLANG OPTIONS
-       --annotation-reachability-cxx json
-           Specify annotation reachability analyses to be performed on
-           C/C++/ObjC code. Each entry is a JSON object whose key is the
-           issue name. "sources" and "sinks" can be specified either by
-           symbol (including regexps) or path prefix. "sinks" optionally can
-           specify "overrides" (by symbol or path prefix) that block the
-           reachability analysis when hit. Example:
-           {
-               "ISOLATED_REACHING_CONNECT": {
-                 "sources": {
-                   "desc": "Code that should not call connect [optional]",
-                   "paths": [ "isolated/" ]
-                 },
-                 "sinks": {
-                   "symbols": [ "connect" ],
-                   "overrides": { "symbol_regexps": [ ".*::Trusted::.*" ] }
-                 }
-               }
-             }
-           
-           This will cause us to create a new ISOLATED_REACHING_CONNECT
-           issue for every function whose source path starts with "isolated/"
-           that may reach the function named "connect", ignoring paths that
-           go through a symbol matching the OCaml regexp ".*::Trusted::.*".
-
-       --annotation-reachability-cxx-sources json
-           Override sources in all cxx annotation reachability specs with the
-           given sources spec
-
        --biabduction-unsafe-malloc
            Activates: Assume that malloc(3) never returns null. (Conversely:
            --no-biabduction-unsafe-malloc)
@@ -653,6 +639,12 @@ JAVA OPTIONS
            annotation reachability checker) (Conversely:
            --no-annotation-reachability-expensive)
 
+       --annotation-reachability-minimize-sources
+           Activates: do not report paths where a suffix is also a source to
+           sink path. For example if there is a source1() -> source2() ->
+           sink() path then only source2() -> sink() will be reported.
+           (Conversely: --no-annotation-reachability-minimize-sources)
+
        --annotation-reachability-no-allocation
            Activates: check if methods annotated with @NoAllocation can
            allocate (with annotation reachability checker) (Conversely:
@@ -691,7 +683,7 @@ LINEAGE OPTIONS
            [EXPERIMENTAL] Maximal width of structures for field sensitive
            lineage analysis. Structure that have a higher number of fields
            will be smashed into a single element. 0 will make the analysis
-           field insensitive. If not set, field width will be unlimited.
+           field insensitive.
 
        --lineage-include-builtins
            Activates: Include call/return edges to/from procedures that model
@@ -712,11 +704,11 @@ LINEAGE OPTIONS
        --lineage-max-cfg-size int
            If set, larger CFGs are skipped.
 
-       --lineage-prevent-cycles
-           Activates: [EXPERIMENTAL] If set, Lineage will stop distinguishing
-           the fields of a variable when it notices recursive types (that is,
-           a sub-field having the same type as one of its "ancestors").
-           (Conversely: --no-lineage-prevent-cycles)
+       --no-lineage-prevent-cycles
+           Deactivates: [EXPERIMENTAL] If given, Lineage will not stop
+           traversing the fields of a variable when it notices recursive
+           types (that is, a sub-field having the same type as one of its
+           "ancestors"). (Conversely: --lineage-prevent-cycles)
 
        --lineage-seed int
            Set the random seed used for hashing. (Various entities that get

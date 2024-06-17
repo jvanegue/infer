@@ -272,7 +272,11 @@ val is_std_move : t -> bool
 val is_shared_ptr_observer : t -> bool
 (** Check if it is C++ shared pointer observer, e.g. [std::shared_ptr::operator*] *)
 
-include Comparable.S with type t := t
+module Comparable : Comparable.S with type t := t
+
+include module type of struct
+  include Comparable
+end
 
 (** Hash tables with proc names as keys. *)
 module Hash : Caml.Hashtbl.S with type key = t
@@ -405,6 +409,9 @@ val pp_verbose : Format.formatter -> t -> unit
 
 val to_string : ?verbosity:detail_level -> t -> string
 (** Convert a proc name into a string for the user to see. *)
+
+val to_string_verbose : t -> string
+(** Convert a proc name into a string for the user to see with verbosity parameter. *)
 
 val describe : Format.formatter -> t -> unit
 (** to use in user messages *)
