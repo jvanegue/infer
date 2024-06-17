@@ -9,11 +9,42 @@ open! IStd
 module F = Format
 module L = Logging
 module MF = MarkupFormatter
-module U = Utils
-
-let dummy_constructor_annot = "__infer_is_constructor"
-
 module Domain = AnnotationReachabilityDomain
+
+let annotation_of_str annot_str = {Annot.class_name= annot_str; parameters= []}
+
+let dummy_constructor_annot = annotation_of_str "__infer_is_constructor"
+
+let is_dummy_constructor annot =
+  String.equal annot.Annot.class_name dummy_constructor_annot.class_name
+
+
+let dummy_field_method_prefix = "__infer_field_"
+
+let is_dummy_field_pname pname =
+  String.is_prefix ~prefix:dummy_field_method_prefix (Procname.get_method pname)
+
+
+let dummy_pname_for_field fieldname typ =
+  let class_name = Option.value_exn (Typ.name typ) in
+  Procname.make_java ~class_name ~return_type:None
+    ~method_name:(dummy_field_method_prefix ^ Fieldname.get_field_name fieldname)
+    ~parameters:[] ~kind:Non_Static
+
+
+let classname_from_dummy_pname pname = Option.value_exn (Procname.get_class_type_name pname)
+
+let fieldname_from_dummy_pname pname =
+  let classname = classname_from_dummy_pname pname in
+  let field_name =
+    String.chop_prefix_if_exists ~prefix:dummy_field_method_prefix (Procname.get_method pname)
+  in
+  Fieldname.make classname field_name
+
+
+let struct_from_dummy_pname tenv pname =
+  Option.value_exn (Tenv.lookup tenv (classname_from_dummy_pname pname))
+
 
 let is_modeled_expensive tenv = function
   | Procname.Java proc_name_java as proc_name ->
@@ -80,10 +111,8 @@ let check_modeled_annotation models annot pname =
 
 let method_has_annot annot models tenv pname =
   let has_annot ia = Annotations.ia_ends_with ia annot.Annot.class_name in
-  if
-    Config.annotation_reachability_no_allocation
-    && Annotations.annot_ends_with annot dummy_constructor_annot
-  then is_allocator tenv pname
+  if Config.annotation_reachability_no_allocation && is_dummy_constructor annot then
+    is_allocator tenv pname
   else if
     Config.annotation_reachability_expensive
     && Annotations.annot_ends_with annot Annotations.expensive
@@ -92,8 +121,15 @@ let method_has_annot annot models tenv pname =
 
 
 let find_override_with_annot annot models tenv pname =
-  let is_annotated = method_has_annot annot models in
-  PatternMatch.override_find (fun pn -> is_annotated tenv pn) tenv pname
+  if is_dummy_field_pname pname then
+    (* Get back the original field from the fake call *)
+    let struct_typ = struct_from_dummy_pname tenv pname in
+    let fieldname = fieldname_from_dummy_pname pname in
+    let has_annot ia = Annotations.ia_ends_with ia annot.Annot.class_name in
+    if Annotations.field_has_annot fieldname struct_typ has_annot then Some pname else None
+  else
+    let is_annotated = method_has_annot annot models in
+    PatternMatch.override_find (fun pn -> is_annotated tenv pn) tenv pname
 
 
 let method_overrides_annot annot models tenv pname =
@@ -111,78 +147,103 @@ let update_trace loc trace =
   else Errlog.make_trace_element 0 loc "" [] :: trace
 
 
-let string_of_pname = Procname.to_simplified_string ~withclass:true
-
-let annotation_of_str annot_str = {Annot.class_name= annot_str; parameters= []}
-
-let report_allocation_stack {InterproceduralAnalysis.proc_desc; err_log} src_annot fst_call_loc
-    trace constructor_pname call_loc =
-  let pname = Procdesc.get_proc_name proc_desc in
-  let final_trace = List.rev (update_trace call_loc trace) in
-  let constr_str = string_of_pname constructor_pname in
-  let description =
-    Format.asprintf "Method %a annotated with %a allocates %a via %a" MF.pp_monospaced
-      (Procname.to_simplified_string pname)
-      MF.pp_monospaced ("@" ^ src_annot) MF.pp_monospaced constr_str MF.pp_monospaced
-      ("new " ^ constr_str)
-  in
-  Reporting.log_issue proc_desc err_log ~loc:fst_call_loc ~ltr:final_trace AnnotationReachability
-    IssueType.checkers_allocates_memory description
+let str_of_pname ?(withclass = false) pname =
+  if is_dummy_field_pname pname then
+    (* Get back the original field from the fake call *)
+    let fieldname = fieldname_from_dummy_pname pname in
+    if withclass then Fieldname.to_simplified_string fieldname
+    else Fieldname.get_field_name fieldname
+  else Procname.to_simplified_string ~withclass pname
 
 
-let get_issue_type src_annot =
-  if
+let get_issue_type ~src ~snk =
+  if is_dummy_constructor snk then IssueType.checkers_allocates_memory
+  else if
     Config.annotation_reachability_expensive
-    && String.equal src_annot Annotations.performance_critical
+    && String.equal src.Annot.class_name Annotations.performance_critical
   then IssueType.checkers_calls_expensive_method
   else IssueType.checkers_annotation_reachability_error
 
 
-let report_annotation_stack ({InterproceduralAnalysis.proc_desc; tenv; err_log} as analysis_data)
-    models src_annot snk_annot loc trace snk_pname call_loc =
-  let src_pname = Procdesc.get_proc_name proc_desc in
-  if String.equal snk_annot dummy_constructor_annot then
-    report_allocation_stack analysis_data src_annot loc trace snk_pname call_loc
-  else
-    let get_original_pname annot pname =
-      find_override_with_annot (annotation_of_str annot) models tenv pname
-      |> Option.value ~default:pname
-    in
-    (* Check if the annotation is inherited from a base class method. *)
-    let get_details annot pname =
-      let origin_pname = get_original_pname annot pname in
-      if Procname.equal origin_pname pname then ""
-      else Format.asprintf ", inherited from %a" MF.pp_monospaced (string_of_pname origin_pname)
-    in
-    (* Check if the annotation is there directly or is modeled. *)
-    let get_kind annot pname =
-      let pname = get_original_pname annot pname in
-      if check_modeled_annotation models (annotation_of_str annot) pname then "modeled as"
-      else "annotated with"
-    in
-    let final_trace = List.rev (update_trace call_loc trace) in
-    let description =
-      Format.asprintf "Method %a (%s %a%s) calls %a (%s %a%s)" MF.pp_monospaced
-        (Procname.to_simplified_string src_pname)
-        (get_kind src_annot src_pname) MF.pp_monospaced ("@" ^ src_annot)
-        (get_details src_annot src_pname) MF.pp_monospaced (string_of_pname snk_pname)
-        (get_kind snk_annot snk_pname) MF.pp_monospaced ("@" ^ snk_annot)
-        (get_details snk_annot snk_pname)
-    in
-    let issue_type = get_issue_type src_annot in
-    Reporting.log_issue proc_desc err_log ~loc ~ltr:final_trace AnnotationReachability issue_type
-      description
-
-
-let report_call_stack end_of_stack lookup_next_calls report call_site sink_map =
-  let lookup_location pname =
-    Option.value_map ~f:ProcAttributes.get_loc ~default:Location.dummy (Attributes.load pname)
+let report_src_to_snk_path {InterproceduralAnalysis.proc_desc; tenv; err_log} ~src ~snk models loc
+    trace snk_pname call_loc =
+  let get_original_pname annot pname =
+    find_override_with_annot annot models tenv pname |> Option.value ~default:pname
   in
-  let rec loop fst_call_loc visited_pnames trace (callee_pname, call_loc) =
-    if end_of_stack callee_pname then report fst_call_loc trace callee_pname call_loc
+  (* Check if the annotation is inherited from a base class method. *)
+  let get_details annot pname =
+    let origin_pname = get_original_pname annot pname in
+    if Procname.equal origin_pname pname then ""
     else
-      let callee_def_loc = lookup_location callee_pname in
-      let next_calls = lookup_next_calls callee_pname in
+      Format.asprintf ", inherited from %a" MF.pp_monospaced
+        (str_of_pname ~withclass:true origin_pname)
+  in
+  (* Check if the annotation is inherited from a base class/interface. *)
+  let get_class_details annot pname =
+    let has_annot ia = Annotations.ia_ends_with ia annot.Annot.class_name in
+    let pname = get_original_pname annot pname in
+    match Procname.get_class_type_name pname with
+    | Some typ -> (
+      match PatternMatch.Java.find_superclasses_with_attributes has_annot tenv typ with
+      | [] ->
+          ""
+      | types ->
+          let typ_to_str t =
+            Option.map
+              ~f:(fun name -> Format.asprintf "%a" MF.pp_monospaced (JavaClassName.classname name))
+              (Typ.Name.Java.get_java_class_name_opt t)
+          in
+          ", defined on " ^ String.concat ~sep:", " (List.filter_map ~f:typ_to_str types) )
+    | None ->
+        ""
+  in
+  (* Check if the annotation is there directly or is modeled. *)
+  let get_kind annot pname =
+    let pname = get_original_pname annot pname in
+    if check_modeled_annotation models annot pname then "modeled as" else "annotated with"
+  in
+  let src_pname = Procdesc.get_proc_name proc_desc in
+  let snk_annot_str = snk.Annot.class_name in
+  let src_annot_str = src.Annot.class_name in
+  let access_or_call = if is_dummy_field_pname snk_pname then "accesses" else "calls" in
+  let description =
+    if is_dummy_constructor snk then
+      let constr_str = str_of_pname ~withclass:true snk_pname in
+      Format.asprintf "Method %a annotated with %a allocates %a via %a" MF.pp_monospaced
+        (str_of_pname src_pname) MF.pp_monospaced ("@" ^ src_annot_str) MF.pp_monospaced constr_str
+        MF.pp_monospaced ("new " ^ constr_str)
+    else
+      Format.asprintf "Method %a (%s %a%s%s) %s %a (%s %a%s%s)" MF.pp_monospaced
+        (str_of_pname src_pname) (get_kind src src_pname) MF.pp_monospaced ("@" ^ src_annot_str)
+        (get_details src src_pname) (get_class_details src src_pname) access_or_call
+        MF.pp_monospaced
+        (str_of_pname ~withclass:true snk_pname)
+        (get_kind snk snk_pname) MF.pp_monospaced ("@" ^ snk_annot_str) (get_details snk snk_pname)
+        (get_class_details snk snk_pname)
+  in
+  let issue_type = get_issue_type ~src ~snk in
+  let final_trace = List.rev (update_trace call_loc trace) in
+  Reporting.log_issue proc_desc err_log ~loc ~ltr:final_trace AnnotationReachability issue_type
+    description
+
+
+let find_paths_to_snk ({InterproceduralAnalysis.proc_desc; tenv} as analysis_data) ~src ~snk
+    sink_map models =
+  let rec loop fst_call_loc visited_pnames trace (callee_pname, call_loc) =
+    let is_end_of_stack proc_name = method_overrides_annot snk models tenv proc_name in
+    if is_end_of_stack callee_pname then
+      report_src_to_snk_path analysis_data ~src ~snk models fst_call_loc trace callee_pname call_loc
+    else if
+      Config.annotation_reachability_minimize_sources
+      && method_overrides_annot src models tenv callee_pname
+    then (* Found a source in the middle, this path is not minimal *)
+      ()
+    else
+      let callee_def_loc =
+        Option.value_map ~f:ProcAttributes.get_loc ~default:Location.dummy
+          (Attributes.load callee_pname)
+      in
+      let next_calls = lookup_annotation_calls analysis_data snk callee_pname in
       let new_trace = update_trace call_loc trace |> update_trace callee_def_loc in
       let unseen_callees, updated_callees =
         Domain.SinkMap.fold
@@ -198,6 +259,7 @@ let report_call_stack end_of_stack lookup_next_calls report call_site sink_map =
       in
       List.iter ~f:(loop fst_call_loc updated_callees new_trace) unseen_callees
   in
+  let call_site = CallSite.make (Procdesc.get_proc_name proc_desc) (Procdesc.get_loc proc_desc) in
   Domain.SinkMap.iter
     (fun _ call_sites ->
       try
@@ -210,40 +272,34 @@ let report_call_stack end_of_stack lookup_next_calls report call_site sink_map =
     sink_map
 
 
-let report_src_snk_path ({InterproceduralAnalysis.proc_desc; tenv; err_log} as analysis_data)
-    sink_map snk_annot models src_annot =
+let report_src_and_sink {InterproceduralAnalysis.proc_desc; err_log} ~src ~snk =
   let proc_name = Procdesc.get_proc_name proc_desc in
   let loc = Procdesc.get_loc proc_desc in
-  if method_overrides_annot src_annot models tenv proc_name then (
-    Option.iter sink_map ~f:(fun sink_map ->
-        let f_report =
-          report_annotation_stack analysis_data models src_annot.Annot.class_name
-            snk_annot.Annot.class_name
-        in
-        report_call_stack
-          (method_overrides_annot snk_annot models tenv)
-          (lookup_annotation_calls analysis_data snk_annot)
-          f_report (CallSite.make proc_name loc) sink_map ) ;
-    if
-      Config.annotation_reachability_report_source_and_sink
-      && method_overrides_annot snk_annot models tenv proc_name
-    then
-      let issue_type = get_issue_type src_annot.Annot.class_name in
-      let description =
-        Format.asprintf "Method %a is annotated with both %a and %a" MF.pp_monospaced
-          (Procname.to_simplified_string proc_name)
-          MF.pp_monospaced
-          ("@" ^ src_annot.Annot.class_name)
-          MF.pp_monospaced
-          ("@" ^ snk_annot.Annot.class_name)
-      in
-      Reporting.log_issue proc_desc err_log ~loc ~ltr:[] AnnotationReachability issue_type
-        description )
+  let issue_type = get_issue_type ~src ~snk in
+  let description =
+    Format.asprintf "Method %a is annotated with both %a and %a" MF.pp_monospaced
+      (str_of_pname proc_name) MF.pp_monospaced ("@" ^ src.Annot.class_name) MF.pp_monospaced
+      ("@" ^ snk.Annot.class_name)
+  in
+  Reporting.log_issue proc_desc err_log ~loc ~ltr:[] AnnotationReachability issue_type description
 
 
-let report_src_snk_paths proc_data annot_map src_annot_list snk_annot models =
-  let sink_map = Domain.find_opt snk_annot annot_map in
-  List.iter ~f:(report_src_snk_path proc_data sink_map snk_annot models) src_annot_list
+let check_srcs_and_find_snk ({InterproceduralAnalysis.proc_desc; tenv} as analysis_data) src_list
+    snk annot_map models =
+  let check_one_src_and_find_snk src =
+    let proc_name = Procdesc.get_proc_name proc_desc in
+    if method_overrides_annot src models tenv proc_name then (
+      (* If there are callsites to sinks, find/report such paths. *)
+      Option.iter (Domain.find_opt snk annot_map) ~f:(fun sink_map ->
+          find_paths_to_snk analysis_data ~src ~snk sink_map models ) ;
+      (* Reporting something that is both a source and a sink at the same time needs to be
+         treated as a special case because there is no call/callsite (path of length 0). *)
+      if
+        Config.annotation_reachability_report_source_and_sink
+        && method_overrides_annot snk models tenv proc_name
+      then report_src_and_sink analysis_data ~src ~snk )
+  in
+  List.iter ~f:check_one_src_and_find_snk src_list
 
 
 module AnnotationSpec = struct
@@ -262,186 +318,23 @@ end
 
 module StandardAnnotationSpec = struct
   let from_annotations str_src_annots str_snk_annot str_sanitizer_annots models =
-    let src_annots = List.map str_src_annots ~f:annotation_of_str in
+    let src_list = List.map str_src_annots ~f:annotation_of_str in
     let sanitizer_annots = List.map str_sanitizer_annots ~f:annotation_of_str in
-    let snk_annot = annotation_of_str str_snk_annot in
+    let snk = annotation_of_str str_snk_annot in
     let open AnnotationSpec in
     { description= "StandardAnnotationSpec"
-    ; sink_predicate= (fun tenv pname -> method_overrides_annot snk_annot models tenv pname)
+    ; sink_predicate= (fun tenv pname -> method_overrides_annot snk models tenv pname)
     ; sanitizer_predicate=
         (fun tenv pname ->
           List.exists sanitizer_annots ~f:(fun s -> method_overrides_annot s models tenv pname) )
-    ; sink_annotation= snk_annot
+    ; sink_annotation= snk
     ; report=
-        (fun proc_data annot_map ->
-          report_src_snk_paths proc_data annot_map src_annots snk_annot models ) }
-end
-
-module CxxAnnotationSpecs = struct
-  let src_path_of pname =
-    match Attributes.load pname with
-    | Some proc_attrs ->
-        let loc = ProcAttributes.get_loc proc_attrs in
-        SourceFile.to_string loc.file
-    | None ->
-        ""
-
-
-  (* Does <str_or_prefix> equal <str> or a delimited prefix of <prefix>? *)
-  let prefix_match ~delim str str_or_prefix =
-    String.equal str str_or_prefix
-    || (String.is_prefix ~prefix:str_or_prefix str && String.is_suffix ~suffix:delim str_or_prefix)
-
-
-  let symbol_match = prefix_match ~delim:"::"
-
-  let path_match = prefix_match ~delim:"/"
-
-  let option_name = "--annotation-reachability-cxx"
-
-  let src_option_name = "--annotation-reachability-cxx-sources"
-
-  let cxx_string_of_pname pname =
-    let chop_prefix s =
-      String.chop_prefix s ~prefix:Config.clang_inner_destructor_prefix |> Option.value ~default:s
-    in
-    let pname_str = Procname.to_string pname in
-    let i = Option.value (String.rindex pname_str ':') ~default:(-1) + 1 in
-    let slen = String.length pname_str in
-    String.sub pname_str ~pos:0 ~len:i
-    ^ chop_prefix (String.sub pname_str ~pos:i ~len:(slen - i))
-    ^ "()"
-
-
-  let debug_pred ~spec_name ~desc pred pname =
-    L.d_printf "%s: Checking if `%a` is a %s... " spec_name Procname.pp pname desc ;
-    let r = pred pname in
-    L.d_printf "%b %s.@." r desc ;
-    r
-
-
-  let at_least_one_nonempty ~src symbols symbol_regexps paths =
-    if List.is_empty symbols && Option.is_none symbol_regexps && List.is_empty paths then
-      L.die UserError "Must specify at least one of `paths`, `symbols`, or `symbols_regexps` in %s"
-        src
-
-
-  let spec_from_config spec_name spec_cfg source_overrides =
-    let src = option_name ^ " -> " ^ spec_name in
-    let make_pname_pred entry ~src : Procname.t -> bool =
-      let symbols = U.yojson_lookup entry "symbols" ~src ~f:U.string_list_of_yojson ~default:[] in
-      let symbol_regexps =
-        U.yojson_lookup entry "symbol_regexps" ~src ~default:None ~f:(fun json ~src ->
-            U.string_list_of_yojson json ~src |> String.concat ~sep:"\\|" |> Str.regexp
-            |> Option.some )
-      in
-      let paths = U.yojson_lookup entry "paths" ~src ~f:U.string_list_of_yojson ~default:[] in
-      at_least_one_nonempty ~src symbols symbol_regexps paths ;
-      let sym_pred pname_string = List.exists ~f:(symbol_match pname_string) symbols in
-      let sym_regexp_pred pname_string =
-        match symbol_regexps with
-        | None ->
-            false
-        | Some regexp ->
-            Str.string_match regexp pname_string 0
-      in
-      let path_pred pname = List.exists ~f:(path_match (src_path_of pname)) paths in
-      fun pname ->
-        let pname_string = Procname.to_string pname in
-        sym_pred pname_string || sym_regexp_pred pname_string || path_pred pname
-    in
-    let sources, sources_src =
-      if List.length source_overrides > 0 then (source_overrides, src_option_name)
-      else
-        ( U.yojson_lookup spec_cfg "sources" ~src ~f:U.assoc_of_yojson ~default:[]
-        , src ^ " -> sources" )
-    in
-    let src_name = spec_name ^ "-source" in
-    let src_desc =
-      U.yojson_lookup sources "desc" ~src:sources_src ~f:U.string_of_yojson ~default:src_name
-    in
-    let src_pred pname =
-      make_pname_pred sources ~src:sources_src pname
-      &&
-      match pname with
-      | Procname.ObjC_Cpp cname ->
-          not (Procname.ObjC_Cpp.is_inner_destructor cname)
-      | _ ->
-          true
-    in
-    let src_pred = debug_pred ~spec_name ~desc:"source" src_pred in
-    let sinks = U.yojson_lookup spec_cfg "sinks" ~src ~f:U.assoc_of_yojson ~default:[] in
-    let sinks_src = src ^ " -> sinks" in
-    let snk_name = spec_name ^ "-sink" in
-    let snk_desc =
-      U.yojson_lookup sinks "desc" ~src:sinks_src ~f:U.string_of_yojson ~default:snk_name
-    in
-    let snk_pred = make_pname_pred sinks ~src:sinks_src in
-    let snk_pred = debug_pred ~spec_name ~desc:"sink" snk_pred in
-    let overrides =
-      U.yojson_lookup sinks "overrides" ~src:sinks_src ~f:U.assoc_of_yojson ~default:[]
-    in
-    let sanitizer_pred =
-      if List.is_empty overrides then fun _ -> false
-      else make_pname_pred overrides ~src:(sinks_src ^ " -> overrides")
-    in
-    let sanitizer_pred = debug_pred ~spec_name ~desc:"sanitizer" sanitizer_pred in
-    let call_str = "\n    -> " in
-    let report_cxx_annotation_stack {InterproceduralAnalysis.proc_desc; err_log} loc trace snk_pname
-        call_loc =
-      let src_pname = Procdesc.get_proc_name proc_desc in
-      let final_trace = List.rev (update_trace call_loc trace) in
-      let snk_pname_str = cxx_string_of_pname snk_pname in
-      let src_pname_str = cxx_string_of_pname src_pname in
-      let description =
-        Format.asprintf "%s can reach %s:\n    %s%s%s\n" src_desc snk_desc src_pname_str call_str
-          snk_pname_str
-      in
-      let issue_type = IssueType.register_dynamic ~id:spec_name Error AnnotationReachability in
-      Reporting.log_issue proc_desc err_log ~loc ~ltr:final_trace AnnotationReachability issue_type
-        description
-    in
-    let snk_annot = annotation_of_str snk_name in
-    let report ({InterproceduralAnalysis.proc_desc} as analysis_data) annot_map =
-      let proc_name = Procdesc.get_proc_name proc_desc in
-      if src_pred proc_name then
-        let loc = Procdesc.get_loc proc_desc in
-        try
-          let sink_map = Domain.find snk_annot annot_map in
-          report_call_stack snk_pred
-            (lookup_annotation_calls analysis_data snk_annot)
-            (report_cxx_annotation_stack analysis_data)
-            (CallSite.make proc_name loc) sink_map
-        with Caml.Not_found -> ()
-    in
-    { AnnotationSpec.description= Printf.sprintf "CxxAnnotationSpecs %s from config" spec_name
-    ; sink_predicate= (fun _ pname -> snk_pred pname)
-    ; sanitizer_predicate= (fun _ pname -> sanitizer_pred pname)
-    ; sink_annotation= snk_annot
-    ; report }
-
-
-  let annotation_reachability_cxx =
-    U.assoc_of_yojson Config.annotation_reachability_cxx ~src:option_name
-
-
-  let annotation_reachability_cxx_sources =
-    U.assoc_of_yojson Config.annotation_reachability_cxx_sources ~src:src_option_name
-
-
-  let from_config () : 'AnnotationSpec list =
-    List.map
-      ~f:(fun (spec_name, spec_cfg) ->
-        let src = option_name ^ " -> " ^ spec_name in
-        spec_from_config spec_name (U.assoc_of_yojson spec_cfg ~src)
-          annotation_reachability_cxx_sources )
-      annotation_reachability_cxx
+        (fun proc_data annot_map -> check_srcs_and_find_snk proc_data src_list snk annot_map models)
+    }
 end
 
 module NoAllocationAnnotationSpec = struct
   let no_allocation_annot = annotation_of_str Annotations.no_allocation
-
-  let constructor_annot = annotation_of_str dummy_constructor_annot
 
   let spec =
     let open AnnotationSpec in
@@ -449,10 +342,10 @@ module NoAllocationAnnotationSpec = struct
     ; sink_predicate= (fun tenv pname -> is_allocator tenv pname)
     ; sanitizer_predicate=
         (fun tenv pname -> check_attributes Annotations.ia_is_ignore_allocations tenv pname)
-    ; sink_annotation= constructor_annot
+    ; sink_annotation= dummy_constructor_annot
     ; report=
         (fun proc_data annot_map ->
-          report_src_snk_paths proc_data annot_map [no_allocation_annot] constructor_annot
+          check_srcs_and_find_snk proc_data [no_allocation_annot] dummy_constructor_annot annot_map
             String.Map.empty ) }
 end
 
@@ -490,49 +383,15 @@ module ExpensiveAnnotationSpec = struct
     ; sanitizer_predicate= default_sanitizer
     ; sink_annotation= expensive_annot
     ; report=
-        (fun ({InterproceduralAnalysis.proc_desc; tenv} as analysis_data) astate ->
+        (fun ({InterproceduralAnalysis.proc_desc; tenv} as analysis_data) annot_map ->
           let proc_name = Procdesc.get_proc_name proc_desc in
           if is_expensive tenv proc_name then
             PatternMatch.override_iter
               (check_expensive_subtyping_rules analysis_data)
               tenv proc_name ;
-          report_src_snk_paths analysis_data astate [performance_critical_annot] expensive_annot
-            String.Map.empty ) }
+          check_srcs_and_find_snk analysis_data [performance_critical_annot] expensive_annot
+            annot_map String.Map.empty ) }
 end
-
-type user_defined_spec =
-  {sources: string list; sinks: string list; sanitizers: string list [@yojson.default []]}
-[@@deriving of_yojson]
-
-type user_defined_specs = user_defined_spec list [@@deriving of_yojson]
-
-let annot_specs =
-  let models = parse_custom_models () in
-  let make_standard_spec_from_user_spec {sources; sinks; sanitizers} =
-    List.map
-      ~f:(fun sink -> StandardAnnotationSpec.from_annotations sources sink sanitizers models)
-      sinks
-  in
-  let user_defined_specs =
-    let specs =
-      try user_defined_specs_of_yojson Config.annotation_reachability_custom_pairs
-      with _ -> L.die ExternalError "Could not parse annotation reachability custom pairs@."
-    in
-    List.map specs ~f:make_standard_spec_from_user_spec
-  in
-  let user_defined_specs = List.concat user_defined_specs in
-  [ (Language.Clang, CxxAnnotationSpecs.from_config ())
-  ; ( Language.Java
-    , (if Config.annotation_reachability_expensive then [ExpensiveAnnotationSpec.spec] else [])
-      @ ( if Config.annotation_reachability_no_allocation then [NoAllocationAnnotationSpec.spec]
-          else [] )
-      @ user_defined_specs ) ]
-
-
-let get_annot_specs pname =
-  let language = Procname.get_language pname in
-  List.Assoc.find_exn ~equal:Language.equal annot_specs language
-
 
 module MakeTransferFunctions (CFG : ProcCfg.S) = struct
   module CFG = CFG
@@ -590,6 +449,13 @@ module MakeTransferFunctions (CFG : ProcCfg.S) = struct
         let call_site = CallSite.make callee_pname call_loc in
         check_call tenv ~callee_pname ~caller_pname call_site astate specs
         |> merge_callee_map analysis_data call_site ~callee_pname
+    | Sil.Load {e= Exp.Lfield (_, fieldname, typ); loc} ->
+        (* Pretend that field access is a call to a fake method (containing the name of the field) *)
+        let caller_pname = Procdesc.get_proc_name proc_desc in
+        let callee_pname = dummy_pname_for_field fieldname typ in
+        let call_site = CallSite.make callee_pname loc in
+        check_call tenv ~callee_pname ~caller_pname call_site astate specs
+        |> merge_callee_map analysis_data call_site ~callee_pname
     | _ ->
         astate
 
@@ -600,10 +466,39 @@ end
 module TransferFunctions = MakeTransferFunctions (ProcCfg.Exceptional)
 module Analyzer = AbstractInterpreter.MakeRPO (TransferFunctions)
 
+type custom_spec =
+  {sources: string list; sinks: string list; sanitizers: string list [@yojson.default []]}
+[@@deriving of_yojson]
+
+type custom_specs = custom_spec list [@@deriving of_yojson]
+
+let parse_custom_specs () =
+  let models = parse_custom_models () in
+  let make_standard_spec_from_custom_spec {sources; sinks; sanitizers} =
+    List.map
+      ~f:(fun sink -> StandardAnnotationSpec.from_annotations sources sink sanitizers models)
+      sinks
+  in
+  let custom_specs =
+    let specs =
+      try custom_specs_of_yojson Config.annotation_reachability_custom_pairs
+      with _ -> L.die ExternalError "Could not parse annotation reachability custom pairs@."
+    in
+    List.map specs ~f:make_standard_spec_from_custom_spec
+  in
+  List.concat custom_specs
+
+
 let checker ({InterproceduralAnalysis.proc_desc} as analysis_data) : Domain.t option =
-  let proc_name = Procdesc.get_proc_name proc_desc in
   let initial = Domain.empty in
-  let specs = get_annot_specs proc_name in
+  let custom_specs = parse_custom_specs () in
+  let expensive_specs =
+    if Config.annotation_reachability_expensive then [ExpensiveAnnotationSpec.spec] else []
+  in
+  let no_alloc_specs =
+    if Config.annotation_reachability_no_allocation then [NoAllocationAnnotationSpec.spec] else []
+  in
+  let specs = expensive_specs @ no_alloc_specs @ custom_specs in
   let proc_data = {TransferFunctions.analysis_data; specs} in
   let post = Analyzer.compute_post proc_data ~initial proc_desc in
   Option.iter post ~f:(fun annot_map ->

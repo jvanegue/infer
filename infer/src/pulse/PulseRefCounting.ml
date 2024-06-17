@@ -27,48 +27,14 @@ let pp_access_type fmt access_type =
   String.pp fmt s
 
 
-let find_field_in_tenv fields fieldname =
-  match List.find fields ~f:(fun (name, _, _) -> Fieldname.equal name fieldname) with
-  | None ->
-      let aprox_field = Fieldname.add_underscore fieldname in
-      List.find fields ~f:(fun (name, _, _) -> Fieldname.equal name aprox_field)
-  | Some field ->
-      Some field
-
-
-let get_access_type tenv (access : Access.t) : access_type =
-  let has_weak_or_unretained_or_assign annotations =
-    List.exists annotations ~f:(fun (ann : Annot.t) ->
-        ( String.equal ann.class_name Config.property_attributes
-        || String.equal ann.class_name Config.ivar_attributes )
-        && List.exists
-             ~f:(fun Annot.{value} ->
-               Annot.has_matching_str_value value ~pred:(fun att ->
-                   String.equal Config.unsafe_unret att
-                   || String.equal Config.weak att || String.equal Config.assign att ) )
-             ann.parameters )
-  in
+let get_access_type _tenv (access : Access.t) : access_type =
   match access with
   | FieldAccess fieldname -> (
-      if Fieldname.is_capture_field_in_closure fieldname then
-        if Fieldname.is_weak_capture_field_in_closure fieldname then Weak else Strong
-      else
-        let classname = Fieldname.get_class_name fieldname in
-        match Tenv.lookup tenv classname with
-        | None ->
-            (* Can't tell if we have a strong reference. *)
-            Unknown
-        | Some {fields} -> (
-          match find_field_in_tenv fields fieldname with
-          | None ->
-              (* Can't tell if we have a strong reference. *)
-              Unknown
-          | Some (_, typ, anns) -> (
-            match typ.Typ.desc with
-            | Tptr (_, (Pk_objc_weak | Pk_objc_unsafe_unretained)) ->
-                Weak
-            | _ ->
-                if has_weak_or_unretained_or_assign anns then Weak else Strong ) ) )
+    match Fieldname.is_weak fieldname with
+    | Some is_weak ->
+        if is_weak then Weak else Strong
+    | None ->
+        Unknown )
   | _ ->
       Strong
 

@@ -24,16 +24,29 @@ let append_no_duplicates_annotations =
   Staged.unstage (IList.append_no_duplicates ~cmp)
 
 
+let append_no_duplicates_attr =
+  Staged.unstage (IList.append_no_duplicates ~cmp:Struct.compare_objc_property_attribute)
+
+
 let append_no_duplicates_methods = Staged.unstage (IList.append_no_duplicates ~cmp:Procname.compare)
 
 let add_no_duplicates_fields field_tuple l =
   let rec replace_field field_tuple l found =
     match (field_tuple, l) with
-    | (field, typ, annot), ((old_field, old_typ, old_annot) as old_field_tuple) :: rest ->
+    | ( {Struct.name= field; typ; annot; objc_property_attributes}
+      , ( { Struct.name= old_field
+          ; typ= old_typ
+          ; annot= old_annot
+          ; objc_property_attributes= old_objc_property_attributes } as old_field_tuple )
+        :: rest ) ->
         let ret_list, ret_found = replace_field field_tuple rest found in
         if Fieldname.equal field old_field && Typ.equal typ old_typ then
           let annotations = append_no_duplicates_annotations annot old_annot in
-          ((field, typ, annotations) :: ret_list, true)
+          let objc_property_attributes =
+            append_no_duplicates_attr objc_property_attributes old_objc_property_attributes
+          in
+          let field = Struct.mk_field field typ ~annot:annotations ~objc_property_attributes in
+          (field :: ret_list, true)
         else (old_field_tuple :: ret_list, ret_found)
     | _, [] ->
         ([], found)
@@ -55,8 +68,6 @@ let list_range i j =
   let rec aux n acc = if n < i then acc else aux (n - 1) (n :: acc) in
   aux j []
 
-
-let mk_class_field_name class_tname ni_name = Fieldname.make class_tname ni_name
 
 let is_cpp_translation translation_unit_context =
   let lang = translation_unit_context.CFrontend_config.lang in

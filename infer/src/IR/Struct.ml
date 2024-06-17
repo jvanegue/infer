@@ -8,12 +8,28 @@
 open! IStd
 module F = Format
 
-type field = Fieldname.t * Typ.t * Annot.Item.t [@@deriving compare, equal, hash, normalize]
+type objc_property_attribute = Copy | Strong | Weak [@@deriving compare, equal, hash, normalize]
+
+type field =
+  { name: Fieldname.t
+  ; typ: Typ.t
+  ; annot: Annot.Item.t
+  ; objc_property_attributes: objc_property_attribute list }
+[@@deriving compare, equal, hash, normalize]
+
+let mk_field ?(annot = Annot.Item.empty) ?(objc_property_attributes = []) name typ =
+  {name; typ; annot; objc_property_attributes}
+
+
+let field_has_weak field =
+  List.exists field.objc_property_attributes ~f:(fun attr ->
+      equal_objc_property_attribute attr Weak )
+
 
 type java_class_kind = Interface | AbstractClass | NormalClass
 [@@deriving equal, compare, hash, show {with_path= false}, normalize]
 
-type hack_class_kind = Class | AbstractClass | Interface | Trait
+type hack_class_kind = Class | AbstractClass | Interface | Trait | Alias
 [@@deriving equal, hash, show {with_path= false}, normalize]
 
 module ClassInfo = struct
@@ -45,8 +61,19 @@ type t =
 
 type lookup = Typ.Name.t -> t option
 
-let pp_field pe f (field_name, typ, ann) =
-  F.fprintf f "@\n\t\t%a %a %a" (Typ.pp_full pe) typ Fieldname.pp field_name Annot.Item.pp ann
+let pp_objc_property_attribute f attributes =
+  let s = match attributes with Copy -> "copy" | Strong -> "strong" | Weak -> "weak" in
+  F.fprintf f "%s" s
+
+
+let pp_objc_property_attributes f attrs =
+  if List.is_empty attrs then ()
+  else F.fprintf f "(%a)" (Pp.comma_seq pp_objc_property_attribute) attrs
+
+
+let pp_field pe f {name= field_name; typ; annot; objc_property_attributes} =
+  F.fprintf f "@\n\t\t%a %a %a %a" (Typ.pp_full pe) typ Fieldname.pp field_name Annot.Item.pp annot
+    pp_objc_property_attributes objc_property_attributes
 
 
 let pp pe name f
@@ -60,8 +87,9 @@ let pp pe name f
      ; class_info
      ; dummy
      ; source_file } [@warning "+missing-record-field-pattern"] ) =
-  let pp_field pe f (field_name, typ, ann) =
-    F.fprintf f "@;<0 2>%a %a %a" (Typ.pp_full pe) typ Fieldname.pp field_name Annot.Item.pp ann
+  let pp_field pe f {name; typ; annot; objc_property_attributes} =
+    F.fprintf f "@;<0 2>%a %a %a %a" (Typ.pp_full pe) typ Fieldname.pp name Annot.Item.pp annot
+      pp_objc_property_attributes objc_property_attributes
   in
   let seq pp fmt = function
     | [] ->
@@ -99,7 +127,7 @@ let pp pe name f
     source_file
 
 
-let compare_custom_field (fld, _, _) (fld', _, _) = Fieldname.compare fld fld'
+let compare_custom_field {name= fld} {name= fld'} = Fieldname.compare fld fld'
 
 let make_sorted_struct fields' statics' methods' supers' annots' class_info ?source_file dummy =
   let fields = List.dedup_and_sort ~compare:compare_custom_field fields' in
@@ -166,7 +194,7 @@ let rec get_extensible_array_element_typ ~lookup (typ : Typ.t) =
     match lookup name with
     | Some {fields} -> (
       match List.last fields with
-      | Some (_, fld_typ, _) ->
+      | Some {typ= fld_typ} ->
           get_extensible_array_element_typ ~lookup fld_typ
       | None ->
           None )
@@ -184,7 +212,8 @@ let fld_typ_opt ~lookup fn (typ : Typ.t) =
   | Tstruct name -> (
     match lookup name with
     | Some {fields} ->
-        List.find ~f:(fun (f, _, _) -> Fieldname.equal f fn) fields |> Option.map ~f:snd3
+        List.find ~f:(fun {name= f} -> Fieldname.equal f fn) fields
+        |> Option.map ~f:(fun {typ} -> typ)
     | None ->
         None )
   | _ ->
@@ -198,15 +227,15 @@ type field_info = {typ: Typ.t; annotations: Annot.Item.t; is_static: bool}
 
 let find_field field_list field_name_to_lookup =
   List.find_map
-    ~f:(fun (field_name, typ, annotations) ->
-      if Fieldname.equal field_name field_name_to_lookup then Some (typ, annotations) else None )
+    ~f:(fun {name; typ; annot} ->
+      if Fieldname.equal name field_name_to_lookup then Some (typ, annot) else None )
     field_list
 
 
 let get_field_info ~lookup field_name_to_lookup (typ : Typ.t) =
   let find_field_info field_list ~is_static =
     find_field field_list field_name_to_lookup
-    |> Option.map ~f:(fun (typ, annotations) -> {typ; annotations; is_static})
+    |> Option.map ~f:(fun (typ, annot) -> {typ; annotations= annot; is_static})
   in
   match typ.desc with
   | Tstruct name | Tptr ({desc= Tstruct name}, _) -> (
@@ -415,6 +444,10 @@ let is_hack_abstract_class {class_info} =
 
 let is_hack_interface {class_info} =
   match (class_info : ClassInfo.t) with HackClassInfo Interface -> true | _ -> false
+
+
+let is_hack_alias {class_info} =
+  match (class_info : ClassInfo.t) with HackClassInfo Alias -> true | _ -> false
 
 
 let is_hack_trait {class_info} =

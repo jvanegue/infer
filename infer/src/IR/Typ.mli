@@ -178,7 +178,7 @@ module Name : sig
   (** name of the c++ typename without qualifier *)
 
   val name : t -> string
-  (** name of the typename without qualifier *)
+  (** name of the typename *)
 
   val qual_name : t -> QualifiedCppName.t
   (** qualified name of the type, may return nonsense for Java classes *)
@@ -234,6 +234,9 @@ module Name : sig
 
     val is_class : t -> bool
     (** [is_class name] holds if [name] names a Java class *)
+
+    val get_java_class_name_opt : t -> JavaClassName.t option
+    (** Return underlying JavaClassName if [name] is java class *)
 
     val get_java_class_name_exn : t -> JavaClassName.t
     (** Ensure [name] is a java class name and return underlying JavaClassName *)

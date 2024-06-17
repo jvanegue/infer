@@ -120,8 +120,6 @@ let progress_bar_style_symbols = [("auto", `Auto); ("plain", `Plain); ("multilin
 
 let anonymous_block_prefix = "objc_block_"
 
-let assign = "<\"Assign\">"
-
 (** If true, a procedure call succeeds even when there is a bound error this mimics what happens
     with a direct array access where an error is produced and the analysis continues *)
 let bound_error_allowed_in_procedure_call = true
@@ -146,8 +144,6 @@ let fail_on_issue_exit_code = 2
 
 (** If true, treat calls to no-arg getters as idempotent w.r.t non-nullness *)
 let idempotent_getters = true
-
-let ivar_attributes = "ivar_attributes"
 
 let java_lambda_marker_infix_generated_by_javalib = "$Lambda$"
 
@@ -202,8 +198,6 @@ let meet_level = 1
 
 let nsnotification_center_checker_backend = false
 
-let property_attributes = "property_attributes"
-
 (** If true, sanity-check inferred preconditions against Nullable annotations and report
     inconsistencies *)
 let report_nullable_inconsistency = true
@@ -218,12 +212,6 @@ let kotlin_source_extension = ".kt"
 
 (** Enable detailed tracing information during array abstraction *)
 let trace_absarray = false
-
-let unsafe_unret = "<\"Unsafe_unretained\">"
-
-let weak = "<\"Weak\">"
-
-let copy = "<\"Copy\">"
 
 (* Allow lists for C++ library functions *)
 
@@ -626,45 +614,20 @@ Example format: for custom annotations com.my.annotation.{Source1,Source2,Sink1,
 { "sources" : ["Source1", "Source2"], "sinks" : ["Sink1"], "sanitizers": ["Sanitizer1"] }|}
 
 
-and annotation_reachability_cxx =
-  CLOpt.mk_json ~long:"annotation-reachability-cxx"
-    ~in_help:InferCommand.[(Analyze, manual_clang)]
-    ( "Specify annotation reachability analyses to be performed on C/C++/ObjC code. Each entry is \
-       a JSON object whose key is the issue name. \"sources\" and \"sinks\" can be specified \
-       either by symbol (including regexps) or path prefix.  \"sinks\" optionally can specify \
-       \"overrides\" (by symbol or path prefix) that block the reachability analysis when hit.  \
-       Example:\n"
-    ^ {|{
-    "ISOLATED_REACHING_CONNECT": {
-      "sources": {
-        "desc": "Code that should not call connect [optional]",
-        "paths": [ "isolated/" ]
-      },
-      "sinks": {
-        "symbols": [ "connect" ],
-        "overrides": { "symbol_regexps": [ ".*::Trusted::.*" ] }
-      }
-    }
-  }
-|}
-    ^ "\n\
-       This will cause us to create a new ISOLATED_REACHING_CONNECT issue for every function whose \
-       source path starts with \"isolated/\" that may reach the function named \"connect\", \
-       ignoring paths that go through a symbol matching the OCaml regexp \".*::Trusted::.*\"." )
-
-
-and annotation_reachability_cxx_sources =
-  CLOpt.mk_json ~long:"annotation-reachability-cxx-sources"
-    ~in_help:InferCommand.[(Analyze, manual_clang)]
-    {|Override sources in all cxx annotation reachability specs with the given sources spec|}
-
-
 and annotation_reachability_expensive =
   CLOpt.mk_bool ~long:"annotation-reachability-expensive"
     ~in_help:InferCommand.[(Analyze, manual_java)]
     ~default:false
     "check if methods annotated with @PerformanceCritical can call expensive methods (annotated \
      @Expensive or modeled, with annotation reachability checker)"
+
+
+and annotation_reachability_minimize_sources =
+  CLOpt.mk_bool ~long:"annotation-reachability-minimize-sources"
+    ~in_help:InferCommand.[(Analyze, manual_java)]
+    "do not report paths where a suffix is also a source to sink path. For example if there is a \
+     source1() -> source2() -> sink() path then only source2() -> sink() will be reported."
+    ~default:false
 
 
 and annotation_reachability_no_allocation =
@@ -1539,6 +1502,15 @@ and dependencies =
      translated. No sources needed."
 
 
+and detach_analysis_dependency =
+  CLOpt.mk_bool ~long:"detach-analysis-dependency"
+    ~in_help:InferCommand.[(Analyze, manual_generic)]
+    "Detach analysis dependencies of checkers during the analysis, so that each checker triggers \
+     themselves only when analyzing a callee. This can save unnecessary analyses on the situation \
+     that NOT all of the captured data should be analyzed, e.g. $(b,--changed-files-index) is \
+     given."
+
+
 and dict_missing_key_var_block_list =
   CLOpt.mk_string_list ~long:"dict-missing-key-var-block-list" ~meta:"string"
     ~in_help:InferCommand.[(Analyze, manual_generic)]
@@ -1963,7 +1935,6 @@ and issues_tests_fields =
         ; Bucket
         ; Severity
         ; BugTrace
-        ; NullsafeExtra
         ; TaintExtra
         ; TransitiveCalleesExtra ]
     ~symbols:IssuesTestField.all_symbols ~eq:IssuesTestField.equal
@@ -2006,21 +1977,35 @@ and jobs =
 
 
 and kotlin_capture =
-  CLOpt.mk_bool ~long:"kotlin-capture" ~default:false
+  CLOpt.mk_bool ~long:"kotlin-capture" ~default:true
     ~in_help:InferCommand.[(Capture, manual_java)]
-    "Enable Kotlin capture (experimental, do not use)."
+    "Enable Kotlin capture."
 
 
 and lineage_source =
   CLOpt.mk_string_opt ~long:"lineage-source"
+    ~in_help:InferCommand.[(Report, manual_lineage)]
     "[EXPERIMENTAL; UNSTABLE API] Lineage source for taint finding, format \
-     [module:]function/arity${ret,argN}"
+     [module:]function/arity.{ret,argN}"
 
 
 and lineage_sink =
   CLOpt.mk_string_opt ~long:"lineage-sink"
+    ~in_help:InferCommand.[(Report, manual_lineage)]
     "[EXPERIMENTAL; UNSTABLE API] Lineage sink for taint finding, format \
-     [module:]function/arity${ret,argN}"
+     [module:]function/arity.{ret,argN}"
+
+
+and lineage_sanitizers =
+  CLOpt.mk_string_list ~long:"lineage-sanitizers"
+    ~in_help:InferCommand.[(Report, manual_lineage)]
+    "[EXPERIMENTAL; UNSTABLE API] Lineage sanitizers, comma-separated m:f/a"
+
+
+and lineage_limit =
+  CLOpt.mk_int_opt ~long:"lineage-limit"
+    "[EXPERIMENTAL; UNSTABLE API] Lineage pathfinding internal limit. Behaviour unspecified, but \
+     lower values should skip more paths."
 
 
 and lineage_dedup =
@@ -2032,7 +2017,7 @@ and lineage_dedup =
 
 
 and lineage_field_depth =
-  CLOpt.mk_int ~deprecated:["-simple-lineage-field-depth"] ~long:"lineage-field-depth" ~default:0
+  CLOpt.mk_int ~deprecated:["-simple-lineage-field-depth"] ~long:"lineage-field-depth" ~default:5
     ~in_help:InferCommand.[(Analyze, manual_lineage)]
     "[EXPERIMENTAL] Maximal field depth sensitivity for lineage analysis. 0 will make the analysis \
      field insensitive."
@@ -2045,11 +2030,11 @@ and lineage_field_max_cfg_size =
 
 
 and lineage_field_width =
-  CLOpt.mk_int_opt ~deprecated:["-simple-lineage-field-width"] ~long:"lineage-field-width"
+  CLOpt.mk_int ~deprecated:["-simple-lineage-field-width"] ~long:"lineage-field-width" ~default:5
     ~in_help:InferCommand.[(Analyze, manual_lineage)]
     "[EXPERIMENTAL] Maximal width of structures for field sensitive lineage analysis. Structure \
      that have a higher number of fields will be smashed into a single element. 0 will make the \
-     analysis field insensitive. If not set, field width will be unlimited."
+     analysis field insensitive."
 
 
 and lineage_include_builtins =
@@ -2086,9 +2071,9 @@ and lineage_max_cfg_size =
 and lineage_prevent_cycles =
   CLOpt.mk_bool
     ~deprecated:["-simple-lineage-prevent-cycles"]
-    ~long:"lineage-prevent-cycles" ~default:false
+    ~long:"lineage-prevent-cycles" ~default:true
     ~in_help:InferCommand.[(Analyze, manual_lineage)]
-    "[EXPERIMENTAL] If set, Lineage will stop distinguishing the fields of a variable when it \
+    "[EXPERIMENTAL] If given, Lineage will not stop traversing the fields of a variable when it \
      notices recursive types (that is, a sub-field having the same type as one of its \
      \"ancestors\")."
 
@@ -2113,6 +2098,12 @@ and lineage_variant_width =
 and _linters =
   CLOpt.mk_bool ~long:"" ~deprecated:["-linters"] ~deprecated_no:["-no-linters"]
     "[DOES NOTHING] this used to de-activate ASTLanguage (AL) linters"
+
+
+and list_categories =
+  CLOpt.mk_bool ~long:"list-categories"
+    ~in_help:InferCommand.[(Help, manual_generic)]
+    "Show the list of all categories of issue types that infer might report."
 
 
 and list_checkers =
@@ -2479,14 +2470,13 @@ and pulse_cut_to_one_path_procedures_pattern =
 
 
 and pulse_force_continue =
-  CLOpt.mk_bool ~long:"pulse-force-continue" ~default:false
+  CLOpt.mk_bool ~long:"pulse-force-continue" ~default:true
     "The code coming after a function call is not analyzed if the callee has no summary of type \
      ContinueProgram, which may happen if the callee implementation was hard to analyze. With this \
      option, we force the analysis to continue, treating the callee as an unknown function. (Note \
      that if the callee had latent issues, those keep being surfaced, as appropriate.) Activating \
      this option will increase the coverage of code that is analyzed, but may introduce false \
-     positives. It is intended to be used for debugging, to quickly assess if a false negative may \
-     be caused by lack of coverage."
+     positives."
 
 
 and pulse_havoc_arguments =
@@ -3049,6 +3039,14 @@ and reactive =
      started"
 
 
+and reactive_capture =
+  CLOpt.mk_bool ~long:"reactive-capture"
+    ~in_help:InferCommand.[(Analyze, manual_generic)]
+    "Reactive capture: capture and analysis are interleaved. Currently this flag will only make \
+     the analysis generate a list of type names that were not found in the global tenv. The \
+     feature is only available for the Hack frontend for now."
+
+
 and reanalyze =
   CLOpt.mk_bool ~long:"reanalyze"
     "Rerun the analysis. Not compatible with $(b,--incremental-analysis) and \
@@ -3473,6 +3471,13 @@ and starvation_c_function_pointer_models =
     \      void (*LOCK_M2_INDIRECTLY)(void) =  &lock_m2_indirectly;\n\n\
     \    you could model it as `{'LOCK_M2_INDIRECTLY': 'lock_m2_indirectly'}`\n\
     \    "
+
+
+and starvation_c_named_threads_annot =
+  CLOpt.mk_json ~long:"starvation-c-named-threads"
+    "Associate functions to threads. If two functions are associated to the same thread they \
+     cannot run together. For example {'foo': 'some_thread', 'bar': 'some_thread'} would indicate \
+     that foo and bar cannot run in parallel."
 
 
 and starvation_skip_analysis =
@@ -3900,11 +3905,9 @@ and annotation_reachability_custom_models = !annotation_reachability_custom_mode
 
 and annotation_reachability_custom_pairs = !annotation_reachability_custom_pairs
 
-and annotation_reachability_cxx = !annotation_reachability_cxx
-
-and annotation_reachability_cxx_sources = !annotation_reachability_cxx_sources
-
 and annotation_reachability_expensive = !annotation_reachability_expensive
+
+and annotation_reachability_minimize_sources = !annotation_reachability_minimize_sources
 
 and annotation_reachability_no_allocation = !annotation_reachability_no_allocation
 
@@ -4159,6 +4162,8 @@ and deduplicate = !deduplicate
 
 and dependency_mode = !dependencies
 
+and detach_analysis_dependency = !detach_analysis_dependency
+
 and dict_missing_key_var_block_list =
   join_patterns_list (RevList.to_list !dict_missing_key_var_block_list)
 
@@ -4314,6 +4319,12 @@ and lineage_source = !lineage_source
 
 and lineage_sink = !lineage_sink
 
+and lineage_sanitizers =
+  RevList.to_list !lineage_sanitizers |> List.concat_map ~f:(String.split ~on:',')
+
+
+and lineage_limit = !lineage_limit
+
 and lineage_dedup = !lineage_dedup
 
 and lineage_field_depth = !lineage_field_depth
@@ -4335,6 +4346,8 @@ and lineage_prevent_cycles = !lineage_prevent_cycles
 and lineage_seed = !lineage_seed
 
 and lineage_variant_width = !lineage_variant_width
+
+and list_categories = !list_categories
 
 and list_checkers = !list_checkers
 
@@ -4681,6 +4694,8 @@ and racerd_ignore_classes = RevList.to_list !racerd_ignore_classes |> String.Set
 
 and reactive_mode = !reactive
 
+and reactive_capture = !reactive_capture
+
 and reanalyze = !reanalyze
 
 and relative_path_backtrack = !relative_path_backtrack
@@ -4799,6 +4814,8 @@ and sqlite_page_size = !sqlite_page_size
 and sqlite_vfs = !sqlite_vfs
 
 and starvation_c_function_pointer_models = !starvation_c_function_pointer_models
+
+and starvation_c_named_threads_annot = !starvation_c_named_threads_annot
 
 and starvation_skip_analysis = !starvation_skip_analysis
 

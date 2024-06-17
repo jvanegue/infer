@@ -422,7 +422,8 @@ module Internal = struct
         | Some {fields} ->
             let stack, addr = add_edge_on_src timestamp src location (post :> base_domain).stack in
             let init = PostDomain.update ~stack post in
-            List.fold fields ~init ~f:(fun (acc : PostDomain.t) (field, field_typ, _) ->
+            List.fold fields ~init
+              ~f:(fun (acc : PostDomain.t) {Struct.name= field; typ= field_typ} ->
                 if Fieldname.is_internal field || Fieldname.is_capture_field_in_closure field then
                   acc
                 else
@@ -2057,7 +2058,7 @@ module Topl = struct
 end
 
 let add_missed_captures missed_captures ({transitive_info} as astate) =
-  if Config.pulse_monitor_transitive_missed_captures then
+  if Config.pulse_monitor_transitive_missed_captures || Config.reactive_capture then
     let missed_captures = Typ.Name.Set.union missed_captures transitive_info.missed_captures in
     let transitive_info = {transitive_info with TransitiveInfo.missed_captures} in
     {astate with transitive_info}

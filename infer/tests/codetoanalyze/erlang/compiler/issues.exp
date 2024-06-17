@@ -260,6 +260,7 @@ features_lambdas:test_scopes4_Ok/0: ok
 
 ----- features_lc -----
 features_lc:fn_test_simple4_Bad/0: function_clause
+features_lc:test_bad_gen_Bad/0: bad_generator
 features_lc:test_empty_Bad/0: function_clause
 features_lc:test_empty_Ok/0: ok
 features_lc:test_filtered1_Bad/0: function_clause
@@ -375,9 +376,9 @@ features_logic:test_xor11_Bad/0: if_clause
 
 ----- features_maps -----
 features_maps:fn_test_get_badkey3_Bad/0: badkey
+features_maps:fn_test_to_list6_Bad/0: expected_crash
 features_maps:fn_test_update_exact3_Bad/0: badkey
-features_maps:fp_test_mapcomp_Ok/0: ok
-features_maps:fp_test_mapgen_Ok/0: ok
+features_maps:fp_test_to_list5_Ok/0: ok
 features_maps:test_get_Bad/0: expected_crash
 features_maps:test_get_Ok/0: ok
 features_maps:test_get_badkey1_Ok/0: ok
@@ -386,8 +387,6 @@ features_maps:test_get_badmap_Bad/0: badmap
 features_maps:test_is_key_Bad/0: expected_crash
 features_maps:test_is_key_Ok/0: ok
 features_maps:test_is_key_badmap_Bad/0: badmap
-features_maps:test_mapcomp_Bad/0: expected_crash
-features_maps:test_mapgen_Bad/0: expected_crash
 features_maps:test_new_Bad/0: expected_crash
 features_maps:test_new_Ok/0: ok
 features_maps:test_put1_Ok/0: ok
@@ -396,6 +395,10 @@ features_maps:test_put3_Ok/0: ok
 features_maps:test_put4_Bad/0: function_clause
 features_maps:test_put5_Bad/0: function_clause
 features_maps:test_put6_Bad/0: badmap
+features_maps:test_to_list1_Ok/0: ok
+features_maps:test_to_list2_Bad/0: expected_crash
+features_maps:test_to_list3_Ok/0: ok
+features_maps:test_to_list4_Bad/0: expected_crash
 features_maps:test_update_exact1_Ok/0: ok
 features_maps:test_update_exact2_Bad/0: badkey
 
@@ -416,6 +419,22 @@ features_maybe:test_maybe_with_else1_Ok/0: ok
 features_maybe:test_maybe_with_else2_Bad/0: expected_crash
 features_maybe:test_maybe_with_else3_Ok/0: ok
 features_maybe:test_maybe_with_else4_Bad/0: expected_crash
+
+----- features_mc -----
+features_mc:fn_test_mapcomp2_Bad/0: expected_crash
+features_mc:fn_test_mapgen_nonempty2_Bad/0: expected_crash
+features_mc:fp_test_mapgen_nonempty2_Ok/0: ok
+features_mc:test_mapcomp2_Ok/0: ok
+features_mc:test_mapcomp_Bad/0: expected_crash
+features_mc:test_mapcomp_Ok/0: ok
+features_mc:test_mapcomp_with_mapgen_Bad/0: expected_crash
+features_mc:test_mapcomp_with_mapgen_Ok/0: ok
+features_mc:test_mapgen_badmap2_Bad/0: bad_generator
+features_mc:test_mapgen_badmap_Bad/0: bad_generator
+features_mc:test_mapgen_empty_Bad/0: expected_crash
+features_mc:test_mapgen_empty_Ok/0: ok
+features_mc:test_mapgen_nonempty_Bad/0: expected_crash
+features_mc:test_mapgen_nonempty_Ok/0: ok
 
 ----- features_receive -----
 features_receive:test_receive1_Ok/0: ok

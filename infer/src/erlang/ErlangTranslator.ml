@@ -628,6 +628,8 @@ and translate_expression env {Ast.location; simple_expression} =
         translate_expression_map_create env ret_var updates
     | Map {map= Some map; updates} ->
         translate_expression_map_update env ret_var map updates
+    | MapComprehension {expression; qualifiers} ->
+        translate_expression_mapcomprehension env ret_var expression qualifiers
     | Match {pattern; body} ->
         translate_expression_match env ret_var pattern body
     | Maybe {body; else_cases} ->
@@ -975,91 +977,132 @@ and translate_expression_lambda (env : (_, _) Env.t) ret_var lambda_name cases p
   Block.all env [capture_block; Block.make_load env ret_var closure any_typ]
 
 
+(* Helper function for the main loop of translating list/map comprehensions, taking care of
+   generators and filters. *)
+and translate_comprehension_loop (env : (_, _) Env.t) loop_body qualifiers : Block.t =
+  (* Surround expression with filters *)
+  let apply_one_filter (qual : Ast.qualifier) (acc : Block.t) : Block.t =
+    match qual with
+    | Filter expr ->
+        (* Check expression, execute inner block (accumulator) only if true *)
+        let result_id, filter_expr_block = translate_expression_to_fresh_id env expr in
+        let unboxed, unbox_block = unbox_bool env (Exp.Var result_id) in
+        let true_node = Node.make_if env true unboxed in
+        let false_node = Node.make_if env false unboxed in
+        let fail_node = Node.make_nop env in
+        let succ_node = Node.make_nop env in
+        let filter_expr_block = Block.all env [filter_expr_block; unbox_block] in
+        filter_expr_block.exit_success |~~> [true_node; false_node] ;
+        filter_expr_block.exit_failure |~~> [fail_node] ;
+        true_node |~~> [acc.start] ;
+        false_node |~~> [succ_node] ;
+        acc.exit_success |~~> [succ_node] ;
+        acc.exit_failure |~~> [fail_node] ;
+        {start= filter_expr_block.start; exit_success= succ_node; exit_failure= fail_node}
+    | _ ->
+        (* Ignore generators *)
+        acc
+  in
+  let loop_body_with_filters = List.fold_right qualifiers ~f:apply_one_filter ~init:loop_body in
+  (* Wrap filtered expression with loops for generators*)
+  let apply_one_gen (qual : Ast.qualifier) (acc : Block.t) : Block.t =
+    (* Helper function for the common parts of list/map generators, namely taking elements from
+       the list one-by-one in a loop (maps are also converted to lists). *)
+    let make_gen gen_var (init_block : Block.t) mk_matcher : Block.t =
+      (* Check if there are still elements in the generator *)
+      let is_cons_id = mk_fresh_id () in
+      let check_cons_node =
+        Node.make_stmt env [Env.has_type_instr env ~result:is_cons_id ~value:(Var gen_var) Cons]
+      in
+      let is_cons_node = Node.make_if env true (Var is_cons_id) in
+      let no_cons_node = Node.make_if env false (Var is_cons_id) in
+      (* Load head, overwrite list with tail for next iteration *)
+      let head_var = mk_fresh_id () in
+      let head_load = load_field_from_id env head_var gen_var ErlangTypeName.cons_head Cons in
+      let tail_load = load_field_from_id env gen_var gen_var ErlangTypeName.cons_tail Cons in
+      let unpack_node = Node.make_stmt env [head_load; tail_load] in
+      (* Match head and evaluate expression *)
+      let head_matcher : Block.t = mk_matcher head_var in
+      let fail_node = Node.make_nop env in
+      let join_node = Node.make_join env in
+      init_block.exit_success |~~> [join_node] ;
+      init_block.exit_failure |~~> [fail_node] ;
+      join_node |~~> [check_cons_node] ;
+      check_cons_node |~~> [is_cons_node; no_cons_node] ;
+      is_cons_node |~~> [unpack_node] ;
+      unpack_node |~~> [head_matcher.start] ;
+      head_matcher.exit_success |~~> [acc.start] ;
+      head_matcher.exit_failure |~~> [join_node] ;
+      acc.exit_success |~~> [join_node] ;
+      acc.exit_failure |~~> [fail_node] ;
+      {start= init_block.start; exit_success= no_cons_node; exit_failure= fail_node}
+    in
+    let make_gen_checker id types =
+      let check_blocks = List.map ~f:(fun typ -> check_type env id typ) types in
+      let fail_block = Block.make_fail env BuiltinDecl.__erlang_error_badgenerator in
+      Block.any env (check_blocks @ [fail_block])
+    in
+    match qual with
+    | Generator {pattern; expression} ->
+        let gen_var, init_block = translate_expression_to_fresh_id env expression in
+        let check_block = make_gen_checker gen_var [Nil; Cons] in
+        let init_block = Block.all env [init_block; check_block] in
+        let mk_matcher head_var = translate_pattern env head_var pattern in
+        make_gen gen_var init_block mk_matcher
+    | MapGenerator {pattern; expression} ->
+        let gen_var = mk_fresh_id () in
+        let init_block =
+          (* Turn the generator map into a list of {key, val} pairs *)
+          let gen_var_map, gen_var_block = translate_expression_to_fresh_id env expression in
+          let to_list =
+            builtin_call_1 env gen_var BuiltinDecl.__erlang_map_to_list (Exp.Var gen_var_map)
+          in
+          let check_block = make_gen_checker gen_var_map [Map] in
+          Block.all env [gen_var_block; check_block; Block.make_instruction env [to_list]]
+        in
+        let mk_matcher head_var =
+          (* The head is a {key, val} tuple, so we extract the fields and match on both *)
+          let key_var = mk_fresh_id () in
+          let val_var = mk_fresh_id () in
+          let key_load =
+            load_field_from_id env key_var head_var (ErlangTypeName.tuple_elem 1) (Tuple 2)
+          in
+          let val_load =
+            load_field_from_id env val_var head_var (ErlangTypeName.tuple_elem 2) (Tuple 2)
+          in
+          let key_val_load = Node.make_stmt env [key_load; val_load] in
+          let key_matcher = translate_pattern env key_var pattern.key in
+          let val_matcher = translate_pattern env val_var pattern.value in
+          let matcher = Block.all env [key_matcher; val_matcher] in
+          key_val_load |~~> [matcher.start] ;
+          {matcher with start= key_val_load}
+        in
+        make_gen gen_var init_block mk_matcher
+    | _ ->
+        acc
+  in
+  List.fold_right qualifiers ~f:apply_one_gen ~init:loop_body_with_filters
+
+
 and translate_expression_listcomprehension (env : (_, _) Env.t) ret_var expression qualifiers :
     Block.t =
   let list_var = mk_fresh_id () in
   (* Start with en empty list L := Nil *)
   let init_block = translate_expression_nil env list_var in
-  (* Compute one iteration of the expression and add to list: L := Cons(Expr, L) *)
-  let loop_body =
-    (* Compute result of the expression *)
-    let expr_id, expr_block = translate_expression_to_fresh_id env expression in
-    (* Prepend to list *)
-    let call_instr =
-      builtin_call_2 env list_var BuiltinDecl.__erlang_make_cons (Var expr_id) (Var list_var)
+  (* Loop with generators/filters *)
+  let loop_block =
+    (* Compute one iteration of the expression and add to list: L := Cons(Expr, L) *)
+    let loop_body =
+      (* Compute result of the expression *)
+      let expr_id, expr_block = translate_expression_to_fresh_id env expression in
+      (* Prepend to list *)
+      let call_instr =
+        builtin_call_2 env list_var BuiltinDecl.__erlang_make_cons (Var expr_id) (Var list_var)
+      in
+      Block.all env [expr_block; Block.make_instruction env [call_instr]]
     in
-    Block.all env [expr_block; Block.make_instruction env [call_instr]]
+    translate_comprehension_loop env loop_body qualifiers
   in
-  (* Surround expression with filters *)
-  let extract_filter (qual : Ast.qualifier) =
-    match qual with Filter expr -> Some expr | _ -> None
-  in
-  let filters = List.filter_map ~f:extract_filter qualifiers in
-  let apply_one_filter expr (acc : Block.t) : Block.t =
-    (* Check expression, execute inner block (accumulator) only if true *)
-    let result_id, filter_expr_block = translate_expression_to_fresh_id env expr in
-    let unboxed, unbox_block = unbox_bool env (Exp.Var result_id) in
-    let true_node = Node.make_if env true unboxed in
-    let false_node = Node.make_if env false unboxed in
-    let fail_node = Node.make_nop env in
-    let succ_node = Node.make_nop env in
-    let filter_expr_block = Block.all env [filter_expr_block; unbox_block] in
-    filter_expr_block.exit_success |~~> [true_node; false_node] ;
-    filter_expr_block.exit_failure |~~> [fail_node] ;
-    true_node |~~> [acc.start] ;
-    false_node |~~> [succ_node] ;
-    acc.exit_success |~~> [succ_node] ;
-    acc.exit_failure |~~> [fail_node] ;
-    {start= filter_expr_block.start; exit_success= succ_node; exit_failure= fail_node}
-  in
-  let loop_body_with_filters = List.fold_right filters ~f:apply_one_filter ~init:loop_body in
-  (* Translate generators *)
-  let extract_generator (qual : Ast.qualifier) =
-    match qual with
-    | Generator {pattern; expression} ->
-        Some (pattern, expression)
-    | MapGenerator _ ->
-        (* TODO: add support for map generators: T163176600 *)
-        L.debug Capture Verbose
-          "@[todo ErlangTranslator.translate_expression map generator instance(s)." ;
-        None
-    | _ ->
-        None
-  in
-  let generators = List.filter_map ~f:extract_generator qualifiers in
-  (* Wrap filtered expression with loops for generators*)
-  let apply_one_gen (pat, expr) (acc : Block.t) : Block.t =
-    (* Initialize generator *)
-    let gen_var, init_block = translate_expression_to_fresh_id env expr in
-    (* Check if there are still elements in the generator *)
-    let join_node = Node.make_join env in
-    let is_cons_id = mk_fresh_id () in
-    let check_cons_node =
-      Node.make_stmt env [Env.has_type_instr env ~result:is_cons_id ~value:(Var gen_var) Cons]
-    in
-    let is_cons_node = Node.make_if env true (Var is_cons_id) in
-    let no_cons_node = Node.make_if env false (Var is_cons_id) in
-    (* Load head, overwrite list with tail for next iteration *)
-    let head_var = mk_fresh_id () in
-    let head_load = load_field_from_id env head_var gen_var ErlangTypeName.cons_head Cons in
-    let tail_load = load_field_from_id env gen_var gen_var ErlangTypeName.cons_tail Cons in
-    let unpack_node = Node.make_stmt env [head_load; tail_load] in
-    (* Match head and evaluate expression *)
-    let head_matcher = translate_pattern env head_var pat in
-    let fail_node = Node.make_nop env in
-    init_block.exit_success |~~> [join_node] ;
-    init_block.exit_failure |~~> [fail_node] ;
-    join_node |~~> [check_cons_node] ;
-    check_cons_node |~~> [is_cons_node; no_cons_node] ;
-    is_cons_node |~~> [unpack_node] ;
-    unpack_node |~~> [head_matcher.start] ;
-    head_matcher.exit_success |~~> [acc.start] ;
-    head_matcher.exit_failure |~~> [join_node] ;
-    acc.exit_success |~~> [join_node] ;
-    acc.exit_failure |~~> [fail_node] ;
-    {start= init_block.start; exit_success= no_cons_node; exit_failure= fail_node}
-  in
-  let loop_block = List.fold_right generators ~f:apply_one_gen ~init:loop_body_with_filters in
   (* Store lists:reverse(L) in return variable *)
   let store_return_block =
     let fun_exp = Exp.Const (Cfun lists_reverse) in
@@ -1152,6 +1195,34 @@ and translate_expression_map_update (env : (_, _) Env.t) ret_var map updates : B
   (* TODO: what should be the order of updates? *)
   let update_blocks = List.map ~f:translate_update updates in
   Block.all env ([map_block; check_map_type_block] @ update_blocks)
+
+
+and translate_expression_mapcomprehension (env : (_, _) Env.t) ret_var
+    (expression : Ast.association) qualifiers : Block.t =
+  let map_var = mk_fresh_id () in
+  (* Start with an empty map M := {} *)
+  let init_block = translate_expression_map_create env map_var [] in
+  (* Loop with generators/filters *)
+  let loop_block =
+    let loop_body =
+      (* Compute the result of the association's expressions *)
+      let key_id, key_block = translate_expression_to_fresh_id env expression.key in
+      let val_id, val_block = translate_expression_to_fresh_id env expression.value in
+      (* Add to map *)
+      let update_fun_exp = Exp.Const (Cfun maps_put) in
+      let update_args =
+        [(Exp.Var key_id, any_typ); (Exp.Var val_id, any_typ); (Exp.Var map_var, any_typ)]
+      in
+      let update_instr =
+        Sil.Call ((map_var, any_typ), update_fun_exp, update_args, env.location, CallFlags.default)
+      in
+      Block.all env [key_block; val_block; Block.make_instruction env [update_instr]]
+    in
+    translate_comprehension_loop env loop_body qualifiers
+  in
+  (* Simply store map M in return variable *)
+  let store_return_block = Block.make_load env ret_var (Var map_var) any_typ in
+  Block.all env [init_block; loop_block; store_return_block]
 
 
 and translate_expression_match (env : (_, _) Env.t) ret_var pattern body : Block.t =
@@ -1602,11 +1673,10 @@ let translate_one_spec (env : (_, _) Env.t) function_ spec =
 let add_module_info_field (env : (_, _) Env.t) tenv =
   let typ = Typ.ErlangType ModuleInfo in
   Tenv.mk_struct tenv typ |> ignore ;
-  let field =
-    ( Fieldname.make typ ErlangTypeName.module_info_field_name
-    , Typ.mk_struct typ
-    , Map.data env.module_info )
-  in
+  let name = Fieldname.make typ ErlangTypeName.module_info_field_name in
+  let field_typ = Typ.mk_struct typ in
+  let annot = Map.data env.module_info in
+  let field = Struct.mk_field name field_typ ~annot in
   Tenv.add_field tenv typ field
 
 

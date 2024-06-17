@@ -29,10 +29,12 @@
     test_update_exact1_Ok/0,
     test_update_exact2_Bad/0,
     fn_test_update_exact3_Bad/0,
-    fp_test_mapcomp_Ok/0,
-    test_mapcomp_Bad/0,
-    fp_test_mapgen_Ok/0,
-    test_mapgen_Bad/0
+    test_to_list1_Ok/0,
+    test_to_list2_Bad/0,
+    test_to_list3_Ok/0,
+    test_to_list4_Bad/0,
+    fp_test_to_list5_Ok/0,
+    fn_test_to_list6_Bad/0
 ]).
 
 test_is_key_Ok() ->
@@ -98,7 +100,7 @@ test_put5_Bad() ->
     accepts_map_with_key_one_value_two(M1).
 
 test_put6_Bad() ->
-    M1 = maps:put(1, 3, [not_a_map]).
+    maps:put(1, 3, [not_a_map]).
 
 test_new_Ok() ->
     M = maps:new(),
@@ -139,20 +141,22 @@ fn_test_update_exact3_Bad() ->
     M = #{1 => 2},
     M#{2 := 3}.
 
-fp_test_mapcomp_Ok() ->
-    M = #{I => I+1 || I <- [1]},
-    ?ASSERT_EQUAL(2, maps:get(1, M)).
+test_to_list1_Ok() ->
+    ?ASSERT_EQUAL([], maps:to_list(#{})).
 
-test_mapcomp_Bad() ->
-    M = #{I => I+1 || I <- [1]},
-    ?CRASH_IF_EQUAL(2, maps:get(1, M)).
+test_to_list2_Bad() ->
+    ?CRASH_IF_EQUAL([], maps:to_list(#{})).
 
-fp_test_mapgen_Ok() ->
-    M = #{1 => 2},
-    L = [{K, V} || K := V <- M],
-    ?ASSERT_EQUAL([{1, 2}], L).
+test_to_list3_Ok() ->
+    ?ASSERT_EQUAL([{1, 2}], maps:to_list(#{1 => 2})).
 
-test_mapgen_Bad() ->
-    M = #{1 => 2},
-    L = [{K, V} || K := V <- M],
-    ?CRASH_IF_EQUAL([{1, 2}], L).
+test_to_list4_Bad() ->
+    ?CRASH_IF_EQUAL([{1, 2}], maps:to_list(#{1 => 2})).
+
+% Known limitation due to recency abstraction
+fp_test_to_list5_Ok() ->
+    ?ASSERT_EQUAL([{1, 2}, {3, 4}], maps:to_list(#{1 => 2, 3 => 4})).
+
+% Known limitation due to recency abstraction
+fn_test_to_list6_Bad() ->
+    ?CRASH_IF_EQUAL([{1, 2}, {3, 4}], maps:to_list(#{1 => 2, 3 => 4})).

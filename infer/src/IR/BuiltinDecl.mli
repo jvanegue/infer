@@ -29,6 +29,8 @@ val __erlang_greater : Procname.t
 
 val __erlang_greater_or_equal : Procname.t
 
+val __erlang_error_badgenerator : Procname.t
+
 val __erlang_error_badkey : Procname.t
 
 val __erlang_error_badmatch : Procname.t
@@ -65,6 +67,10 @@ val __erlang_make_map : Procname.t
 val __erlang_make_str_const : Procname.t
 
 val __erlang_make_bitstring : Procname.t
+
+val __erlang_map_to_list : Procname.t
+(** This is an internal function we use for map generators, not to be confused with maps:to_list/1
+    from OTP library. *)
 
 val __erlang_receive : Procname.t
 

@@ -229,19 +229,20 @@ let get_result_type : Typ.t monad = fun state -> (Value state.pdesc.procdecl.res
 
 let get_lang : Lang.t option monad = fun state -> (Value (TextualDecls.lang state.decls), state)
 
-let fold (l : 'a list) ~(init : 'acc monad) ~(f : 'acc -> 'a -> 'acc monad) : 'acc monad =
-  List.fold l ~init ~f:(fun monad a ->
-      let* acc = monad in
-      f acc a )
+let rec fold (l : 'a list) ~(init : 'acc) ~(f : 'acc -> 'a -> 'acc monad) : 'acc monad =
+ fun astate ->
+  match l with
+  | [] ->
+      ret init astate
+  | x :: xs ->
+      bind (f init x) (fun init -> (fold [@tailcall]) xs ~init ~f) astate
 
 
-let iter (l : 'a list) ~(f : 'a -> unit monad) : unit monad =
-  fold l ~init:(ret ()) ~f:(fun () a -> f a)
-
+let iter (l : 'a list) ~(f : 'a -> unit monad) : unit monad = fold l ~init:() ~f:(fun () a -> f a)
 
 let mapM (l : 'a list) ~(f : 'a -> 'b monad) : 'b list monad =
   let+ rev_res =
-    fold l ~init:(ret []) ~f:(fun l a ->
+    fold l ~init:[] ~f:(fun l a ->
         let+ b = f a in
         b :: l )
   in
@@ -378,7 +379,7 @@ let typeof_reserved_proc procsig args =
 let typeof_generics = Typ.Ptr (Typ.Struct TypeName.hack_generics)
 
 let count_generics_args args : int monad =
-  fold args ~init:(ret 0) ~f:(fun count exp ->
+  fold args ~init:0 ~f:(fun count exp ->
       match exp with
       | Exp.Var id ->
           let+ typ, _ = typeof_ident id in

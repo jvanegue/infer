@@ -450,6 +450,7 @@ module StructBridge = struct
              if has ~f:Textual.Attr.is_interface then SilStruct.Interface
              else if has ~f:Textual.Attr.is_trait then SilStruct.Trait
              else if has ~f:Textual.Attr.is_abstract then SilStruct.AbstractClass
+             else if has ~f:Textual.Attr.is_alias then SilStruct.Alias
              else SilStruct.Class
            in
            SilStruct.ClassInfo.HackClassInfo kind )
@@ -479,9 +480,9 @@ module StructBridge = struct
     in
     let fields =
       List.map fields ~f:(fun (fdecl : FieldDecl.t) ->
-          ( FieldDeclBridge.to_sil lang fdecl
-          , TypBridge.to_sil lang ~attrs:fdecl.attributes fdecl.typ
-          , Annot.Item.empty ) )
+          SilStruct.mk_field
+            (FieldDeclBridge.to_sil lang fdecl)
+            (TypBridge.to_sil lang ~attrs:fdecl.attributes fdecl.typ) )
     in
     let annots =
       List.filter_map attributes ~f:(fun attr ->
@@ -500,9 +501,9 @@ module StructBridge = struct
 
 
   let of_sil name (sil_struct : SilStruct.t) =
-    let of_sil_field (fieldname, typ, annots) =
+    let of_sil_field {SilStruct.name= fieldname; typ; annot} =
       let typ = TypBridge.of_sil typ in
-      FieldDeclBridge.of_sil fieldname typ (Annot.Item.is_final annots)
+      FieldDeclBridge.of_sil fieldname typ (Annot.Item.is_final annot)
     in
     let supers = sil_struct.supers |> List.map ~f:TypeNameBridge.of_sil in
     let fields = SilStruct.(sil_struct.fields @ sil_struct.statics) in

@@ -5,7 +5,11 @@
 
 TESTS_DIR = ../../..
 
-INFER_OPTIONS = --pulse-only --erlang-with-otp-specs --debug-exceptions --project-root $(TESTS_DIR) --print-types
+INFER_OPTIONS = \
+  --pulse-only --erlang-with-otp-specs --debug-exceptions --no-pulse-force-continue \
+  --project-root $(TESTS_DIR) --print-types \
+  --report-suppress-errors MUTUAL_RECURSION_CYCLE \
+
 INFERPRINT_OPTIONS = --issues-tests
 
 SOURCES = $(wildcard *.erl)
