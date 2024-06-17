@@ -47,7 +47,6 @@ let pp_function_symbol fmt = function
       (* templates mess up HTML debug output and are too much info most of the time *)
       Procname.pp_without_templates fmt proc_name
 
-
 type operand =
   | AbstractValueOperand of Var.t
   | ConstOperand of Const.t
@@ -1470,7 +1469,7 @@ module Term = struct
           ~fold:(IContainer.fold_of_pervasives_set_fold fold)
           ?filter
           (fun fmt atom -> F.fprintf fmt "{%a}" (pp_no_paren pp_var) atom)
-          fmt atoms
+          fmt atoms 
 
     let yojson_of_t atoms = `List (List.map (elements atoms) ~f:yojson_of_t)
                           
@@ -2311,6 +2310,8 @@ module Formula = struct
     val get_terminal_conds : t -> Atom.Set.t
 
     val get_terminal_terms : t -> Term.Set.t
+
+    (* val is_empty : t -> bool *)
       
     val unsafe_mk :
          var_eqs:var_eqs
@@ -2387,11 +2388,12 @@ module Formula = struct
          ; tableau_occurrences= _
          ; term_eqs_occurrences= _
          ; atoms_occurrences= _
-         ; term_conditions= _
-         ; term_conditions2= _ } [@warning "+missing-record-field-pattern"] ) =
+         ; term_conditions
+         ; term_conditions2} [@warning "+missing-record-field-pattern"] ) =
       VarUF.is_empty var_eqs && Var.Map.is_empty const_eqs && Var.Map.is_empty type_constraints
       && Var.Map.is_empty linear_eqs && term_eqs_is_empty term_eqs && Var.Map.is_empty tableau
-      && Var.Map.is_empty intervals && Atom.Set.is_empty atoms (* PULSEINF: Not adding term_conds for now *)
+      && Var.Map.is_empty intervals && Atom.Set.is_empty atoms && Atom.Set.is_empty term_conditions
+      && Term.Set.is_empty term_conditions2
 
     (* {2 [term_eqs] interface due to the totally opaque type} *)
 
@@ -2467,7 +2469,7 @@ module Formula = struct
            ; term_conditions2 } [@warning "+missing-record-field-pattern"] ) as phi ) =
       let is_first = ref true in
       let pp_if condition header pp fmt x =
-        let pp_and fmt = if not !is_first then F.fprintf fmt "@;&& " else is_first := false in
+        let pp_and fmt = if not !is_first then F.fprintf fmt "@;&& \n" else is_first := false in
         if condition then F.fprintf fmt "%t%s: %a" pp_and header pp x
       in
       F.pp_open_hvbox fmt 0 ;
@@ -2493,9 +2495,10 @@ module Formula = struct
       (pp_if (not (Var.Map.is_empty intervals)) "intervals" (pp_var_map ~arrow:"" CItv.pp pp_var))
         fmt intervals ;
       (pp_if (not (Atom.Set.is_empty atoms)) "atoms" (Atom.Set.pp_with_pp_var pp_var)) fmt atoms ;
-      (pp_if (not (Atom.Set.is_empty term_conditions)) "term_conds" (Atom.Set.pp_with_pp_var pp_var)) fmt term_conditions ;
-
-      (pp_if (not (Term.Set.is_empty term_conditions2)) "term_conds2" (Term.Set.pp_with_pp_var pp_var)) fmt term_conditions2 ;
+      (pp_if (not (Atom.Set.is_empty term_conditions)) "term_conds" (Atom.Set.pp_with_pp_var pp_var))
+        fmt term_conditions ;
+      (pp_if (not (Term.Set.is_empty term_conditions2)) "term_conds2" (Term.Set.pp_with_pp_var pp_var))
+        fmt term_conditions2 ;
       
       if Config.debug_level_analysis >= 3 then (
         (pp_if
@@ -2799,6 +2802,7 @@ module Formula = struct
       | _ -> phi                                       
 
     let and_termcond_binop (phi:t) (term:Term.t) : t =
+      L.debug Analysis Quiet "JV: Adding term_conditions2 - Term \n";
       {phi with term_conditions2= Term.Set.add term phi.term_conditions2}
            
     let remove_atom atom phi =
@@ -2845,6 +2849,8 @@ module Formula = struct
     let get_terminal_conds t = t.term_conditions
 
     let get_terminal_terms t = t.term_conditions2
+
+    (* let is_empty t = (Formula.is_empty t) *)
                              
     let unsafe_mk ~var_eqs ~const_eqs ~type_constraints ~linear_eqs ~term_eqs ~tableau ~intervals ~atoms
         ~linear_eqs_occurrences ~tableau_occurrences ~term_eqs_occurrences ~atoms_occurrences ~term_conditions ~term_conditions2 =
@@ -3794,7 +3800,7 @@ module Formula = struct
       (* May not be necessary thanks to Pulse fresh name creation, which witness the existence of a change without tracking intermediate constraints *)
       let upd_phi =
         let _ = (if add_term then "TRUE - adding atom" else "FALSE - not adding atom") in
-        (* L.debug Analysis Quiet "JV: and_normalized_atoms: add termination cond is %s \n" str; *)
+        L.debug Analysis Quiet "JV: and_normalized_atoms: adding termination atom cond \n";
         if add_term then
           (and_termcond_atoms phi orig_atom)
         else
@@ -3906,15 +3912,13 @@ let extract_term_cond (var:t) = (Formula.get_terminal_conds var.phi)
 let extract_term_cond2 (var:t) = (Formula.get_terminal_terms var.phi)                              
 let set_is_empty (conds: Atom.Set.t) = (Atom.Set.is_empty conds)
 let termset_is_empty (conds: Term.Set.t) = (Term.Set.is_empty conds)
+
+let formula_is_empty (var:t) = set_is_empty(extract_path_cond(var)) 
+                               && set_is_empty(extract_term_cond(var))
+                               && termset_is_empty(extract_term_cond2(var))
+                                         
+(* let formula_is_empty (var:t) = (Formula.is_empty var.phi) *)
 (* end pulse-infinite *)
-          
-(* let pp_with_pp_var pp_var fmt {conditions; phi; term_conds} = *)
-(*
-  F.fprintf fmt "@[<hv>conditions: %a@;phi: %a@;term_conds: %a]"
-    (Atom.Set.pp_with_pp_var pp_var) conditions
-    (Formula.pp_with_pp_var pp_var) phi
-    (Atom.Set.pp_with_pp_var pp_var) term_conds
-*)
 
 let pp_with_pp_var pp_var fmt {conditions; phi} =
   let pp_conditions fmt conditions =
@@ -4199,9 +4203,20 @@ let prune_binop ~negated (bop:Binop.t) ?(ifk=false) x y formula =
   let t = Term.of_binop bop tx ty in
   (* [Option.value_exn] is justified by [force_to_atom:true] *)
 
+  (* JV: Check for cases like while (x == x) by rewriting them to while (0 == 0) *)
+  let opcond = match (tx, ty) with
+    | Term.Var v1, Term.Var v2 -> (phys_equal v1 v2)
+    | _,_ -> false
+  in       
+  let swapcond = (match (bop: Binop.t) with | Eq -> true | _ -> false)
+  in 
+  let swapterm = (Term.of_binop Eq Term.zero Term.zero) in
+  let atom = if (opcond && swapcond) then swapterm else t
+  in
   (* JV: Here add t to term_conditions2 for PULSEINF *)
-  let newphi = (Formula.and_termcond_binop formula.phi t) in
+  let newphi = (Formula.and_termcond_binop formula.phi atom) in
   let newformula = {formula with phi=newphi} in
+  (* End pulse-inf *)
   
   let atoms =
     Option.value_exn

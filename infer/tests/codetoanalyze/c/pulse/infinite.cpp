@@ -65,7 +65,7 @@ void loop_call_not_terminate(int y) {
   return;
 }
 
-/* pulse-inf: FALSE NEGATIVE (no goto support) */
+/* pulse-inf: FALSE NEGATIVE (empty pathcond) */
 void twovars_goto_not_terminate(int y) {
   int z = y;
   int x = 0;
@@ -123,8 +123,7 @@ void loop_conditional_not_terminate(int y) {
 
 
 
-/* pulse-inf: works good */
-/* NEW FALSE NEG??? */
+/* pulse-inf: works good, find bug */
 void nested_loop_cond_not_terminate(int y) {
   int x = 42;
   while (y < 100) {
@@ -149,8 +148,7 @@ void simple_loop_not_terminate(int y) {
 
 
 
-/* pulse-inf: works good */
-/* NEW FALSE NEG??? */
+/* pulse-inf: works good, find bug */
 void loop_alternating_not_terminate(int y, int x) {
   int turn = 0;
   while (x < 100) {
@@ -164,7 +162,7 @@ void loop_alternating_not_terminate(int y, int x) {
 
 
 
-/* NEW FALSE NEG??? */
+/* NEW FALSE NEG??? needs to augment widening threshold? */
 /* pulse-inf: works good */
 void nested_loop_not_terminate(int y, int x) {
   
@@ -201,7 +199,6 @@ void simple_dowhile_terminate(int y, int x) {
 
 
 /* pulse-inf: works good */
-
 int conditional_goto_terminate(int x, int y) {
  re:
   x++;
@@ -791,29 +788,33 @@ void iterate_modulus_nonterminate(int array[256], unsigned int len, unsigned int
 /* Iterate computing a crc value - terminates no bug */
 /* Pulse-inf: no bug - good */
 #define W 8
-#define N 5
+//#define N 5
 
+/*
 static unsigned int crc_braid_table[W][256];
 static unsigned int crc_braid_big_table[W][256];
+*/
 
 void iterate_crc_terminate()
 {
   unsigned int k;
-  unsigned long crc0 = 0xFFFFFFFF, crc1 = 0, crc2 = 0, crc3 = 0, crc4 = 0, crc5 = 0;
+  unsigned long crc0 = 0xFFFFFFFF;
+  /*
+  unsigned long crc1 = 0, crc2 = 0, crc3 = 0, crc4 = 0, crc5 = 0;
   unsigned short word0 = 6, word1 = 1, word2 = 2, word3 = 3, word4 = 4, word5 = 5;
-  
+  */
   for (k = 1; k < W; k++) {
+    crc0++;
+    /*
     crc0 ^= crc_braid_table[k][(word0 >> (k << 3)) & 0xff];
     crc1 ^= crc_braid_table[k][(word1 >> (k << 3)) & 0xff];
     crc2 ^= crc_braid_table[k][(word2 >> (k << 3)) & 0xff];
     crc3 ^= crc_braid_table[k][(word3 >> (k << 3)) & 0xff];
     crc4 ^= crc_braid_table[k][(word4 >> (k << 3)) & 0xff];
     crc5 ^= crc_braid_table[k][(word5 >> (k << 3)) & 0xff];
+    */
   }
 }
-
-
-
 
 /* From: libpng */
 /* Test from libpng with typedefs */
@@ -835,10 +836,25 @@ void	png_palette_terminate(int val)
 }
 
 /* Peter O'Hearn's test - not terminate */
-/* Pulse-Inf: OK! */
+/* Pulse-Inf: OK - find bug  */
 void simple_loop_equal_notterminate()
 {
   int x = 42;
   while (x == x)
     x = x + 1;
+}
+
+
+/* Pulse-Inf: OK! Find bug */
+int compute_increment(int k) {
+  return (k % 2 ? 1 : 0);
+}
+
+void loop_fcall_add_inductive_nonterminate()
+{
+  int i;
+  int incr;
+  for (i = 0; i < 10; i += incr)
+    incr = compute_increment(i);
+  
 }

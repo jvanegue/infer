@@ -178,7 +178,6 @@ module PulseTransferFunctions = struct
     let plist,rplist = listpair_split prev [] [] in
     let nlist,rnlist = listpair_split next [] [] in
     let dbe,cnt      = (ExecDom.back_edge plist nlist num_iters) in
-    
     let _,_       = (PathContext.back_edge rplist rnlist num_iters) in    
     let (pathctx: PathContext.t option) = (List.nth rnlist cnt) in
 
@@ -191,9 +190,11 @@ module PulseTransferFunctions = struct
             
     in
     (* L.debug Analysis Quiet "JV PATHCTX: dbe len = %u pts len = 1 \n" (List.length dbe); *)
+    L.debug Analysis Quiet "widen: Prev MODIFIED %b \n" (used > 0 && cnt >= 0);
+    
     let res = if (used > 0 && cnt >= 0) then
                 listpair_combine (plist @ dbe) (rplist @ [pts])
-              else listpair_combine plist rplist
+              else prev (* listpair_combine plist rplist *)
     in
     (res,-1)
   (* END OF BACK-EDGE CODE *)

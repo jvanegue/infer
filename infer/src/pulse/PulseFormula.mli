@@ -100,6 +100,8 @@ val extract_term_cond2 : t -> Term.Set.t
 val set_is_empty : Atom.Set.t -> bool
 
 val termset_is_empty : Term.Set.t -> bool  
+
+val formula_is_empty : t -> bool
 (* End pulse-infinite *)
 
                

@@ -124,17 +124,6 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
 
   let cfgnode = (Metadata.get_cfg_node ()) in  
   let same = phys_equal prev next in
-
-  (* Future work: implement a more generic way to check for recurring sets than filtering on the path condition *)
-  (* 
-     let substate _ _ = false (* TODO *) 
-     in 
-     let rec find_equiv_elem e lst =
-         match lst with
-         | [] -> false
-         | hd::tl -> if (substate hd e) then true else (find_equiv_elem e tl)
-     in
-   *)
   
   let rec detect_elem e lst curi : bool * int =
     match lst with
@@ -167,7 +156,7 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
   (* Pulse-inf debug output: useful but verbose *)
   let rec print_workset ws =
     match ws with
-    | [] -> true
+    | [] -> L.flush_formatters(); true
     | (hd,_)::tl ->                 
        pp Format.err_formatter hd;
        print_workset tl
@@ -180,11 +169,16 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
   
   let print_warning s cnt state =
     let _ = state in 
-    L.debug Analysis Quiet "JV: FOUND infinite state from %s with cnt %i \n" s cnt; 
-    pp Format.std_formatter state; 
-    L.debug Analysis Quiet "JV: End infinite state -- now printing workset at bug location \n";
+    L.debug Analysis Quiet "JV: FOUND infinite state from %s with cnt %i numiter %u \n" s cnt num_iters;
+    L.flush_formatters();
+    pp Format.err_formatter state;
+    L.flush_formatters();
+    L.debug Analysis Quiet "JV: End infinite state -- now printing workset at bugloc (numiter %u) \n" num_iters;
+    L.flush_formatters();
     let _ = print_workset workset in
-    L.debug Analysis Quiet "JV: End Printing Vulnerable Workset \n"
+    L.flush_formatters();
+    L.debug Analysis Quiet "JV: End Printing Vulnerable Workset numiter %u \n" num_iters;
+    L.flush_formatters(); ()
   in
   
   let extract_pathcond hd : Formula.t =
@@ -199,36 +193,59 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
     | LatentSpecializedTypeIssue {astate; _} -> AbductiveDomain.Summary.get_path_condition astate
   in
   
-  let rec record_pathcond ws : int =
-    match ws with
+  (* Used when the workset is empty and we need to select one common state *)
+  let rec detect_common_elem_with_non_null_formula prev next : int =
+    match next with
     | [] -> -1
+    | hd::tl ->
+       let (found,idx) = (detect_elem hd prev 0) in
+       match found with
+       | false -> (detect_common_elem_with_non_null_formula prev tl)
+       | true ->
+          let cond = extract_pathcond hd in
+          let fempty = Formula.formula_is_empty cond in
+          L.debug Analysis Quiet "PULSEINF: TRIVIAL LASSO with EMPTY WORKSET (P:%u N:%u W:%u) - fempty:%b numiter:%u \n"
+            prevlen nextlen worklen fempty num_iters;
+          L.flush_formatters();
+          (Formula.pp Format.err_formatter cond);
+          L.flush_formatters();
+          if (fempty) then (detect_common_elem_with_non_null_formula prev tl) else idx
+  in
+
+  (* Used when the workset is not empty *)
+  let rec record_pathcond ws : int =
+
+    (* let curlen = (List.length ws) in *)
+    match ws with
+    | [] -> (-1)
     | (hd,idx)::tl ->
        match !widenstate with
-       | None -> L.debug Analysis Quiet "PULSEINF: widenstate htable NONE - should never happen! \n"; -1
+       | None -> L.debug Analysis Quiet "PULSEINF: widenstate htable NONE - should never happen! num_iter %u \n" num_iters; -1
        | Some wstate ->
           let cond = extract_pathcond hd in
           let pathcond = Formula.extract_path_cond cond in
           let termcond = Formula.extract_term_cond cond in
           let termcond2 = Formula.extract_term_cond2 cond in
-          
           let prevstate = Caml.Hashtbl.find_opt wstate (cfgnode,termcond,pathcond,termcond2) in
           match prevstate with
           | None ->
              Caml.Hashtbl.add wstate (cfgnode,termcond,pathcond,termcond2) (); (* record pathcond of hd *)
-             (* L.debug Analysis Quiet "PULSEINF: Recorded pathcond in htable at idx %d (NO BUG) \n" idx; *)
+             L.debug Analysis Quiet "PULSEINF: Recorded pathcond in htable at idx %d (NO BUG) numiter %u \n" idx num_iters;
              record_pathcond tl
           | Some _ ->
              match (Formula.set_is_empty termcond),(Formula.set_is_empty pathcond),(Formula.termset_is_empty termcond2) with
-             | true,true,true -> (* -2 *)
-                (* L.debug Analysis Quiet "PULSEINF: Recorded pathcond ALREADY in htable! (EMPTY) idx %d \n" idx; *) -2 
-             | _ -> (* idx *)
-                (* L.debug Analysis Quiet "PULSEINF: Recorded pathcond ALREADY in htable! (NON-TERM BUG) idx %d \n" idx; *) idx 
+             | true,true,true -> 
+                L.debug Analysis Quiet "PULSEINF: Recorded pathcond ALREADY in htable! (EMPTY) idx %d numiter %u \n" idx num_iters; -2
+             | _ -> 
+                L.debug Analysis Quiet "PULSEINF: Recorded pathcond ALREADY in htable! (NON-TERM BUG) idx %d numiter %u \n" idx num_iters; idx 
                     
   in
-  
-  (* let _ = print_workset workset in *)
-  let (repeated_wsidx:int) = record_pathcond workset in
 
+  (* let _ = print_workset workset in *)
+  let (repeated_wsidx:int) = if (same || phys_equal worklen 0) then 
+                               detect_common_elem_with_non_null_formula prev next 
+                               else record_pathcond workset in
+  
   let create_infinite_state (hd:t) (cnt:int) : t =
     (* Only create infinite state from a non-error state that is not already an infinite state *)
     match hd with
@@ -243,23 +260,24 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
   in
 
   let create_infinite_state_and_print (state_set: t list) (idx:int) (case:int) = 
-
-    (* L.debug Analysis Quiet "JV: BUG FOUND - DETECTED REPEATED STATE IDX %d CASE %d numiter %d \n" idx case num_iters; *)
-
+    L.debug Analysis Quiet "JV: BUG FOUND - DETECTED REPEATED STATE IDX %d CASE %d numiter %d \n" idx case num_iters; 
     Metadata.record_alert_node cfgnode;
-    
     let nth = (List.nth state_set idx) in 
     match nth with
     | None       ->
-       L.debug Analysis Quiet "PULSEINF: create_infinite_state Nth NONE (idx %d case %d) -- should never happen! \n" idx case;
+       L.debug Analysis Quiet "PULSEINF: create_infinite_state Nth NONE prevlen %u nextlen %u idx %d case %d numiter %u -- SHOULD NEVER HAPPEN! \n"
+         prevlen nextlen idx case num_iters;
        [],-1
     | Some state ->
        [(create_infinite_state state idx)],idx
   in
   
-  let lastelm = (List.length next) in
-  let isempty = (phys_equal lastelm 0) || (phys_equal (List.length prev) 0) in
-
+  (* let lastelm = (List.length next) in *)
+  (* let idx = (if lastelm > 0 then lastelm-1 else 0) in *)
+  (* let isempty = (phys_equal lastelm 0) || (phys_equal (List.length prev) 0) in 
+  let prevempty = (phys_equal (List.length prev) 0) in
+  let nextempty = (phys_equal (List.length next) 0) in *)
+  
   (* Identify which state in the post is repeated and generate a new infinite state for it *)
   let rec is_repeated e lst : bool = 
       match lst with
@@ -276,15 +294,23 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
                   (find_duplicate_state tl (curi+1) maxi)
     | _ -> (* L.debug Analysis Quiet "JV: Chosen duplicate in POST has index = %d \n" maxi; *) maxi 
   in  
+
+  (* let print_empty_warning prevempty nextempty =
+    L.debug Analysis Quiet "JV: BUG MAYBE FOUND prevempty=%b nextempty=%b \n" prevempty nextempty;
+    [],-1
+  in *)
   
+  (* if same && (phys_equal isempty true) then
+    print_empty_warning prevempty nextempty *)
   (* we have a trivial lasso because prev = next - this should trigger an alert *)
-  if same && (phys_equal isempty false) then
-    create_infinite_state_and_print next lastelm 1
+  (* else if same && (phys_equal isempty false) then *)
+  if ((same || (phys_equal worklen 0)) && repeated_wsidx >= 0) then
+    create_infinite_state_and_print next repeated_wsidx 1
   (* We have one or more newly created equivalent states in the post, trigger an alert *)
   else if (phys_equal worklen 0) && (nextlen - prevlen) > 0 then
     create_infinite_state_and_print next (find_duplicate_state next 0 (-1)) 2
   (* We have a new post state whose path condition is equivalent to an existing state, trigger an alert *)
-  else if repeated_wsidx >= 0 then
+  else if (repeated_wsidx >= 0) then
     create_infinite_state_and_print next repeated_wsidx 3
   (* No recurring state detected, return empty *)
   else [],-1
