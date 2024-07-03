@@ -330,6 +330,10 @@ struct
       || is_trivial_subset (fst lhs) ~of_:(fst rhs)
          && T.NonDisjDomain.leq ~lhs:(snd lhs) ~rhs:(snd rhs)
 
+    let rec list_phys_equal l1 l2 = match l1, l2 with
+      | [], [] -> true
+      | x::tl, y::tl' -> phys_equal x y && list_phys_equal tl tl'
+      | _ -> false
 
     let widen ~prev ~next ~num_iters =
       L.debug Analysis Quiet "widen(%i)@\n" num_iters ;
@@ -337,31 +341,32 @@ struct
         match DConfig.widen_policy with UnderApproximateAfterNumIterations max_iter -> max_iter
       in
 
-      if phys_equal prev next then (
-        L.debug Analysis Quiet "widen: phys_equal, stopping early@\n" ;
+      (* if list_phys_equal (fst prev) (fst next) && phys_equal (fst prev) (fst next) then ( *)
+      if list_phys_equal (fst prev) (fst next) then ( 
+        (* L.debug Analysis Quiet "widen: phys_equal, stopping early @\n" ;*)
         prev )
       
       else if num_iters > max_iter then (
-        L.debug Analysis Quiet "widen: Iteration %d is greater than max iter %d, stopping." num_iters max_iter ;
+        (* L.debug Analysis Quiet "widen: Iteration %d is greater than max iter %d, stopping." num_iters max_iter ; *)
         DisjunctiveMetadata.incr_interrupted_loops () ;
         prev )
       else (
-        L.debug Analysis Quiet "widen: widening iteration %i@\n" num_iters;
+        (* L.debug Analysis Quiet "widen: widening iteration %i @\n" num_iters; *)
 
         let back_edges (prev: T.DisjDomain.t list) (next: T.DisjDomain.t list) (num_iters:int) : T.DisjDomain.t list * int =
-                         (T.back_edge prev next num_iters) in
-        L.debug Analysis Quiet "JV AbsInt back_edge called \n";
+          (T.back_edge prev next num_iters) in
+        
+        (* L.debug Analysis Quiet "JV AbsInt back_edge called @\n"; *)
 
         let fp = fst prev in
         let fn = fst next in
 
-        L.debug Analysis Quiet "widen: (before backedge) fst_prev = %u fst_next = %u \n" (List.length fp) (List.length fn);
+        (* L.debug Analysis Quiet "widen: (before backedge) fst_prev = %u fst_next = %u @\n" (List.length fp) (List.length fn); *)
         
         let dbe,_ = (back_edges fp fn num_iters) in
-
         let hasnew = not (phys_equal (fst prev) dbe) in
         
-        L.debug Analysis Quiet "widen: New DBE length = %u hasnew = %b \n" (List.length dbe) hasnew;
+        (* L.debug Analysis Quiet "widen: New DBE length = %u hasnew = %b @\n" (List.length dbe) hasnew; *)
         
         let post_disj,_,dropped =
           (* L.debug Analysis Quiet "JV Widen Just Before LEQ PulseExecutionDomain \n"; *)
@@ -372,7 +377,8 @@ struct
         in
          let next_non_disj = (T.NonDisjDomain.widen ~prev:(snd prev) ~next:(snd next) ~num_iters) in
          (* let post = (post_disj, next_non_disj) in *)
-         if leq ~lhs:(post_disj, next_non_disj) ~rhs:prev then prev
+         if leq ~lhs:(post_disj, next_non_disj) ~rhs:prev then
+           (* (L.debug Analysis Quiet "widen: iteration post already in prev: converged@\n"; *) prev 
          else (post_disj, add_dropped_disjuncts dropped next_non_disj)
       )
 

@@ -152,8 +152,9 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
 
   (* L.debug Analysis Quiet "PULSEINF: BACKEDGE prevlen %d nextlen %d diff %d worklen %d \n" prevlen nextlen (nextlen - prevlen) worklen; *)
   (* Do-nothing version to avoid debug output *)
-  (* let print_workset _ = true in  *) (* L.debug Analysis Quiet "JV: Computing Workset at numiter %i \n" num_iters; true in *)  
+  let print_workset _ = true in  (* L.debug Analysis Quiet "JV: Computing Workset at numiter %i \n" num_iters; true in *)  
   (* Pulse-inf debug output: useful but verbose *)
+ (*
   let rec print_workset ws =
     match ws with
     | [] -> L.flush_formatters(); true
@@ -161,12 +162,14 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
        pp Format.err_formatter hd;
        print_workset tl
   in
-
+ *)
+  
   (* Use this when disabling debug output *)
-  (* let print_warning _ _ _ = () in *)
+  let print_warning _ _ _ = () in 
 
   let _ = print_workset workset in
-  
+
+  (*
   let print_warning s cnt state =
     let _ = state in 
     L.debug Analysis Quiet "JV: FOUND infinite state from %s with cnt %i numiter %u \n" s cnt num_iters;
@@ -180,6 +183,7 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
     L.debug Analysis Quiet "JV: End Printing Vulnerable Workset numiter %u \n" num_iters;
     L.flush_formatters(); ()
   in
+   *)
   
   let extract_pathcond hd : Formula.t =
    match hd with
@@ -194,6 +198,7 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
   in
   
   (* Used when the workset is empty and we need to select one common state *)
+  (*
   let rec detect_common_elem_with_non_null_formula prev next : int =
     match next with
     | [] -> -1
@@ -211,6 +216,7 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
           L.flush_formatters();
           if (fempty) then (detect_common_elem_with_non_null_formula prev tl) else idx
   in
+  *)
 
   (* Used when the workset is not empty *)
   let rec record_pathcond ws : int =
@@ -230,21 +236,26 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
           match prevstate with
           | None ->
              Caml.Hashtbl.add wstate (cfgnode,termcond,pathcond,termcond2) (); (* record pathcond of hd *)
-             L.debug Analysis Quiet "PULSEINF: Recorded pathcond in htable at idx %d (NO BUG) numiter %u \n" idx num_iters;
+             (* L.debug Analysis Quiet "PULSEINF: Recorded pathcond in htable at idx %d (NO BUG) numiter %u \n" idx num_iters; *)
              record_pathcond tl
           | Some _ ->
              match (Formula.set_is_empty termcond),(Formula.set_is_empty pathcond),(Formula.termset_is_empty termcond2) with
              | true,true,true -> 
-                L.debug Analysis Quiet "PULSEINF: Recorded pathcond ALREADY in htable! (EMPTY) idx %d numiter %u \n" idx num_iters; -2
+                (* L.debug Analysis Quiet "PULSEINF: Recorded pathcond ALREADY in htable! (EMPTY) idx %d numiter %u \n" idx num_iters; *) -2
              | _ -> 
-                L.debug Analysis Quiet "PULSEINF: Recorded pathcond ALREADY in htable! (NON-TERM BUG) idx %d numiter %u \n" idx num_iters; idx 
+                (* L.debug Analysis Quiet "PULSEINF: Recorded pathcond ALREADY in htable! (NON-TERM BUG) idx %d numiter %u \n" idx num_iters; *) idx 
                     
   in
 
   (* let _ = print_workset workset in *)
-  let (repeated_wsidx:int) = if (same || phys_equal worklen 0) then 
-                               detect_common_elem_with_non_null_formula prev next 
-                               else record_pathcond workset in
+  let (repeated_wsidx:int) =
+    if (phys_equal same true) then (-1)
+    else
+      (
+        (* if (phys_equal worklen 0) then detect_common_elem_with_non_null_formula prev next else else *)
+        record_pathcond workset
+      )
+  in
   
   let create_infinite_state (hd:t) (cnt:int) : t =
     (* Only create infinite state from a non-error state that is not already an infinite state *)
@@ -260,7 +271,7 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
   in
 
   let create_infinite_state_and_print (state_set: t list) (idx:int) (case:int) = 
-    L.debug Analysis Quiet "JV: BUG FOUND - DETECTED REPEATED STATE IDX %d CASE %d numiter %d \n" idx case num_iters; 
+    (* L.debug Analysis Quiet "JV: BUG FOUND - DETECTED REPEATED STATE IDX %d CASE %d numiter %d \n" idx case num_iters; *)
     Metadata.record_alert_node cfgnode;
     let nth = (List.nth state_set idx) in 
     match nth with
@@ -304,8 +315,10 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
     print_empty_warning prevempty nextempty *)
   (* we have a trivial lasso because prev = next - this should trigger an alert *)
   (* else if same && (phys_equal isempty false) then *)
-  if ((same || (phys_equal worklen 0)) && repeated_wsidx >= 0) then
-    create_infinite_state_and_print next repeated_wsidx 1
+  if same then
+    [],-1
+  (* else if (phys_equal worklen 0) && (repeated_wsidx >= 0) then
+    create_infinite_state_and_print next repeated_wsidx 1 *)
   (* We have one or more newly created equivalent states in the post, trigger an alert *)
   else if (phys_equal worklen 0) && (nextlen - prevlen) > 0 then
     create_infinite_state_and_print next (find_duplicate_state next 0 (-1)) 2

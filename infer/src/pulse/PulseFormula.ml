@@ -2803,7 +2803,7 @@ module Formula = struct
       | _ -> phi                                       
 
     let and_termcond_binop (phi:t) (term:Term.t) : t =
-      L.debug Analysis Quiet "JV: Adding term_conditions2 - Term \n";
+      (* L.debug Analysis Quiet "JV: Adding term_conditions2 - Term \n"; *)
       {phi with term_conditions2= Term.Set.add term phi.term_conditions2}
            
     let remove_atom atom phi =
@@ -3800,8 +3800,8 @@ module Formula = struct
       (* JV: Possibly useful: test if variables in orig_atom are present in term_conds: if so, add orig_atom in term_conds even if add_term is false *)
       (* May not be necessary thanks to Pulse fresh name creation, which witness the existence of a change without tracking intermediate constraints *)
       let upd_phi =
-        let _ = (if add_term then "TRUE - adding atom" else "FALSE - not adding atom") in
-        L.debug Analysis Quiet "JV: and_normalized_atoms: adding termination atom cond \n";
+        (* let _ = (if add_term then "TRUE - adding atom" else "FALSE - not adding atom") in *)
+        (* L.debug Analysis Quiet "JV: and_normalized_atoms: adding termination atom cond \n"; *)
         if add_term then
           (and_termcond_atoms phi orig_atom)
         else
