@@ -1,10 +1,16 @@
-FROM debian:bullseye-slim
+FROM ubuntu:22.04
 
 LABEL maintainer "Infer team"
 
+ENV HTTP_PROXY "http://proxy.bloomberg.com:81"
+ENV HTTPS_PROXY "http://proxy.bloomberg.com:81"
+RUN export http_proxy=$HTTP_PROXY
+RUN export https_proxy=$HTTP_PROXY
+
 # mkdir the man/man1 directory due to Debian bug #863199
-RUN apt-get update && \
-    mkdir -p /usr/share/man/man1 && \
+RUN apt-get update
+
+RUN mkdir -p /usr/share/man/man1 && \
     apt-get install --yes --no-install-recommends \
       curl \
       libc6-dev \

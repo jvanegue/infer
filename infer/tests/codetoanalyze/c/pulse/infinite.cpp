@@ -124,11 +124,13 @@ void loop_conditional_not_terminate(int y) {
 
 
 /* pulse-inf: works good, find bug */
+/* pulse inf works */
+/* NEW FALSE NEG??? */
 void nested_loop_cond_not_terminate(int y) {
   int x = 42;
   while (y < 100) {
     while (x <= 100) {
-      if (x == 10)
+      if (x == 5)
 	x = 1;
       else
 	x++;
@@ -140,8 +142,8 @@ void nested_loop_cond_not_terminate(int y) {
 
 /* pulse inf works */
 /* NEW FALSE NEG??? */
-void simple_loop_not_terminate(int y) {
-  int x = 1;
+void simple_loop_not_terminate(int x) {
+  int y = 1;
   while (x != 3)
     y++;
 }
@@ -522,6 +524,7 @@ void	nondet_loop_non_terminate(int z)
 
 /* From: AProVE: Non-termination proving for C Programs (Hensel et al. TACAS 2022)*/
 /* pulse-inf: Works good! (flag bug) */
+// NEW FALSE NEGATIVE
 void hensel_tacas22_non_terminate(int x, int y)
 {
   y = 0;
@@ -765,7 +768,7 @@ void iterate_intoverflow_nonterminate(int len)
 {
   unsigned int i = 0xFFFFFFFF;
   while (i != 0)
-    i -= 2;
+    i++;
 }
 
 

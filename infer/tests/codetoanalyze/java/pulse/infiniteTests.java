@@ -1,4 +1,4 @@
-public abstract class Tests {
+public abstract class infiniteTests {
     
     // 
     void empty_function_terminate() {

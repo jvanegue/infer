@@ -12,10 +12,12 @@ rm -fr infer-out/ infinite.o infer-run.log
 #
 rm -fr pulseinf-svcomp-logs
 mkdir pulseinf-svcomp-logs
-for i in `ls pulseinf/svcomp-nla/*.c`; do
+
+# for i in `ls pulseinf/svcomp-nla/*.c`; do
+for i in pulseinf/svcomp-nla/dijkstra2-both-nt.c; do 
     echo Running infer on $i
     NEWNAME=`echo $i | sed s/pulseinf.svcomp.nla.//g`
     echo Short name for test: $NEWNAME
-    $HOME/infer/bin/infer run --debug-level=0 --pulse-only -- clang++ -c "$i" 2> pulseinf-svcomp-logs/infer-run-"$NEWNAME".log
-    python3 -m json.tool infer-out/report.json > pulseinf-svcomp-logs/pulseinf-report-"$NEWNAME".json
+    $HOME/infer/bin/infer run --debug-level=2 --pulse-only --print-logs -g -- clang++ -c "$i" 2> pulseinf-svcomp-logs/infer-run-"$NEWNAME".log
+    # python3 -m json.tool infer-out/report.json > pulseinf-svcomp-logs/pulseinf-report-"$NEWNAME".json
 done

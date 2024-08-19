@@ -113,7 +113,7 @@ let () = AnalysisGlobalState.register_ref ~init:(fun () -> Some (Caml.Hashtbl.cr
 
 let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
 
-  (* L.debug Analysis Quiet "PULSEINF: Entered BACK-EDGE! \n"; *)
+  L.debug Analysis Quiet "PULSEINF: Entered BACK-EDGE! \n"; 
   
   let _ = num_iters in
   
@@ -150,11 +150,11 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
   let nextlen = List.length(next) in
   let worklen = List.length(workset) in
 
-  (* L.debug Analysis Quiet "PULSEINF: BACKEDGE prevlen %d nextlen %d diff %d worklen %d \n" prevlen nextlen (nextlen - prevlen) worklen; *)
+  L.debug Analysis Quiet "PULSEINF: BACKEDGE prevlen %d nextlen %d diff %d worklen %d \n" prevlen nextlen (nextlen - prevlen) worklen;
+  
   (* Do-nothing version to avoid debug output *)
-  let print_workset _ = true in  (* L.debug Analysis Quiet "JV: Computing Workset at numiter %i \n" num_iters; true in *)  
+  (* let print_workset _ = true in  *) (* L.debug Analysis Quiet "JV: Computing Workset at numiter %i \n" num_iters; true in *)  
   (* Pulse-inf debug output: useful but verbose *)
- (*
   let rec print_workset ws =
     match ws with
     | [] -> L.flush_formatters(); true
@@ -162,7 +162,6 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
        pp Format.err_formatter hd;
        print_workset tl
   in
- *)
   
   (* Use this when disabling debug output *)
   let print_warning _ _ _ = () in 
@@ -232,21 +231,32 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
           let pathcond = Formula.extract_path_cond cond in
           let termcond = Formula.extract_term_cond cond in
           let termcond2 = Formula.extract_term_cond2 cond in
-          let prevstate = Caml.Hashtbl.find_opt wstate (cfgnode,termcond,pathcond,termcond2) in
+          let prevstate = (if true then
+                             (Caml.Hashtbl.find_opt wstate (cfgnode,termcond,pathcond,termcond2))
+                               (* Old mode - more FP *)
+                           else
+                             (Caml.Hashtbl.find_opt wstate (cfgnode,Formula.Atom.Set.empty,pathcond,Formula.Term.Set.empty)))
+                        
+          in
           match prevstate with
           | None ->
-             Caml.Hashtbl.add wstate (cfgnode,termcond,pathcond,termcond2) (); (* record pathcond of hd *)
-             (* L.debug Analysis Quiet "PULSEINF: Recorded pathcond in htable at idx %d (NO BUG) numiter %u \n" idx num_iters; *)
+             let key = (if true then (cfgnode,termcond,pathcond,termcond2)
+                                       (* Old mode - more FP *)
+                        else (cfgnode,Formula.Atom.Set.empty,pathcond,Formula.Term.Set.empty))
+             in
+             L.debug Analysis Quiet "PULSEINF: Recorded pathcond NOT in htable (ADDING) idx %d numiter %u \n" idx num_iters;
+             Caml.Hashtbl.add wstate key ();
              record_pathcond tl
           | Some _ ->
-             match (Formula.set_is_empty termcond),(Formula.set_is_empty pathcond),(Formula.termset_is_empty termcond2) with
+             match (Formula.set_is_empty termcond),(Formula.set_is_empty pathcond),(Formula.termset_is_empty termcond2) with 
              | true,true,true -> 
-                (* L.debug Analysis Quiet "PULSEINF: Recorded pathcond ALREADY in htable! (EMPTY) idx %d numiter %u \n" idx num_iters; *) -2
+             (* match (Formula.set_is_empty pathcond) with
+             | true -> *)
+                L.debug Analysis Quiet "PULSEINF: Recorded pathcond ALREADY in htable! (EMPTY) idx %d numiter %u \n" idx num_iters; -2
              | _ -> 
-                (* L.debug Analysis Quiet "PULSEINF: Recorded pathcond ALREADY in htable! (NON-TERM BUG) idx %d numiter %u \n" idx num_iters; *) idx 
-                    
-  in
-
+                L.debug Analysis Quiet "PULSEINF: Recorded pathcond ALREADY in htable! (NON-TERM BUG) idx %d numiter %u \n" idx num_iters; idx 
+  in                                                                                                                                   
+  
   (* let _ = print_workset workset in *)
   let (repeated_wsidx:int) =
     if (phys_equal same true) then (-1)
@@ -286,8 +296,8 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
   (* let lastelm = (List.length next) in *)
   (* let idx = (if lastelm > 0 then lastelm-1 else 0) in *)
   (* let isempty = (phys_equal lastelm 0) || (phys_equal (List.length prev) 0) in 
-  let prevempty = (phys_equal (List.length prev) 0) in
-  let nextempty = (phys_equal (List.length next) 0) in *)
+  let prevempty = (phys_equal (List.length prev) 0) in *)
+  let nextempty = (phys_equal (List.length next) 0) in 
   
   (* Identify which state in the post is repeated and generate a new infinite state for it *)
   let rec is_repeated e lst : bool = 
@@ -314,9 +324,11 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
   (* if same && (phys_equal isempty true) then
     print_empty_warning prevempty nextempty *)
   (* we have a trivial lasso because prev = next - this should trigger an alert *)
-  (* else if same && (phys_equal isempty false) then *)
-  if same then
-    [],-1
+  if same && (phys_equal nextempty false) then
+    (L.debug Analysis Quiet "PULSEINF: same && nextempty is true - returning (no bug) \n";
+     (* [],-1 *)
+     create_infinite_state_and_print next (find_duplicate_state next 0 (-1)) 1)
+    
   (* else if (phys_equal worklen 0) && (repeated_wsidx >= 0) then
     create_infinite_state_and_print next repeated_wsidx 1 *)
   (* We have one or more newly created equivalent states in the post, trigger an alert *)
@@ -326,7 +338,9 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
   else if (repeated_wsidx >= 0) then
     create_infinite_state_and_print next repeated_wsidx 3
   (* No recurring state detected, return empty *)
-  else [],-1
+  else (L.debug Analysis Quiet "PULSEINF: no recurring state detected - returning (no bug) \n";
+        let _ = print_workset workset in 
+        [],-1)
          
 type summary = AbductiveDomain.Summary.t base_t [@@deriving compare, equal, yojson_of]
 

@@ -30,9 +30,15 @@ rm -fr infer-out/ infinite.o infer-run.log
 #$HOME/infer/bin/infer run --pulse-only --debug-level=2 --print-logs -g -- clang++ -c pulseinf/bitshift_left_loop_not_terminate.cpp 2> infer-run.log
 #$HOME/infer/bin/infer run --pulse-only --debug-level=2 --print-logs -g -- clang++ -c pulseinf/bitshift_loop_terminate.cpp 2> infer-run.log
 #$HOME/infer/bin/infer run --pulse-only --debug-level=2 -g --print-logs -- clang++ -c pulseinf/simple_dowhile_terminate.cpp 2> infer-run.log
+
 #$HOME/infer/bin/infer run --pulse-only --debug-level=3 --print-logs -g -- clang++ -c pulseinf/simple_loop_not_terminate.cpp 2> infer-run.log
-#$HOME/infer/bin/infer run --pulse-only --debug-level=3 --print-logs -g -- clang++ -c pulseinf/loop_with_break_terminate.cpp 2> infer-run.log
-$HOME/infer/bin/infer run --pulse-only --pulse-widen-threshold=10 --debug-level=3 --print-logs -g -- clang++ -c pulseinf/iterate_crc_terminate.cpp 2> infer-run.log
+
+#$HOME/infer/bin/infer run --pulse-only --debug-level=3 --print-logs -g -- clang++ -c pulseinf/loop_with_break_terminate.cpp 2>> infer-run.log
+
+##### SHORT LOOP FP! 
+$HOME/infer/bin/infer run --pulse-only --pulse-widen-threshold=3 --debug-level=3 --print-logs -g -- clang++ -c pulseinf/iterate_crc_terminate.cpp 2> infer-run.log
+
+
 #$HOME/infer/bin/infer run --pulse-only --debug-level=3 --print-logs -g -- clang++ -c pulseinf/loop_fcall_add_to_inductive_nonterminate.cpp 2> infer-run.log
 
 
