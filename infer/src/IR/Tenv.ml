@@ -20,6 +20,8 @@ let pp fmt (tenv : t) =
   TypenameHash.iter (fun name typ -> Format.fprintf fmt "%a@," (Struct.pp Pp.text name) typ) tenv
 
 
+let length tenv = TypenameHash.length tenv
+
 let fold tenv ~init ~f = TypenameHash.fold f tenv init
 
 (** Create a new type environment. *)
@@ -241,9 +243,15 @@ let global_tenv_path = ResultsDir.get_path GlobalTypeEnvironment |> DB.filename_
 
 let read path = Serialization.read_from_file tenv_serializer path
 
-let load_global () : t option =
-  if is_none !global_tenv then global_tenv := read global_tenv_path ;
+let read_global () = read global_tenv_path
+
+let force_load_global () =
+  global_tenv := read_global () ;
   !global_tenv
+
+
+let load_global () : t option =
+  if Option.is_some !global_tenv then !global_tenv else force_load_global ()
 
 
 let load =
@@ -396,11 +404,7 @@ module MethodInfo = struct
 end
 
 let is_captured tenv type_name =
-  (let open IOption.Let_syntax in
-   let* struct_ = lookup tenv type_name in
-   let* _sourcefile = struct_.Struct.source_file in
-   Some true )
-  |> Option.value ~default:false
+  lookup tenv type_name |> Option.exists ~f:(fun (s : Struct.t) -> not s.dummy)
 
 
 let resolve_method ~method_exists tenv class_name proc_name =
@@ -496,13 +500,20 @@ let find_cpp_constructor tenv class_name =
       []
 
 
-let is_trivially_copyable tenv typ =
-  Option.exists (Typ.name typ) ~f:(fun name ->
-      match lookup tenv name with
-      | Some {class_info= CppClassInfo {is_trivially_copyable}} ->
-          is_trivially_copyable
-      | _ ->
-          false )
+let rec is_trivially_copyable tenv {Typ.desc} =
+  match desc with
+  | Tstruct name -> (
+    match lookup tenv name with
+    | Some {class_info= CppClassInfo {is_trivially_copyable}} ->
+        is_trivially_copyable
+    | _ ->
+        false )
+  | Tint _ | Tfloat _ | Tvoid | Tptr _ ->
+      true
+  | Tarray {elt} ->
+      is_trivially_copyable tenv elt
+  | Tfun | TVar _ ->
+      false
 
 
 let get_hack_direct_used_traits tenv class_name =

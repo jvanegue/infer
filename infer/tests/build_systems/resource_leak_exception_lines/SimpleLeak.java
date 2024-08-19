@@ -8,15 +8,16 @@
 import java.io.*;
 
 public class SimpleLeak {
-  public void method(boolean v) {
+  // TODO: pulse should point out where the exception is raised to understand the issue
+  public void testExceptionGetsFlagged_Not(boolean v) {
     try {
       FileInputStream a = new FileInputStream("aaa");
       FileInputStream z = null;
       if (v) {
         z = new FileInputStream("bbb");
         z.read();
+        z.close();
       }
-      z.close();
     } catch (IOException e) {
       // do nothing
     }

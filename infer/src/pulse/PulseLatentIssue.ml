@@ -100,20 +100,17 @@ let should_report (astate : AbductiveDomain.Summary.t) (diagnostic : Diagnostic.
   match diagnostic with
   | ConfigUsage _
   | ConstRefableParameter _
-  | CSharpResourceLeak _
   | DynamicTypeMismatch _
-  | JavaResourceLeak _
-  | TransitiveAccess _
   | HackCannotInstantiateAbstractClass _
-  | HackUnawaitedAwaitable _
-  | MemoryLeak _
   | MutualRecursionCycle _
   | ReadUninitialized _
   | ReadonlySharedPtrParameter _
+  | ResourceLeak _
   | RetainCycle _
   | StackVariableAddressEscape _
   | TaintFlow _
   | InfiniteError _
+  | TransitiveAccess _
   | UnnecessaryCopy _ ->
       (* these issues are reported regardless of the calling context, not sure if that's the right
          decision yet *)

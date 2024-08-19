@@ -192,7 +192,7 @@ let nil_typ = Typ.mk (Tstruct (ErlangType Nil))
 
 let cons_typ = Typ.mk (Tstruct (ErlangType Cons))
 
-let normalize_with phi init_phi = test ~f:(fun phi -> normalize phi >>| fst) phi init_phi
+let normalize_with phi init_phi = test ~f:(fun phi -> Sat phi) phi init_phi
 
 let normalize phi = normalize_with phi ttrue
 
@@ -244,13 +244,9 @@ let%test_module "normalization" =
     let%expect_test _ =
       normalize_with_all_types_Nil
         (instanceof cons_typ x_var y_var && instanceof nil_typ x_var y_var) ;
-      [%expect
-        {|
+      [%expect {|
         Formula:
-          conditions: (empty)
-          phi: type_constraints: x:ErlangNil, SourceFile [None]∧y:ErlangNil, SourceFile [None]
-                                 ∧z:ErlangNil, SourceFile [None]∧w:ErlangNil, SourceFile [None]
-               && term_eqs: (x instanceof ErlangCons nullable=false)=y∧(x instanceof ErlangNil nullable=false)=y
+          unsat
         Result: same|}]
 
 

@@ -167,13 +167,23 @@ let unknown_call tenv ({PathContext.timestamp} as path) call_loc (reason : CallE
             (Attributes.singleton (UnknownEffect (reason, hist)))
             astate
         in
-        fold_on_reachable_from_arg astate (fun reachable_actual ->
-            AddressAttributes.remove_allocation_attr reachable_actual )
+        let some_resource_found, astate =
+          fold_on_reachable_from_arg (false, astate)
+            (fun reachable_actual (some_resource_found, astate) ->
+              let some_resource_found =
+                some_resource_found
+                || AddressAttributes.get_allocation_attr reachable_actual astate
+                   |> Option.exists ~f:(fun (attr, _) -> Attribute.is_hack_resource attr)
+              in
+              (some_resource_found, AddressAttributes.remove_allocation_attr reachable_actual astate) )
+        in
+        if some_resource_found then Stats.incr_pulse_unknown_calls_on_hack_resource () ;
+        astate
   in
   let add_skipped_proc astate =
     let** astate, f =
       match reason with
-      | Call _ | Model _ ->
+      | Call _ | Model _ | ModelName _ ->
           Sat (Ok (astate, None))
       | SkippedKnownCall proc_name ->
           Sat (Ok (astate, Some (PulseFormula.Procname proc_name)))
@@ -280,8 +290,7 @@ let apply_callee ({InterproceduralAnalysis.tenv; proc_desc} as analysis_data)
        but when we want to call the actual code of the block or function, we need to remove the closure argument again. *)
     let actuals =
       match call_flags with
-      | Some call_flags
-        when call_flags.CallFlags.cf_is_objc_block || call_flags.CallFlags.cf_is_c_function_ptr -> (
+      | Some call_flags when call_flags.CallFlags.cf_is_objc_block -> (
         match actuals with _ :: rest -> rest | [] -> [] )
       | _ ->
           actuals
@@ -449,16 +458,15 @@ let call_aux ({InterproceduralAnalysis.tenv} as analysis_data) path call_loc cal
     List.map callee_proc_attrs.formals ~f:(fun (mangled, typ, _) ->
         (Pvar.mk mangled callee_pname, typ) )
   in
-  let captured_formals =
-    List.map callee_proc_attrs.captured ~f:(fun {CapturedVar.pvar; capture_mode; typ} ->
-        (pvar, capture_mode, typ) )
-  in
+  let captured_formals = callee_proc_attrs.captured in
   let ( let<**> ) = bind_sat_result (non_disj_caller, None) in
   let<**> astate, captured_actuals =
     PulseOperations.get_captured_actuals callee_pname path call_loc ~captured_formals ~call_kind
       ~actuals astate_caller
   in
-  let captured_formals = List.map captured_formals ~f:(fun (var, _, typ) -> (var, typ)) in
+  let captured_formals =
+    List.map captured_formals ~f:(fun {CapturedVar.pvar; typ} -> (pvar, typ))
+  in
   let should_keep_at_most_one_disjunct =
     Option.exists Config.pulse_cut_to_one_path_procedures_pattern ~f:(fun regex ->
         Str.string_match regex (Procname.to_string callee_pname) 0 )

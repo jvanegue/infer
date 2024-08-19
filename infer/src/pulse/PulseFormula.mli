@@ -173,12 +173,9 @@ val and_equal_string_concat : Var.t -> operand -> operand -> t -> (t * new_eqs) 
 
 val and_is_int : Var.t -> t -> (t * new_eqs) SatUnsat.t
 
-val prune_binop : negated:bool -> Binop.t -> ?ifk:bool -> operand -> operand -> t -> (t * new_eqs) SatUnsat.t
+val prune_binop : ?depth:int -> negated:bool -> Binop.t -> ?ifk:bool -> operand -> operand -> t -> (t * new_eqs) SatUnsat.t
 
 (** {3 Operations} *)
-
-val normalize : ?location:Location.t -> t -> (t * new_eqs) SatUnsat.t
-(** think a bit harder about the formula *)
 
 val simplify :
   precondition_vocabulary:Var.Set.t -> keep:Var.Set.t -> t -> (t * Var.Set.t * new_eqs) SatUnsat.t
@@ -208,6 +205,14 @@ val is_manifest : is_allocated:(Var.t -> bool) -> t -> bool
     report errors that only have valid pointers in their precondition. Similarly, ignore conditions
     of the form [x≠y] where [x] and [y] are already different according to the heap (because they
     are separate memory allocations).
+
+    In addition, only conditions in callees of the current procedure may cause a path to become
+    latent, i.e. direct tests in the current function do not make an issue latent. The rationale for
+    this is that, if the current function branches on a particular condition, it must have some
+    reason to believe both paths are possible in its calling contexts, hence should not exhibit a
+    bug under these conditions. This is different from conditions arising from tests in callees,
+    which may be written more defensively than the current function. (NOTE: this doesn't apply to
+    Erlang)
 
     Some equalities might be represented implicitly in the precondition, see the documentation of
     {!PulseArithmetic.is_manifest}. *)

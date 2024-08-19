@@ -87,10 +87,6 @@ module Java : sig
   val is_static : t -> bool
   (** Check if the java procedure is static. *)
 
-  val is_vararg : t -> bool
-  (** Check if the proc name has the type of a java vararg. Note: currently only checks that the
-      last argument has type Object[]. *)
-
   val is_generated : t -> bool
   (** Check if the proc name comes from generated code *)
 
@@ -146,8 +142,6 @@ module ObjC_Cpp : sig
     Typ.Name.t -> string -> kind -> Typ.template_spec_info -> Parameter.clang_parameter list -> t
   (** Create an objc procedure name from a class_name and method_name. *)
 
-  val get_class_name : t -> string
-
   val get_class_type_name : t -> Typ.Name.t [@@warning "-unused-value-declaration"]
 
   val get_class_qualifiers : t -> QualifiedCppName.t
@@ -194,6 +188,10 @@ module Hack : sig
   type t = private {class_name: HackClassName.t option; function_name: string; arity: int option}
 
   val get_class_name_as_a_string : t -> string option
+
+  val is_xinit : t -> bool
+
+  val belongs_to_static_companion : t -> bool
 end
 
 module Python : sig
@@ -382,9 +380,6 @@ val is_java : t -> bool
 val is_python : t -> bool
 (** Check if this is a Python procedure name. *)
 
-val as_java_exn : explanation:string -> t -> Java.t
-(** Converts to a Java.t. Throws if [is_java] is false *)
-
 val objc_cpp_replace_method_name : t -> string -> t
 
 val is_infer_undefined : t -> bool
@@ -461,6 +456,9 @@ val get_hack_arity : t -> int option
 val get_hack_static_init : is_trait:bool -> HackClassName.t -> t
 (** get the sinit procname in Hack *)
 
+val get_hack_static_constinit : is_trait:bool -> HackClassName.t -> t
+(** get the constinit procname in Hack *)
+
 val pp_name_only : F.formatter -> t -> unit
 (** Print name of procedure with at most one-level path. For example,
 
@@ -504,6 +502,8 @@ val is_erlang_call_qualified : t -> bool
 val is_hack_builtins : t -> bool
 
 val is_hack_sinit : t -> bool
+
+val is_hack_constinit : t -> bool
 
 val has_hack_classname : t -> bool
 

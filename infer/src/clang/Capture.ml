@@ -27,7 +27,8 @@ let validate_decl_from_channel chan =
 
 
 let init_global_state_for_capture_and_linters source_file =
-  L.(debug Capture Medium) "Processing %s" (Filename.basename (SourceFile.to_abs_path source_file)) ;
+  L.debug Capture Medium "Processing %s" (Filename.basename (SourceFile.to_abs_path source_file)) ;
+  !ProcessPoolState.update_status None (SourceFile.to_string source_file) ;
   Language.curr_language := Language.Clang ;
   if Config.capture then DB.Results_dir.init source_file ;
   CFrontend_config.reset_global_state ()
@@ -87,7 +88,6 @@ let run_clang_frontend ast_source =
   L.(debug Capture Medium)
     "Start %s the AST of %a@\n" Config.clang_frontend_action_string pp_ast_filename ast_source ;
   (* run callbacks *)
-  if Config.process_clang_ast then ProcessAST.process_ast trans_unit_ctx ast_decl ;
   if Config.capture then CFrontend.do_source_file trans_unit_ctx ast_decl ;
   L.(debug Capture Medium)
     "End %s the AST of file %a... OK!@\n" Config.clang_frontend_action_string pp_ast_filename

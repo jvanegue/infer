@@ -28,17 +28,34 @@ let get_modeled_as_returning_copy_opt proc_name =
         if Str.string_match r s 0 then Some Attribute.CopyOrigin.CopyCtor else None )
 
 
-let get_copy_origin pname =
+let to_arg_payloads actuals =
+  List.map actuals ~f:(fun (exp, typ) ->
+      ProcnameDispatcher.Call.FuncArg.{exp; typ; arg_payload= ()} )
+
+
+let is_thrift_field_copy_assignment =
+  let dispatch : (unit, unit, unit) ProcnameDispatcher.Call.dispatcher =
+    let open ProcnameDispatcher.Call in
+    (* HACK: There are `operator=` definitions and the non-templated one is for move
+       assignment. Thus, here we check if the funtion is templated.
+       https://github.com/facebook/fbthrift/blob/bf6f866e2f4ce7adb35b99c6c126720cd9e2b095/thrift/lib/cpp2/FieldRef.h#L293-L310 *)
+    make_dispatcher
+      [ -"apache" &:: "thrift" &:: "field_ref" &:: "operator=" < any_typ >$ any_arg $+ any_arg
+        $--> () ]
+  in
+  fun pname actuals ->
+    let arg_payloads = to_arg_payloads actuals in
+    Option.is_some (dispatch () pname arg_payloads)
+
+
+let get_copy_origin pname actuals =
   let open IOption.Let_syntax in
   let* attrs = IRAttributes.load pname in
   if attrs.ProcAttributes.is_cpp_copy_ctor then Some Attribute.CopyOrigin.CopyCtor
   else if attrs.ProcAttributes.is_cpp_copy_assignment then Some Attribute.CopyOrigin.CopyAssignment
+  else if is_thrift_field_copy_assignment pname actuals then
+    Some Attribute.CopyOrigin.CopyAssignment
   else None
-
-
-let to_arg_payloads actuals =
-  List.map actuals ~f:(fun (exp, typ) ->
-      ProcnameDispatcher.Call.FuncArg.{exp; typ; arg_payload= ()} )
 
 
 let is_optional_copy_constructor_with_arg_payloads =
@@ -189,7 +206,10 @@ let is_cheap_to_copy_one integer_type_widths tenv typ =
 
 
 let is_cheap_to_copy integer_type_widths tenv ~source ~target =
-  is_cheap_to_copy_one integer_type_widths tenv target
+  ( if Typ.is_thrift_field_ref target then
+      (* On thrift field copy, it is good enough to check on source only. *)
+      false
+    else is_cheap_to_copy_one integer_type_widths tenv target )
   || is_cheap_to_copy_one integer_type_widths tenv source
 
 
@@ -248,13 +268,15 @@ let is_address_reachable_from_unowned source_addr ~astates_before proc_lvalue_re
           astate_before `Post
       in
       Stack.exists
-        (fun var (this_addr, _) ->
+        (fun var this_vo ->
           ( Var.is_this var || Var.is_global var
           || List.exists proc_lvalue_ref_parameters ~f:(fun (pvar, _) ->
                  Var.equal (Var.of_pvar pvar) var ) )
           &&
           let reachable_addresses_from_unowned =
-            AbductiveDomain.reachable_addresses_from (Seq.return this_addr) astate_before `Post
+            AbductiveDomain.reachable_addresses_from
+              (Seq.return (ValueOrigin.value this_vo))
+              astate_before `Post
           in
           AbstractValue.Set.disjoint reachable_addresses_from_source
             reachable_addresses_from_unowned
@@ -334,7 +356,9 @@ let add_copies_to_pvar_or_field ~is_captured_by_ref proc_lvalue_ref_parameters i
               Some (IntoIntermediate {copied_var}, Some source_expr)
       in
       Option.map copy_into_source_opt ~f:(fun (copy_into, source_opt) ->
-          let copy_addr, _ = Option.value_exn (Stack.find_opt copied_var astate) in
+          let copy_addr =
+            Option.value_exn (Stack.find_opt copied_var astate) |> ValueOrigin.value
+          in
           let astate' =
             Option.value_map source_addr_typ_opt ~default:astate
               ~f:(fun (source_addr, _, source_typ) ->
@@ -453,7 +477,7 @@ let add_copies integer_type_widths tenv proc_desc path location pname actuals ~a
         |-> remove_optional_copies_to_return proc_desc path location pname args )
   in
   let ( |-> ) = IOption.continue ~default in
-  aux get_copy_origin Fn.id default
+  aux (fun pname -> get_copy_origin pname actuals) Fn.id default
   (* For functions that return a copy, the last argument is the assigned copy *)
   |-> aux get_modeled_as_returning_copy_opt List.rev
   (* Record a copy of element in optional constructors *)
@@ -652,22 +676,24 @@ let mark_modified_parameter_at ~address ~var astate (astate_n : NonDisjDomain.t)
 let mark_modified_copies_and_parameters_on_abductive vars astate astate_n =
   let mark_modified_copy var default =
     Stack.find_opt var astate
-    |> Option.value_map ~default ~f:(fun (address, _history) ->
+    |> Option.value_map ~default ~f:(fun vo ->
+           let address = ValueOrigin.value vo in
            let source_addr_opt = AddressAttributes.get_source_origin_of_copy address astate in
            let copied_into = get_copied_into var in
            mark_modified_address_at ~address ~source_addr_opt ~copied_into Copy astate default )
   in
   let mark_modified_parameter var default =
     Stack.find_opt var astate
-    |> Option.value_map ~default ~f:(fun (address, _history) ->
-           mark_modified_parameter_at ~address ~var astate default )
+    |> Option.value_map ~default ~f:(fun vo ->
+           mark_modified_parameter_at ~address:(ValueOrigin.value vo) ~var astate default )
   in
   List.fold vars ~init:astate_n ~f:(fun astate_n var ->
       let astate_n = mark_modified_parameter var astate_n in
       (* mark modified copy when [var] is used as source *)
       let astate_n =
         (let open IOption.Let_syntax in
-         let* source_addr, _ = Stack.find_opt var astate in
+         let* source_vo = Stack.find_opt var astate in
+         let source_addr = ValueOrigin.value source_vo in
          let+ copied_into = AddressAttributes.get_copied_into source_addr astate in
          mark_modified_address_at ~address:source_addr ~source_addr_opt:(Some source_addr) Source
            ~copied_into astate astate_n )

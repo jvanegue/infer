@@ -10,6 +10,8 @@ open LineageShape.StdModules
 
 module PPNode : sig
   type t
+
+  val pp : t Fmt.t [@@warning "-unused-value-declaration"]
 end
 
 module Local : sig
@@ -49,7 +51,13 @@ module Edge : sig
 
   type t
 
+  val pp : t Fmt.t [@@warning "-unused-value-declaration"]
+
   val kind : t -> kind
+
+  val location : t -> Location.t
+
+  val procname : t -> Procname.t
 end
 
 module G : sig
@@ -58,6 +66,33 @@ module G : sig
   val pp : t Fmt.t [@@warning "-unused-value-declaration"]
 
   val of_vertices : vertex list -> t
+end
+
+module Unified : sig
+  module UVertex : sig
+    type v =
+      | Local of Local.t * PPNode.t
+      | Argument of int * FieldPath.t
+      | Return of FieldPath.t
+      | Captured of int
+      | Function
+    [@@deriving sexp, compare, equal, hash]
+
+    type t = {procname: Procname.t; vertex: v} [@@deriving sexp, compare, equal, hash]
+
+    val pp : t Fmt.t [@@warning "-unused-value-declaration"]
+  end
+
+  module LocalG := G
+
+  module G : Graph.Sig.P with type V.t = UVertex.t and type E.label = Edge.t
+
+  val transform_e :
+    (Procname.t -> LineageShape.Summary.t option) -> Procname.t -> LocalG.edge -> G.edge list
+
+  module Dot : sig
+    val pp : G.t Fmt.t
+  end
 end
 
 module Summary : sig
@@ -69,8 +104,6 @@ module Summary : sig
 end
 
 module Out : sig
-  val report_graph : Out_channel.t -> Procdesc.t -> G.t -> unit
-
   val report_summary : Procdesc.t -> Summary.t -> unit
 end
 

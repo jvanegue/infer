@@ -89,20 +89,6 @@
  (action
   (run atdgen -t %{deps})))
 
-; ATD for java_method_decl
-
-(rule
- (targets java_method_decl_j.ml java_method_decl_j.mli)
- (deps java_method_decl.atd)
- (action
-  (run atdgen -j -j-std %{deps})))
-
-(rule
- (targets java_method_decl_t.ml java_method_decl_t.mli)
- (deps java_method_decl.atd)
- (action
-  (run atdgen -t %{deps})))
-
 ; ATD for config_impact_data
 
 (rule
@@ -114,34 +100,6 @@
 (rule
  (targets config_impact_data_t.ml config_impact_data_t.mli)
  (deps config_impact_data.atd)
- (action
-  (run atdgen -t %{deps})))
-
-; ATD for java_profiler_samples
-
-(rule
- (targets java_profiler_samples_j.ml java_profiler_samples_j.mli)
- (deps java_profiler_samples.atd)
- (action
-  (run atdgen -j -j-std %{deps})))
-
-(rule
- (targets java_profiler_samples_t.ml java_profiler_samples_t.mli)
- (deps java_profiler_samples.atd)
- (action
-  (run atdgen -t %{deps})))
-
-; ATD for clang_profiler_samples
-
-(rule
- (targets clang_profiler_samples_j.ml clang_profiler_samples_j.mli)
- (deps clang_profiler_samples.atd)
- (action
-  (run atdgen -j -j-std %{deps})))
-
-(rule
- (targets clang_profiler_samples_t.ml clang_profiler_samples_t.mli)
- (deps clang_profiler_samples.atd)
  (action
   (run atdgen -t %{deps})))
 

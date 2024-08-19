@@ -27,6 +27,7 @@ BUILD_SYSTEMS_TESTS += \
   disjunctive_domain \
   duplicate_symbols \
   extract_capture \
+  suppressions \
   fail_on_issue \
   infer-debug \
   j1 \
@@ -50,10 +51,6 @@ ifeq ($(BUILD_CPU),x86_64)
 BUILD_SYSTEM_TESTS += assembly
 endif
 
-ifeq ($(DIFF_CAN_FORMAT),yes)
-BUILD_SYSTEMS_TESTS += export_changed_functions
-endif
-
 DIRECT_TESTS += \
   c_bufferoverrun \
   c_performance \
@@ -63,7 +60,6 @@ DIRECT_TESTS += \
   c_topl \
   cpp_biabduction \
   cpp_bufferoverrun \
-  cpp_conflicts \
   cpp_frontend \
   cpp_frontend-17 \
   cpp_frontend-20 \
@@ -76,7 +72,6 @@ DIRECT_TESTS += \
   cpp_pulse-11 \
   cpp_pulse-17 \
   cpp_pulse-20 \
-  cpp_quandary \
   cpp_racerd \
   cpp_siof \
   cpp_starvation \
@@ -112,10 +107,6 @@ BUILD_SYSTEMS_TESTS += \
   buck_flavors_diff \
   buck_flavors_run \
   buck_flavors_deterministic
-
-ifeq ($(DIFF_CAN_FORMAT),yes)
-BUILD_SYSTEMS_TESTS += buck_clang_test_determinator buck_export_changed_functions
-endif
 endif
 
 ifneq ($(CMAKE),no)
@@ -137,10 +128,6 @@ BUILD_SYSTEMS_TESTS += \
   pulse_taint_exclude_in_objc \
 	pulse_taint_exclude_matching_objc
 
-ifeq ($(DIFF_CAN_FORMAT),yes)
-BUILD_SYSTEMS_TESTS += clang_test_determinator
-endif
-
 DIRECT_TESTS += \
   objc_bufferoverrun \
   objc_biabduction \
@@ -150,7 +137,6 @@ DIRECT_TESTS += \
   objc_performance \
   objc_pulse \
   objc_pulse-data-lineage \
-  objc_quandary \
   objc_self-in-block \
   objcpp_biabduction \
   objcpp_frontend \
@@ -204,6 +190,7 @@ endif # BUILD_ERLANG_ANALYZERS
 ifneq ($(HACKC),no)
 DIRECT_TESTS += \
   hack_capture \
+	hack_impurity \
   hack_pulse \
   hack_performance \
 
@@ -236,18 +223,13 @@ BUILD_SYSTEMS_TESTS += \
   racerd_dedup \
   merge-capture \
 
-ifeq ($(DIFF_CAN_FORMAT),yes)
-BUILD_SYSTEMS_TESTS += java_test_determinator
-endif
-
 DIRECT_TESTS += \
   java_annotreach \
   java_annotreach-nosuperclass \
   java_biabduction \
   java_bufferoverrun \
-  java_checkers \
-  java_datalog \
   java_dependencies \
+  java_fragment-retains-view \
   java_hoisting \
   java_hoistingExpensive \
   java_impurity \
@@ -258,7 +240,6 @@ DIRECT_TESTS += \
   java_performance-exclusive \
   java_pulse \
   java_purity \
-  java_quandary \
   java_racerd \
   java_scopeleakage \
   java_sil \
@@ -272,6 +253,7 @@ DIRECT_TESTS += \
 
 ifneq ($(KOTLINC), no)
 DIRECT_TESTS += \
+  kotlin_annotreach \
   kotlin_pulse \
   kotlin_racerd \
   kotlin_resources \
@@ -308,7 +290,9 @@ ifneq ($(MVN),no)
 BUILD_SYSTEMS_TESTS += \
 	mvn \
 	jar \
-	jar_without_sources
+# Temporarily(?) disabled due to CI errors
+#	jar_without_sources \
+
 endif
 endif # BUILD_JAVA_ANALYZERS
 
@@ -317,7 +301,6 @@ DIRECT_TESTS += \
   dotnet_array \
   dotnet_bgeble \
   dotnet_box \
-  dotnet_exception \
   dotnet_fieldderef \
   dotnet_isinst \
   dotnet_ldstr \
@@ -732,7 +715,7 @@ endif
 
 .PHONY: test-replace
 test-replace: $(BUILD_SYSTEMS_TESTS:%=build_%_replace) $(DIRECT_TESTS:%=direct_%_replace) \
-              clang_plugin_test_replace
+              clang_plugin_test_replace $(INFER_MANUALS)
 ifneq ($(UTOP),no)
 	$(MAKE) build_infertop_replace
 endif
@@ -884,31 +867,6 @@ endif 	# PLATFORM_ENV
 else 	# PATCHELF
 	echo "ERROR: ldd (Linux?) found but not patchelf, please install patchelf" >&2; exit 1
 endif	# PATCHELF
-else    # LDD
-ifneq ($(OTOOL),no)
-ifneq ($(INSTALL_NAME_TOOL),no)
-#	this sort of assumes osx
-#	figure out where libgmp, libmpfr, and libsqlite3 are using otool
-	set -e; \
-	set -x; \
-	for lib in $$($(OTOOL) -L $(INFER_BIN) \
-	              | cut -d ' ' -f 1 | tr -d '\t' \
-	              | grep -e 'lib\(gmp\|mpfr\|sqlite\)'); do \
-	  $(INSTALL_PROGRAM) -C "$$lib" '$(DESTDIR)$(libdir)'/infer/infer/libso/; \
-	done
-	set -x; \
-	for sofile in '$(DESTDIR)$(libdir)'/infer/infer/libso/*.dylib; do \
-	  $(INSTALL_NAME_TOOL) -add_rpath "@executable_path" "$$sofile"; \
-	  scripts/set_libso_path.sh '$(DESTDIR)$(libdir)'/infer/infer/libso "$$sofile"; \
-	done
-	$(INSTALL_NAME_TOOL) -add_rpath '@executable_path/../libso' '$(DESTDIR)$(libdir)'/infer/infer/bin/infer
-	scripts/set_libso_path.sh '$(DESTDIR)$(libdir)'/infer/infer/libso '$(DESTDIR)$(libdir)'/infer/infer/bin/infer
-else 	# INSTALL_NAME_TOOL
-	echo "ERROR: otool (OSX?) found but not install_name_tool, please install install_name_tool" >&2; exit 1
-endif	# INSTALL_NAME_TOOL
-else 	# OTOOL
-	echo "ERROR: need ldd + patchelf (Linux) or otool + install_name_tool (OSX) available" >&2; exit 1
-endif	# OTOOL
 endif 	# LDD
 
 # Nuke objects built from OCaml. Useful when changing the OCaml compiler, for instance.
@@ -967,26 +925,17 @@ endif
 .PHONY: devsetup
 devsetup:
 	$(QUIET)[ $(OPAM) != "no" ] || (echo 'No `opam` found, aborting setup.' >&2; exit 1)
-ifeq ($(OPAM_PIN_OCAMLFORMAT),yes)
-	$(QUIET)$(call silent_on_success,pinning ocamlformat,\
-	  OPAMSWITCH=$(OPAMSWITCH); \
-	  $(OPAM) pin add $$(cat "$(ABSOLUTE_ROOT_DIR)"/opam/ocamlformat) --yes --no-action)
 	$(QUIET)$(call silent_on_success,installing ocamlformat dependencies,\
 	  OPAMSWITCH=$(OPAMSWITCH); \
-	  $(OPAM) install --deps-only --locked --yes opam/ocamlformat.opam.locked)
+	  $(OPAM) install --deps-only --locked --yes $(ROOT_DIR)/opam/ocamlformat.opam.locked)
 	$(QUIET)$(call silent_on_success,installing ocamlformat,\
 	  OPAMSWITCH=$(OPAMSWITCH); \
-	  $(OPAM) install ocamlformat --yes)
-endif
+	  $(OPAM) install ocamlformat.$$($(OPAM) show -f version $(ROOT_DIR)/opam/ocamlformat.opam.locked) --yes)
 	$(QUIET)$(call silent_on_success,installing $(OPAM_DEV_DEPS),\
 	  OPAMSWITCH=$(OPAMSWITCH); $(OPAM) install --yes --no-depexts user-setup $(OPAM_DEV_DEPS))
 	$(QUIET)if [ "$(PLATFORM)" = "Darwin" ] && [ x"$(GNU_SED)" = x"no" ]; then \
 	  echo '$(TERM_INFO)*** Installing GNU sed$(TERM_RESET)' >&2; \
 	  brew install gnu-sed; \
-	fi
-	$(QUIET)if [ "$(PLATFORM)" = "Darwin" ] && [ x"$(DIFF_CAN_FORMAT)" = x"no" ] ; then \
-	  echo '$(TERM_INFO)*** Installing diffutils$(TERM_RESET)' >&2; \
-	  brew install diffutils; \
 	fi
 	$(QUIET)if [ "$(PLATFORM)" = "Darwin" ] && ! $$(parallel -h | grep -q GNU); then \
 	  echo '$(TERM_INFO)*** Installing GNU parallel$(TERM_RESET)' >&2; \

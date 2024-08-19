@@ -51,6 +51,20 @@ let is_hack_async tenv pname =
                   Struct.is_hack_interface str ) )
 
 
+let is_hack_builder_consumer tenv pname =
+  match Procname.get_class_type_name pname with
+  | Some (HackClass _ as tn) ->
+      let res =
+        List.exists Config.hack_builder_patterns ~f:(fun (class_name, consumer_names) ->
+            PatternMatch.is_subtype tenv tn (HackClass (HackClassName.make class_name))
+            && List.mem consumer_names (Procname.get_method pname) ~equal:String.equal )
+      in
+      L.d_printfln "doing builder consumer check, result is %b" res ;
+      res
+  | _ ->
+      false
+
+
 let is_not_implicit_or_copy_ctor_assignment pname =
   not
     (Option.exists (IRAttributes.load pname) ~f:(fun attrs ->
@@ -292,7 +306,9 @@ module PulseTransferFunctions = struct
     let return = Var.of_id return in
     let do_astate astate =
       let return =
-        Option.map ~f:(fun (value, _history) -> (value, return_type)) (Stack.find_opt return astate)
+        Option.map
+          ~f:(fun return_vo -> (ValueOrigin.value return_vo, return_type))
+          (Stack.find_opt return astate)
       in
       let topl_event = PulseTopl.Call {return; arguments; procname} in
       AbductiveDomain.Topl.small_step tenv loc topl_event astate
@@ -543,7 +559,7 @@ module PulseTransferFunctions = struct
         let static_used = Typ.Name.Hack.static_companion used in
         let typ = Typ.mk_struct static_used |> Typ.mk_ptr in
         let self =
-          {ProcnameDispatcher.Call.FuncArg.exp; typ; arg_payload= ValueOrigin.Unknown arg_payload}
+          {ProcnameDispatcher.Call.FuncArg.exp; typ; arg_payload= ValueOrigin.unknown arg_payload}
         in
         (astate, func_args @ [self])
     | Some IsClass | None ->
@@ -840,7 +856,10 @@ module PulseTransferFunctions = struct
 
 
   let rec dispatch_call_eval_args ({InterproceduralAnalysis.tenv; proc_desc} as analysis_data) path
-      ret call_exp actuals func_args call_loc flags astate non_disj callee_pname =
+      ret call_exp func_args call_loc flags astate non_disj callee_pname =
+    let actuals =
+      List.map func_args ~f:(fun {ProcnameDispatcher.Call.FuncArg.exp; typ} -> (exp, typ))
+    in
     let method_info, ret, actuals, func_args, astate =
       let default_info = Option.map ~f:Tenv.MethodInfo.mk_class callee_pname in
       if flags.CallFlags.cf_virtual then
@@ -896,6 +915,16 @@ module PulseTransferFunctions = struct
     in
     let astate, func_args =
       modify_receiver_if_hack_function_reference path call_loc astate func_args
+    in
+    let astate =
+      match (callee_pname, func_args) with
+      | Some callee_pname, {ProcnameDispatcher.Call.FuncArg.arg_payload= arg} :: _
+        when is_hack_builder_consumer tenv callee_pname ->
+          L.d_printfln "**it's a builder consumer" ;
+          AddressAttributes.set_hack_builder (ValueOrigin.value arg) Attribute.Builder.Discardable
+            astate
+      | _, _ ->
+          astate
     in
     let astate =
       match (callee_pname, func_args) with
@@ -993,6 +1022,7 @@ module PulseTransferFunctions = struct
             let call_was_unknown =
               match call_was_unknown with `UnknownCall -> true | `KnownCall -> false
             in
+            if call_was_unknown then Stats.incr_pulse_unknown_calls () ;
             let ret_opt = PulseOperations.read_id (fst ret) astate in
             let+ astate =
               let astate_after_call =
@@ -1019,7 +1049,7 @@ module PulseTransferFunctions = struct
                                  but it seems better not to keep writing new lower-level stuff *)
                               PulseModelsDSL.unsafe_to_astate_transformer
                                 (PulseModelsHack.make_new_awaitable (rv, vh))
-                                md astate
+                                (Model "Awaitable", md) astate
                             |> SatUnsat.sat )
                             ~default:((rv, vh), astate)
                         in
@@ -1109,8 +1139,8 @@ module PulseTransferFunctions = struct
     let<**> astate, call_exp, callee_pname, func_args =
       eval_function_call_args path call_exp actuals call_loc astate
     in
-    dispatch_call_eval_args analysis_data path ret call_exp actuals func_args call_loc flags astate
-      non_disj callee_pname
+    dispatch_call_eval_args analysis_data path ret call_exp func_args call_loc flags astate non_disj
+      callee_pname
 
 
   (* [get_dealloc_from_dynamic_types vars_types loc] returns a dealloc procname and vars and
@@ -1141,8 +1171,8 @@ module PulseTransferFunctions = struct
       =
     let find_var_opt astate addr =
       Stack.fold
-        (fun var (var_addr, _) var_opt ->
-          if AbstractValue.equal addr var_addr then Some var else var_opt )
+        (fun var var_addr_vo var_opt ->
+          if AbstractValue.equal addr (ValueOrigin.value var_addr_vo) then Some var else var_opt )
         astate None
     in
     let ref_counts = PulseRefCounting.count_references tenv astate in
@@ -1270,7 +1300,10 @@ module PulseTransferFunctions = struct
          be destroyed in the future. In that case, we would miss the opportunity
          to properly dealloc the object if it were removed from the stack,
          leading to potential FP memory leaks *)
-      let vars = PulseRefCounting.removable_vars tenv astate vars in
+      let vars =
+        if Config.objc_synthesize_dealloc then PulseRefCounting.removable_vars tenv astate vars
+        else vars
+      in
       (* Prepare objects in memory before calling any dealloc:
          - set the number of unique strong references accessible from the
           stack to each object's respective __infer_mode_reference_count
@@ -1281,7 +1314,9 @@ module PulseTransferFunctions = struct
          The return variables of the calls to __objc_set_ref_count must be
          removed *)
       let astates, non_disj, ret_vars =
-        set_ref_counts astate astate_n location path analysis_data
+        if Config.objc_synthesize_dealloc then
+          set_ref_counts astate astate_n location path analysis_data
+        else ([ContinueProgram astate], astate_n, [])
       in
       (* Here we add and execute calls to dealloc for Objective-C objects
          before removing the variables. The return variables of those calls
@@ -1409,23 +1444,23 @@ module PulseTransferFunctions = struct
           (* [lhs_id := *rhs_exp] *)
           let model_opt = PulseLoadInstrModels.dispatch ~load:rhs_exp in
           let deref_rhs astate =
-            (let** astate, rhs_addr_hist =
+            (let** astate, rhs_vo =
                match model_opt with
                | None ->
                    (* no model found: evaluate the expression as normal *)
-                   PulseOperations.eval_deref path loc rhs_exp astate
+                   PulseOperations.eval_deref_to_value_origin path loc rhs_exp astate
                | Some model ->
                    (* we are loading from something modelled; apply the model *)
-                   model {path; location= loc} astate
+                   let++ astate, addr_hist = model {path; location= loc} astate in
+                   (astate, ValueOrigin.unknown addr_hist)
              in
-             let rhs_addr, _ = rhs_addr_hist in
-
+             let rhs_addr = ValueOrigin.value rhs_vo in
              (* L.debug Analysis Quiet "JV: Calling and_is_int_if_integer_type from deref_rhs/Pulse.ml \n"; *)
-             
+             >>>>>>> fborigin/main
              and_is_int_if_integer_type typ rhs_addr astate
              >>|| PulseOperations.hack_python_propagates_type_on_load tenv path loc rhs_exp rhs_addr
              >>|| PulseOperations.add_static_type_objc_class tenv typ rhs_addr loc
-             >>|| PulseOperations.write_id lhs_id rhs_addr_hist )
+             >>|| PulseOperations.write_load_id lhs_id rhs_vo )
             |> SatUnsat.to_list
             |> PulseReport.report_results analysis_data loc
           in
@@ -1539,8 +1574,8 @@ module PulseTransferFunctions = struct
                        not accept more complicated types than lists of states (we need a pair of the
                        before astate and the list of results) *)
                   astates_before := astate :: !astates_before ;
-                  dispatch_call_eval_args analysis_data path ret call_exp actuals func_args loc
-                    call_flags astate astate_n callee_pname )
+                  dispatch_call_eval_args analysis_data path ret call_exp func_args loc call_flags
+                    astate astate_n callee_pname )
             in
             let astates_before = !astates_before in
             (PulseReport.report_exec_results analysis_data loc res, astate_n, astates_before)
@@ -1701,16 +1736,15 @@ let with_html_debug_node node ~desc ~f =
 
 let set_uninitialize_prop path tenv ({ProcAttributes.loc} as proc_attrs) astate =
   let pname = ProcAttributes.get_proc_name proc_attrs in
-  if Procname.is_hack_sinit pname then
+  if Procname.is_hack_constinit pname then
     let ( let* ) x f = match x with None -> astate | Some x -> f x in
     let* name = Procname.get_class_type_name pname in
     let fields = Tenv.get_fields_trans tenv name in
     let class_global_var = PulseModelsHack.get_static_companion_var name in
     let typ = Typ.mk_struct name in
-    List.fold fields ~init:astate ~f:(fun astate {Struct.name= fld; typ= {Typ.quals= fld_quals}} ->
-        (* Ideally, we would like to analyze `abstract const` fields only, but current SIL cannot
-           express the `abstract` field at the moment. *)
-        if Typ.is_const fld_quals then
+    List.fold fields ~init:astate
+      ~f:(fun astate {Struct.name= fld; typ= {Typ.quals= fld_quals}; annot} ->
+        if Annot.Item.is_abstract annot && Typ.is_const fld_quals then
           match
             PulseOperations.eval path NoAccess loc (Lfield (Lvar class_global_var, fld, typ)) astate
           with
@@ -1727,7 +1761,7 @@ let assume_notnull_params {ProcAttributes.proc_name; formals} astate =
       if Annot.Item.is_notnull anno then
         (let open IOption.Let_syntax in
          let var = Pvar.mk mangled proc_name |> Var.of_pvar in
-         let* addr_var = Stack.find_opt var astate in
+         let* addr_var = Stack.find_opt var astate >>| ValueOrigin.addr_hist in
          let astate, (addr, _) = Memory.eval_edge addr_var Dereference astate in
          PulseArithmetic.and_positive addr astate |> PulseOperationResult.sat_ok )
         |> Option.value ~default:astate

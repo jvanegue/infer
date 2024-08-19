@@ -16,7 +16,6 @@ type t =
   | BufferOverrunChecker
   | ConfigImpactAnalysis
   | Cost
-  | Datalog
   | DisjunctiveDemo
   | FragmentRetainsView
   | Impurity
@@ -27,11 +26,9 @@ type t =
   | Liveness
   | LoopHoisting
   | ParameterNotNullChecked
-  | PrintfArgs
   | Pulse
   | PurityAnalysis
   | PurityChecker
-  | Quandary
   | RacerD
   | ResourceLeakLabExercise
   | SILValidation
@@ -167,14 +164,6 @@ let config_unsafe checker =
       ; cli_flags= Some {deprecated= []; show_in_help= true}
       ; enabled_by_default= false
       ; activates= [BufferOverrunAnalysis; PurityAnalysis] }
-  | Datalog ->
-      { id= "datalog"
-      ; kind= UserFacing {title= "Datalog-based points-to analysis"; markdown_body= ""}
-      ; support= mk_support_func ~java:ExperimentalSupport ()
-      ; short_documentation= "Experimental datalog-based points-to analysis."
-      ; cli_flags= Some {deprecated= []; show_in_help= true}
-      ; enabled_by_default= false
-      ; activates= [] }
   | DisjunctiveDemo ->
       { id= "disjunctive-demo"
       ; kind= Internal
@@ -185,11 +174,7 @@ let config_unsafe checker =
       ; activates= [] }
   | FragmentRetainsView ->
       { id= "fragment-retains-view"
-      ; kind=
-          UserFacingDeprecated
-            { title= "Fragment Retains View"
-            ; markdown_body= ""
-            ; deprecation_message= "Unmaintained due to poor precision." }
+      ; kind= UserFacing {title= "Fragment Retains View"; markdown_body= ""}
       ; support= mk_support_func ~java:Support ()
       ; short_documentation=
           "Detects when Android fragments are not explicitly nullified before becoming unreachable."
@@ -201,7 +186,9 @@ let config_unsafe checker =
       ; kind=
           UserFacing
             {title= "Impurity"; markdown_body= [%blob "./documentation/checkers/Impurity.md"]}
-      ; support= mk_support_func ~clang:ExperimentalSupport ~java:ExperimentalSupport ()
+      ; support=
+          mk_support_func ~clang:ExperimentalSupport ~java:ExperimentalSupport
+            ~hack:ExperimentalSupport ()
       ; short_documentation=
           "Detects functions with potential side-effects. Same as \"purity\", but implemented on \
            top of Pulse."
@@ -265,28 +252,13 @@ let config_unsafe checker =
       ; cli_flags= Some {deprecated= []; show_in_help= true}
       ; enabled_by_default= true
       ; activates= [] }
-  | PrintfArgs ->
-      { id= "printf-args"
-      ; kind=
-          UserFacingDeprecated
-            { title= "`printf()` Argument Types"
-            ; markdown_body= ""
-            ; deprecation_message= "Unmaintained." }
-      ; support= mk_support_func ~java:Support ()
-      ; short_documentation=
-          "Detect mismatches between the Java `printf` format strings and the argument types For \
-           example, this checker will warn about the type error in `printf(\"Hello %d\", \
-           \"world\")`"
-      ; cli_flags= Some {deprecated= []; show_in_help= true}
-      ; enabled_by_default= false
-      ; activates= [] }
   | Pulse ->
       { id= "pulse"
       ; kind= UserFacing {title= "Pulse"; markdown_body= [%blob "./documentation/checkers/Pulse.md"]}
       ; support=
           mk_support_func ~clang:Support ~java:Support ~erlang:ExperimentalSupport ~hack:Support ()
       ; short_documentation= "General-purpose memory and value analysis engine."
-      ; cli_flags= Some {deprecated= ["-ownership"]; show_in_help= true}
+      ; cli_flags= Some {deprecated= []; show_in_help= true}
       ; enabled_by_default= true
       ; activates= [] }
   | PurityAnalysis ->
@@ -307,30 +279,13 @@ let config_unsafe checker =
       ; cli_flags= Some {deprecated= []; show_in_help= true}
       ; enabled_by_default= false
       ; activates= [PurityAnalysis] }
-  | Quandary ->
-      { id= "quandary"
-      ; kind=
-          UserFacingDeprecated
-            { title= "Quandary"
-            ; deprecation_message=
-                "Taint analysis is now supported by the Pulse checker and Quandary will be removed \
-                 in the next release."
-            ; markdown_body= [%blob "./documentation/checkers/Quandary.md"] }
-      ; support= mk_support_func ~clang:Support ~java:Support ()
-      ; short_documentation=
-          "The Quandary taint analysis detects flows of values between sources and sinks, except \
-           if the value went through a \"sanitizer\". In addition to some defaults, users can \
-           specify their own sources, sinks, and sanitizers functions."
-      ; cli_flags= Some {deprecated= []; show_in_help= true}
-      ; enabled_by_default= false
-      ; activates= [] }
   | RacerD ->
       { id= "racerd"
       ; kind=
           UserFacing {title= "RacerD"; markdown_body= [%blob "./documentation/checkers/RacerD.md"]}
       ; support= mk_support_func ~clang:Support ~java:Support ~csharp:Support ()
       ; short_documentation= "Thread safety analysis."
-      ; cli_flags= Some {deprecated= ["-threadsafety"]; show_in_help= true}
+      ; cli_flags= Some {deprecated= []; show_in_help= true}
       ; enabled_by_default= true
       ; activates= [] }
   | ResourceLeakLabExercise ->
@@ -376,7 +331,7 @@ let config_unsafe checker =
       ; kind= UserFacing {title= "Lineage"; markdown_body= ""}
       ; support= mk_support_func ~erlang:Support ()
       ; short_documentation= "Computes a dataflow graph"
-      ; cli_flags= Some {deprecated= ["-simple-lineage"]; show_in_help= true}
+      ; cli_flags= Some {deprecated= []; show_in_help= true}
       ; enabled_by_default= false
       ; activates= [LineageShape] }
   | LineageShape ->
@@ -432,8 +387,7 @@ let config_unsafe checker =
       ; activates= [] }
 
 
-let config c =
-  let config = config_unsafe c in
+let sanity_check config =
   let is_illegal_id_char c = match c with 'a' .. 'z' | '-' -> false | _ -> true in
   String.find config.id ~f:is_illegal_id_char
   |> Option.iter ~f:(fun c ->
@@ -441,6 +395,17 @@ let config c =
            "Illegal character '%c' in id: '%s'. Checker ids must be easy to pass on the command \
             line."
            c config.id ) ;
+  ( match config.kind with
+  | UserFacingDeprecated _ when config.enabled_by_default ->
+      L.die InternalError "Checker %s is both deprecated and enabled by default." config.id
+  | _ ->
+      () ) ;
+  ()
+
+
+let config checker =
+  let config = config_unsafe checker in
+  sanity_check config ;
   config
 
 

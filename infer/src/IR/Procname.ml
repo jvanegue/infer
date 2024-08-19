@@ -252,16 +252,6 @@ module Java = struct
 
   let is_autogen_method {method_name} = JConfig.is_synthetic_name method_name
 
-  (** Check if the proc name has the type of a java vararg. Note: currently only checks that the
-      last argument has type Object[]. *)
-  let is_vararg {parameters} =
-    match List.last parameters with
-    | Some {desc= Tptr ({desc= Tarray {elt}}, Pk_pointer)} ->
-        Typ.equal StdTyp.Java.pointer_to_java_lang_object elt
-    | _ ->
-        false
-
-
   let is_external java_pname =
     let package = get_package java_pname in
     Option.exists ~f:Config.java_package_is_external package
@@ -553,6 +543,11 @@ module Hack = struct
      x, vx,
   *)
 
+  let is_vec_or_dict_from_async {function_name} =
+    String.equal function_name "FlibSL::Vec::from_async"
+    || String.equal function_name "FlibSL::Dict::from_async"
+
+
   let pp verbosity fmt t =
     let pp_arity verbosity fmt =
       match verbosity with
@@ -578,6 +573,25 @@ module Hack = struct
     let static_class_name = HackClassName.static_companion class_name in
     let arity = if is_trait then 2 else 1 in
     {class_name= Some static_class_name; function_name= "_86sinit"; arity= Some arity}
+
+
+  let get_static_constinit ~is_trait class_name =
+    let static_class_name = HackClassName.static_companion class_name in
+    let arity = if is_trait then 2 else 1 in
+    {class_name= Some static_class_name; function_name= "_86constinit"; arity= Some arity}
+
+
+  let is_xinit {function_name= name} =
+    String.equal name "_86sinit" || String.equal name "_86pinit" || String.equal name "_86cinit"
+    || String.equal name "_86constinit"
+
+
+  let belongs_to_static_companion {class_name} =
+    match class_name with
+    | Some class_name ->
+        HackClassName.is_static_companion class_name
+    | None ->
+        false
 end
 
 module Python = struct
@@ -653,7 +667,11 @@ let is_erlang_unsupported name =
 
 
 let is_hack_async_name name =
-  match name with Hack hack_name -> Hack.is_named_genx hack_name | _ -> false
+  match name with
+  | Hack hack_name ->
+      Hack.is_named_genx hack_name || Hack.is_vec_or_dict_from_async hack_name
+  | _ ->
+      false
 
 
 let is_erlang_call_unqualified name =
@@ -734,14 +752,6 @@ let is_hack t = match t with Hack _ -> true | _ -> false
 let is_java t = match t with Java _ -> true | _ -> false
 
 let is_python t = match t with Python _ -> true | _ -> false
-
-let as_java_exn ~explanation t =
-  match t with
-  | Java java ->
-      java
-  | _ ->
-      Logging.die InternalError "Expected Java procname: %s" explanation
-
 
 (* TODO: deprecate this unfortunately named function and use is_clang instead *)
 let is_c_method t = match t with ObjC_Cpp _ -> true | _ -> false
@@ -1006,6 +1016,13 @@ let is_hack_builtins = function
 let is_hack_sinit = function
   | Hack {function_name} ->
       String.equal function_name "_86sinit"
+  | _ ->
+      false
+
+
+let is_hack_constinit = function
+  | Hack {function_name} ->
+      String.equal function_name "_86constinit"
   | _ ->
       false
 
@@ -1366,6 +1383,10 @@ let decr_hack_arity procname =
 
 
 let get_hack_static_init ~is_trait class_name = Hack (Hack.get_static_init ~is_trait class_name)
+
+let get_hack_static_constinit ~is_trait class_name =
+  Hack (Hack.get_static_constinit ~is_trait class_name)
+
 
 module Hashable = struct
   type nonrec t = t [@@deriving compare, equal]

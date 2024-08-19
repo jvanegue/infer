@@ -264,12 +264,8 @@ let create_attributes_helper ?loc_instantiated ?(set_objc_accessor_attr = false)
 
 
 let create_attributes ?loc_instantiated ?(set_objc_accessor_attr = false) trans_unit_ctx tenv ms
-    fbody captured =
-  let captured_mangled =
-    List.map ~f:(fun (pvar, typ, capture_mode) -> {CapturedVar.pvar; typ; capture_mode}) captured
-  in
-  create_attributes_helper ?loc_instantiated ~set_objc_accessor_attr trans_unit_ctx tenv ms fbody
-    captured_mangled
+    fbody =
+  create_attributes_helper ?loc_instantiated ~set_objc_accessor_attr trans_unit_ctx tenv ms fbody []
 
 
 (** Creates a procedure description. *)
@@ -280,11 +276,12 @@ let create_local_procdesc ?loc_instantiated ?(set_objc_accessor_attr = false)
   let proc_name = ms.CMethodSignature.name in
   let captured_mangled =
     List.map
-      ~f:(fun (pvar, typ, capture_mode) ->
+      ~f:(fun (captured_var : CapturedVar.t) ->
         let pvar =
-          if is_cpp_lambda_call_operator then Pvar.mk (Pvar.get_name pvar) proc_name else pvar
+          if is_cpp_lambda_call_operator then Pvar.mk (Pvar.get_name captured_var.pvar) proc_name
+          else captured_var.pvar
         in
-        {CapturedVar.pvar; typ; capture_mode} )
+        {captured_var with pvar} )
       captured
   in
   (* Retrieve captured variables from procdesc created when translating captured variables in lambda expression *)

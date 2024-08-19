@@ -73,7 +73,7 @@ let make_new_awaitable av =
   ret av
 
 
-let deep_await_hack_value aval : unit DSL.model_monad =
+let deep_clean_hack_value aval : unit DSL.model_monad =
   let open DSL.Syntax in
   let* reachable_addresses =
     exec_pure_operation (fun astate ->
@@ -81,6 +81,9 @@ let deep_await_hack_value aval : unit DSL.model_monad =
   in
   absvalue_set_iter reachable_addresses ~f:(fun absval ->
       let* _v = await_hack_value (absval, ValueHistory.epoch) in
+      let* () =
+        AddressAttributes.set_hack_builder absval Attribute.Builder.Discardable |> exec_command
+      in
       ret () )
 
 
@@ -114,11 +117,11 @@ module Vec = struct
 
   let last_read_field = mk_vec_field last_read_field_name
 
-  let new_vec_dsl args : DSL.aval DSL.model_monad =
+  let new_vec_dsl ?(know_size = None) args : DSL.aval DSL.model_monad =
     let open DSL.Syntax in
     let actual_size = List.length args in
-    let* size = eval_const_int actual_size in
-    let* last_read = mk_fresh ~model_desc:"new_vec.last_read" () in
+    let* size = match know_size with None -> eval_const_int actual_size | Some size -> ret size in
+    let* last_read = mk_fresh () in
     let* dummy = eval_const_int 9 in
     let* vec =
       constructor type_name
@@ -143,7 +146,7 @@ module Vec = struct
                   ret ()
               (* Do "fake" await on the values we drop on the floor. TODO: mark reachable too? *)
               | rest ->
-                  list_iter rest ~f:deep_await_hack_value ) )
+                  list_iter rest ~f:deep_clean_hack_value ) )
     in
     ret vec
 
@@ -164,14 +167,40 @@ module Vec = struct
        let* awaited_fst_val = await_hack_value fst_val in
        let* awaited_snd_val = await_hack_value snd_val in
        let* fresh_vec = new_vec_dsl [awaited_fst_val; awaited_snd_val] in
-       let* wrapped_fresh_vec = make_new_awaitable fresh_vec in
-       assign_ret wrapped_fresh_vec
+       assign_ret fresh_vec
+
+
+  let map _this arg closure =
+    let open DSL.Syntax in
+    start_model
+    @@
+    let* size_val = eval_deref_access Read arg (FieldAccess size_field) in
+    let size_eq_0_case : DSL.aval DSL.model_monad =
+      let* () = prune_eq_zero size_val in
+      new_vec_dsl []
+    in
+    let size_eq_1_case : DSL.aval DSL.model_monad =
+      let* () = prune_eq_int size_val IntLit.one in
+      let* fst_val = eval_deref_access Read arg (FieldAccess fst_field) in
+      let* mapped_fst_val = apply_hack_closure closure [fst_val] in
+      new_vec_dsl [mapped_fst_val]
+    in
+    let size_gt_1_case : DSL.aval DSL.model_monad =
+      let* () = prune_gt_int size_val IntLit.one in
+      let* fst_val = eval_deref_access Read arg (FieldAccess fst_field) in
+      let* snd_val = eval_deref_access Read arg (FieldAccess snd_field) in
+      let* mapped_fst_val = apply_hack_closure closure [fst_val] in
+      let* mapped_snd_val = apply_hack_closure closure [snd_val] in
+      new_vec_dsl ~know_size:(Some size_val) [mapped_fst_val; mapped_snd_val]
+    in
+    let* ret = disjuncts [size_eq_0_case; size_eq_1_case; size_gt_1_case] in
+    assign_ret ret
 
 
   let get_vec_dsl argv _index : DSL.aval DSL.model_monad =
     let open DSL.Syntax in
-    let* ret_val = mk_fresh ~model_desc:"vec index" () in
-    let* new_last_read_val = mk_fresh ~model_desc:"vec index" () in
+    let* ret_val = mk_fresh () in
+    let* new_last_read_val = mk_fresh () in
     let* _size_val = eval_deref_access Read argv (FieldAccess size_field) in
     let* fst_val = eval_deref_access Read argv (FieldAccess fst_field) in
     let* snd_val = eval_deref_access Read argv (FieldAccess snd_field) in
@@ -240,7 +269,7 @@ module Vec = struct
     | [_key; value] ->
         let* v_fst = eval_deref_access Read vec (FieldAccess fst_field) in
         let* v_snd = eval_deref_access Read vec (FieldAccess snd_field) in
-        let* () = deep_await_hack_value v_fst in
+        let* () = deep_clean_hack_value v_fst in
         let* new_vec = new_vec_dsl [v_snd; value] in
         let* size = eval_deref_access Read vec (FieldAccess size_field) in
         let* () = write_deref_field ~ref:new_vec size_field ~obj:size in
@@ -381,16 +410,18 @@ module VecIter = struct
 end
 
 let get_static_companion_var type_name =
-  Pvar.mk_global (Mangled.mangled (Typ.Name.name type_name) "STATIC")
+  let static_type_name = Typ.Name.Hack.static_companion type_name in
+  Pvar.mk_global (Mangled.from_string (Typ.Name.name static_type_name))
 
 
 let get_static_companion ~model_desc path location type_name astate =
   let pvar = get_static_companion_var type_name in
   let var = Var.of_pvar pvar in
   let hist = Hist.single_call path location model_desc in
-  let astate, ((addr, _) as addr_hist) = AbductiveDomain.Stack.eval hist var astate in
+  let astate, vo = AbductiveDomain.Stack.eval hist var astate in
   let static_type_name = Typ.Name.Hack.static_companion type_name in
   let typ = Typ.mk_struct static_type_name in
+  let ((addr, _) as addr_hist) = ValueOrigin.addr_hist vo in
   let astate = PulseArithmetic.and_dynamic_type_is_unsafe addr typ location astate in
   (addr_hist, astate)
 
@@ -401,8 +432,74 @@ let get_static_companion_dsl ~model_desc type_name : DSL.aval DSL.model_monad =
   exec_operation (get_static_companion ~model_desc path location type_name)
 
 
-(* NOTE: We model [lazy_class_initialize] as invoking the corresponding [sinit] procedure.  This is
-   unsound in terms of that it gets non-final values. *)
+(* TODO: refactor to remove copy-pasta *)
+let constinit_existing_class_object static_companion : unit DSL.model_monad =
+  let open DSL.Syntax in
+  let* typ_opt = get_dynamic_type ~ask_specialization:true static_companion in
+  match typ_opt with
+  | Some {Formula.typ= {desc= Tstruct type_name}} -> (
+      let origin_name = Typ.Name.Hack.static_companion_origin type_name in
+      match origin_name with
+      | HackClass hack_origin_name ->
+          let pvar = get_static_companion_var origin_name in
+          let exp = Exp.Lvar pvar in
+          let ret_id = Ident.create_none () in
+          let ret_typ = Typ.mk_ptr (Typ.mk_struct mixed_type_name) in
+          let* {analysis_data= {tenv}} = get_data in
+          let is_trait = Option.exists (Tenv.lookup tenv type_name) ~f:Struct.is_hack_trait in
+          let constinit_pname = Procname.get_hack_static_constinit ~is_trait hack_origin_name in
+          let typ = Typ.mk_struct type_name in
+          let arg_payload =
+            ValueOrigin.OnStack {var= Var.of_pvar pvar; addr_hist= static_companion}
+          in
+          dispatch_call (ret_id, ret_typ) constinit_pname [{exp; typ; arg_payload}]
+      | _ ->
+          ret () )
+  | _ ->
+      ret ()
+
+
+(* NOTE: We model [lazy_class_initialize] as invoking the corresponding [sinit] procedure.  To be
+   sound, we consider the cases where the initialization has been done before or not by separating
+   disjuncts. *)
+let get_initialized_class_object (type_name : Typ.name) : DSL.aval DSL.model_monad =
+  let open DSL.Syntax in
+  let* class_object = get_static_companion_dsl ~model_desc:"lazy_class_initialize" type_name in
+  let* () =
+    match type_name with
+    | HackClass class_name ->
+        let pvar = get_static_companion_var type_name in
+        let exp = Exp.Lvar pvar in
+        let* static_companion = eval_read exp in
+        let* is_sinit_called = is_hack_sinit_called static_companion in
+        if is_sinit_called then ret ()
+        else
+          (* Note that we set the [HackSinitCalled] attribute even in the [just_call_constinit] case to
+             avoid sinit is called later in the following instructions. *)
+          let* () = set_hack_sinit_called static_companion in
+          let ret_id = Ident.create_none () in
+          let ret_typ = Typ.mk_ptr (Typ.mk_struct mixed_type_name) in
+          let* {analysis_data= {tenv}} = get_data in
+          let is_trait = Option.exists (Tenv.lookup tenv type_name) ~f:Struct.is_hack_trait in
+          let sinit_pname = Procname.get_hack_static_init ~is_trait class_name in
+          let constinit_pname = Procname.get_hack_static_constinit ~is_trait class_name in
+          let typ = Typ.mk_struct type_name in
+          let arg_payload =
+            ValueOrigin.OnStack {var= Var.of_pvar pvar; addr_hist= static_companion}
+          in
+          let call_sinit : unit DSL.model_monad =
+            dispatch_call (ret_id, ret_typ) sinit_pname [{exp; typ; arg_payload}]
+          in
+          let just_call_constinit : unit DSL.model_monad =
+            dispatch_call (ret_id, ret_typ) constinit_pname [{exp; typ; arg_payload}]
+          in
+          disjuncts [call_sinit; just_call_constinit]
+    | _ ->
+        ret ()
+  in
+  ret class_object
+
+
 let lazy_class_initialize size_exp : model =
   let open DSL.Syntax in
   start_model
@@ -415,22 +512,7 @@ let lazy_class_initialize size_exp : model =
         L.die InternalError
           "lazy_class_initialize: the Hack frontend should never generate such argument type"
   in
-  let* class_object = get_static_companion_dsl ~model_desc:"lazy_class_initialize" type_name in
-  let* () =
-    match type_name with
-    | HackClass class_name ->
-        let ret_id = Ident.create_none () in
-        let ret_typ = Typ.mk_ptr (Typ.mk_struct mixed_type_name) in
-        let* {analysis_data= {tenv}} = get_data in
-        let is_trait = Option.exists (Tenv.lookup tenv type_name) ~f:Struct.is_hack_trait in
-        let pname = Procname.get_hack_static_init ~is_trait class_name in
-        let exp = Exp.Lvar (get_static_companion_var type_name) in
-        let typ = Typ.mk_struct type_name in
-        let* arg_payload = eval_to_value_origin exp in
-        dispatch_call (ret_id, ret_typ) pname [(exp, typ)] [{exp; typ; arg_payload}]
-    | _ ->
-        ret ()
-  in
+  let* class_object = get_initialized_class_object type_name in
   assign_ret class_object
 
 
@@ -441,9 +523,12 @@ let get_static_class aval : model =
      match opt_dynamic_type_data with
      | Some {Formula.typ= {desc= Tstruct type_name}} ->
          let* class_object = get_static_companion_dsl ~model_desc:"get_static_class" type_name in
+         let* () = register_class_object_for_value aval class_object in
          assign_ret class_object
      | _ ->
-         ret ()
+         let* unknown_class_object = mk_fresh () in
+         let* () = register_class_object_for_value aval unknown_class_object in
+         assign_ret unknown_class_object
 
 
 let hhbc_class_get_c value : model =
@@ -550,8 +635,7 @@ module Dict = struct
              | _ ->
                  ret () )
        in
-       let* new_awaitable = make_new_awaitable new_dict in
-       assign_ret new_awaitable
+       assign_ret new_dict
 
 
   let hack_add_elem_c_dsl dict key value : unit DSL.model_monad =
@@ -609,14 +693,14 @@ module Dict = struct
                   let* () = write_deref_field ~ref:dict field ~obj:copied_inned_dict in
                   ret copied_inned_dict
               | None ->
-                  mk_fresh ~model_desc:"hack_array_cow_set_dsl" () )
+                  mk_fresh () )
         in
         let* field = field_of_string_value key in
         let* () =
           match field with
           | None ->
               let* () = remove_dict_contain_const_keys inner_dict in
-              deep_await_hack_value value
+              deep_clean_hack_value value
           | Some field ->
               write_deref_field field ~ref:inner_dict ~obj:value
         in
@@ -632,11 +716,7 @@ module Dict = struct
     let open DSL.Syntax in
     (* TODO: a key for a non-vec could be also a int *)
     let* field = field_of_string_value key in
-    match field with
-    | Some field ->
-        read_dict_field_with_check dict field
-    | None ->
-        mk_fresh ~model_desc:"hack_array_get_one_dim" ()
+    match field with Some field -> read_dict_field_with_check dict field | None -> mk_fresh ()
 
 
   let hack_array_idx dict key default : unit DSL.model_monad =
@@ -647,7 +727,7 @@ module Dict = struct
       | Some field ->
           eval_deref_access Read dict (FieldAccess field)
       | None ->
-          mk_fresh ~model_desc:"hack_array_idx" ()
+          mk_fresh ()
     in
     let* ret_values = disjuncts [value; ret default] in
     assign_ret ret_values
@@ -735,8 +815,8 @@ module DictIter = struct
       let* key_value, elt_value =
         match index_q_opt with
         | None ->
-            let* key_value = mk_fresh ~model_desc:"dict_iter_next" () in
-            let* elt_value = mk_fresh ~model_desc:"dict_iter_next" () in
+            let* key_value = mk_fresh () in
+            let* elt_value = mk_fresh () in
             ret (key_value, elt_value)
         | Some q -> (
             let* index_int =
@@ -782,7 +862,7 @@ let hack_add_elem_c this key value : model =
   start_model
   @@
   let default () =
-    let* fresh = mk_fresh ~model_desc:"hack_add_elem_c" () in
+    let* fresh = mk_fresh () in
     assign_ret fresh
   in
   dynamic_dispatch this
@@ -795,8 +875,8 @@ let hack_array_cow_set this args : model =
   start_model
   @@
   let default () =
-    let* () = option_iter (List.last args) ~f:deep_await_hack_value in
-    let* fresh = mk_fresh ~model_desc:"hack_array_cow_set" () in
+    let* () = option_iter (List.last args) ~f:deep_clean_hack_value in
+    let* fresh = mk_fresh () in
     assign_ret fresh
   in
   dynamic_dispatch this
@@ -812,7 +892,7 @@ let hack_array_get this args : model =
   @@
   let default () =
     L.d_warning "default case of hack_array_get" ;
-    mk_fresh ~model_desc:"hack_array_get" ()
+    mk_fresh ()
   in
   let hack_array_get_one_dim this key : DSL.aval DSL.model_monad =
     dynamic_dispatch this
@@ -830,7 +910,7 @@ let hack_array_idx this key default_val : model =
   start_model
   @@
   let default () =
-    let* fresh = mk_fresh ~model_desc:"hack_array_idx" () in
+    let* fresh = mk_fresh () in
     assign_ret fresh
   in
   dynamic_dispatch this
@@ -840,40 +920,79 @@ let hack_array_idx this key default_val : model =
     ~default
 
 
+let eval_resolved_field ~model_desc typ_name fld_str =
+  let open DSL.Syntax in
+  let* fld_opt = tenv_resolve_fieldname typ_name fld_str in
+  let name, fld =
+    match fld_opt with
+    | None ->
+        L.d_printfln_escaped "Could not resolve the field %a.%s" Typ.Name.pp typ_name fld_str ;
+        (typ_name, Fieldname.make typ_name fld_str)
+    | Some fld ->
+        (Fieldname.get_class_name fld, fld)
+  in
+  let* class_object = get_static_companion_dsl ~model_desc name in
+  eval_deref_access Read class_object (FieldAccess fld)
+
+
+let internal_hack_field_get this field : DSL.aval DSL.model_monad =
+  let open DSL.Syntax in
+  let* opt_string_field_name = get_const_string field in
+  match opt_string_field_name with
+  | Some string_field_name -> (
+      let* opt_dynamic_type_data = get_dynamic_type ~ask_specialization:true this in
+      match opt_dynamic_type_data with
+      | Some {Formula.typ= {desc= Tstruct type_name}} ->
+          let* aval =
+            eval_resolved_field ~model_desc:"hack_field_get" type_name string_field_name
+          in
+          let* () =
+            let field = Fieldname.make type_name string_field_name in
+            let* struct_info = tenv_resolve_field_info type_name field in
+            match struct_info with
+            | Some {Struct.typ= field_typ} when Typ.is_pointer field_typ ->
+                option_iter
+                  (Typ.name (Typ.strip_ptr field_typ))
+                  ~f:(fun field_type_name -> add_static_type field_type_name aval)
+            | _ ->
+                ret ()
+          in
+          ret aval
+      | _ ->
+          let field = TextualSil.wildcard_sil_fieldname Hack string_field_name in
+          let* aval = eval_deref_access Read this (FieldAccess field) in
+          ret aval )
+  | None ->
+      L.die InternalError "hack_field_get expect a string constant as 2nd argument"
+
+
 let hack_field_get this field : model =
   let open DSL.Syntax in
   start_model
-  @@ let* opt_string_field_name = get_const_string field in
-     match opt_string_field_name with
-     | Some string_field_name -> (
-         let* opt_dynamic_type_data = get_dynamic_type ~ask_specialization:true this in
-         match opt_dynamic_type_data with
-         | Some {Formula.typ= {Typ.desc= Tstruct type_name}} ->
-             let field = Fieldname.make type_name string_field_name in
-             let* aval = eval_deref_access Read this (FieldAccess field) in
-             let* struct_info = tenv_resolve_field_info type_name field in
-             let opt_field_type_name =
-               let open IOption.Let_syntax in
-               let* {Struct.typ= field_typ} = struct_info in
-               if Typ.is_pointer field_typ then Typ.name (Typ.strip_ptr field_typ) else None
-             in
-             let* () =
-               option_iter opt_field_type_name ~f:(fun field_type_name ->
-                   add_static_type field_type_name aval )
-             in
-             assign_ret aval
-         | _ ->
-             let* fresh = mk_fresh ~model_desc:"hack_field_get" () in
-             assign_ret fresh )
-     | None ->
-         L.die InternalError "hack_field_get expect a string constant as 2nd argument"
+  @@
+  let* retval = internal_hack_field_get this field in
+  assign_ret retval
 
 
 let make_hack_random_bool : DSL.aval DSL.model_monad =
   let open DSL.Syntax in
-  let* any = mk_fresh ~model_desc:"make_hack_random_bool" () in
+  let* any = mk_fresh () in
   let* boxed_bool = constructor hack_bool_type_name [("val", any)] in
   ret boxed_bool
+
+
+let make_hack_unconstrained_int : DSL.aval DSL.model_monad =
+  let open DSL.Syntax in
+  let* any = mk_fresh () in
+  let* boxed_int = constructor hack_int_type_name [("val", any)] in
+  ret boxed_int
+
+
+let hack_unconstrained_int : model =
+  let open DSL.Syntax in
+  start_model
+  @@ let* rv = make_hack_unconstrained_int in
+     assign_ret rv
 
 
 let hhbc_not_dsl arg : DSL.aval DSL.model_monad =
@@ -1045,20 +1164,9 @@ let hhbc_cls_cns this field : model =
                  L.internal_error "hhbc_cls_cns has been called on non-constant string" ;
                  "__dummy_constant_name__"
            in
-           let* fld_opt = tenv_resolve_fieldname name string_field_name in
-           let name, fld =
-             match fld_opt with
-             | None ->
-                 L.d_printfln_escaped "Could not resolve the constant field %a::%s" Typ.Name.pp name
-                   string_field_name ;
-                 (name, Fieldname.make name string_field_name)
-             | Some fld ->
-                 (Fieldname.get_class_name fld, fld)
-           in
-           let* class_object = get_static_companion_dsl ~model_desc name in
-           eval_deref_access Read class_object (FieldAccess fld)
+           eval_resolved_field ~model_desc name string_field_name
        | _ ->
-           mk_fresh ~model_desc ()
+           mk_fresh ()
      in
      assign_ret field_v
 
@@ -1067,10 +1175,31 @@ let hack_get_class this : model =
   let open DSL.Syntax in
   start_model
   @@ let* typ_opt = get_dynamic_type ~ask_specialization:true this in
-     let* field_v =
-       match typ_opt with Some _ -> ret this | None -> mk_fresh ~model_desc:"hack_get_class" ()
-     in
+     let* field_v = match typ_opt with Some _ -> ret this | None -> mk_fresh () in
      assign_ret field_v
+
+
+(* we don't have a different kind of lazy class objects, so this is the identity, but maybe we should force initialization here? *)
+let hhbc_lazy_class_from_class this : model =
+  let open DSL.Syntax in
+  start_model @@ assign_ret this
+
+
+(* HH::type_structure should officially be able to take an instance of a class or the name (classname=string) as first argument, and
+   null or the name of a type constant as second argument
+   See https://github.com/facebook/hhvm/blob/master/hphp/runtime/ext/reflection/ext_reflection-classes.php
+   However, to start with we just deal with the case that the first argument is one of our static companion objects
+   and the second is a type constant name
+   If the static companion has been _86constinit'd then this should just be a field dereference
+*)
+let hh_type_structure clsobj constnameobj : model =
+  let open DSL.Syntax in
+  start_model
+  @@
+  let* constname = eval_deref_access Read constnameobj (FieldAccess string_val_field) in
+  let* () = constinit_existing_class_object clsobj in
+  let* retval = internal_hack_field_get clsobj constname in
+  assign_ret retval
 
 
 let hack_set_static_prop this prop obj : model =
@@ -1216,7 +1345,7 @@ let hhbc_add x y : model =
          let* res = aval_to_hack_int sum in
          assign_ret res
      | _, _ ->
-         let* sum = mk_fresh ~model_desc:"hhbc_add" () in
+         let* sum = mk_fresh () in
          assign_ret sum (* unconstrained value *)
 
 
@@ -1281,7 +1410,8 @@ module SplatedVec = struct
 end
 
 let build_vec_for_variadic_callee data args astate =
-  (SplatedVec.build_vec_for_variadic_callee args |> DSL.unsafe_to_astate_transformer) data astate
+  (SplatedVec.build_vec_for_variadic_callee args |> DSL.unsafe_to_astate_transformer)
+    (Model "variadic args vec", data) astate
 
 
 (* Map the kind tag values used in type structure dictionaries to their corresponding Pulse dynamic type names
@@ -1320,58 +1450,103 @@ let read_nullable_field_from_ts tdict =
   as_constant_bool nullable_bool_val
 
 
-let read_classname_field_from_ts tdict =
+let read_string_field_from_ts fieldname tdict =
   let open DSL.Syntax in
-  let classname_field = TextualSil.wildcard_sil_fieldname Textual.Lang.Hack "classname" in
-  let* classname_boxed_string = eval_deref_access Read tdict (FieldAccess classname_field) in
-  let* classname_string_val =
-    eval_deref_access Read classname_boxed_string (FieldAccess string_val_field)
+  let field = TextualSil.wildcard_sil_fieldname Textual.Lang.Hack fieldname in
+  let* field_boxed_string = eval_deref_access Read tdict (FieldAccess field) in
+  let* field_string_val =
+    eval_deref_access Read field_boxed_string (FieldAccess string_val_field)
   in
-  as_constant_string classname_string_val
+  as_constant_string field_string_val
+
+
+let read_access_from_ts tdict =
+  let open DSL.Syntax in
+  let field = TextualSil.wildcard_sil_fieldname Textual.Lang.Hack "access_list" in
+  let* access_list_vec = eval_deref_access Read tdict (FieldAccess field) in
+  (* TODO: this should work for an access list of length one, but will not for more accesses
+     (which we get for source like C::T1::T2) because
+      vec_get_dsl actually ignores its index :-( To fix, we either have to change the way we deal with
+      vectors to be more precise (at least for smallish constant vecs) or tweak the encoding
+      of type structures for Infer to use something different (less faithful to HHVM) *)
+  let* type_prop_name_boxed_string = Vec.get_vec_dsl access_list_vec 0 in
+  let* type_prop_name_string_val =
+    eval_deref_access Read type_prop_name_boxed_string (FieldAccess string_val_field)
+  in
+  as_constant_string type_prop_name_string_val
 
 
 (* returns a fresh value equated to the SIL result of the comparison *)
 let check_against_type_struct v tdict : DSL.aval DSL.model_monad =
   let open DSL.Syntax in
-  let kind_field = TextualSil.wildcard_sil_fieldname Textual.Lang.Hack "kind" in
-  let* kind_boxed_int = eval_deref_access Read tdict (FieldAccess kind_field) in
-  let* kind_int_val = eval_deref_access Read kind_boxed_int (FieldAccess int_val_field) in
-  let* kind_int_opt = as_constant_int kind_int_val in
-  match kind_int_opt with
-  | None ->
-      L.d_printfln "didn't get known integer tag in check against type struct" ;
-      let* md = get_data in
-      L.internal_error "known tag failure tdict is %a at %a" AbstractValue.pp (fst tdict)
-        Location.pp_file_pos md.location ;
-      (* duplicating behaviour of previous sil model instead of calling this an internal error *)
-      let* one = eval_const_int 1 in
-      ret one
-  | Some k -> (
-      let* inner_val = mk_fresh ~model_desc:"check against type struct" () in
-      let* nullable_bool_opt = read_nullable_field_from_ts tdict in
-      let nullable = Option.value nullable_bool_opt ~default:false in
-      let* classname =
+  let* inner_val = mk_fresh () in
+  let rec find_name tdict nullable_already visited_set =
+    let kind_field = TextualSil.wildcard_sil_fieldname Textual.Lang.Hack "kind" in
+    let* kind_boxed_int = eval_deref_access Read tdict (FieldAccess kind_field) in
+    let* kind_int_val = eval_deref_access Read kind_boxed_int (FieldAccess int_val_field) in
+    let* kind_int_opt = as_constant_int kind_int_val in
+    match kind_int_opt with
+    | None ->
+        L.d_printfln "didn't get known integer tag in check against type struct" ;
+        let* md = get_data in
+        L.internal_error "known tag failure tdict is %a at %a" AbstractValue.pp (fst tdict)
+          Location.pp_file_pos md.location ;
+        ret None
+    | Some k -> (
+        let* nullable_bool_opt = read_nullable_field_from_ts tdict in
+        let nullable = nullable_already || Option.value nullable_bool_opt ~default:false in
         match type_struct_prim_tag_to_classname k with
         | Some name ->
-            ret (Some name)
+            ret (Some (name, nullable))
         | None ->
-            (* 101 is the magic number for "Unresolved type" in type structures.
-               See https://github.com/facebook/hhvm/blob/master/hphp/runtime/base/type-structure-kinds.h *)
             if Int.(k = 101) then
-              let* classname_string_opt = read_classname_field_from_ts tdict in
+              (* 101 is the magic number for "Unresolved type" in type structures.
+                 See https://github.com/facebook/hhvm/blob/master/hphp/runtime/base/type-structure-kinds.h *)
+              let* classname_string_opt = read_string_field_from_ts "classname" tdict in
               ret
                 (Option.map classname_string_opt ~f:(fun s ->
-                     Typ.HackClass (HackClassName.make (replace_backslash_with_colon s)) ) )
-            else ret None
-      in
-      match classname with
-      | Some name ->
-          L.d_printfln "type structure test against type name %a" Typ.Name.pp name ;
-          let typ = Typ.mk (Typ.Tstruct name) in
-          let* () = and_equal_instanceof inner_val v typ ~nullable in
-          ret inner_val
-      | None ->
-          ret inner_val )
+                     (Typ.HackClass (HackClassName.make (replace_backslash_with_colon s)), nullable) )
+                )
+            else if Int.(k = 102) then (
+              (* 102 is the magic number for type access *)
+              L.d_printfln "testing against type access" ;
+              let* rootname_opt = read_string_field_from_ts "root_name" tdict in
+              let* type_prop_name_opt = read_access_from_ts tdict in
+              match (rootname_opt, type_prop_name_opt) with
+              | Some rootname, Some type_prop_name ->
+                  let rootname = replace_backslash_with_colon rootname in
+                  L.d_printfln "got root_name = %s, type_prop_name = %s" rootname type_prop_name ;
+                  let concatenated_name = Printf.sprintf "%s$$%s" rootname type_prop_name in
+                  if String.Set.mem visited_set concatenated_name then (
+                    L.d_printfln "Cyclic type constant detected!" ;
+                    ret None )
+                  else
+                    let type_prop_field = TextualSil.wildcard_sil_fieldname Hack type_prop_name in
+                    let* companion =
+                      get_initialized_class_object (HackClass (HackClassName.make rootname))
+                    in
+                    L.d_printfln "companion object is %a" AbstractValue.pp (fst companion) ;
+                    let* type_constant_ts =
+                      eval_deref_access Read companion (FieldAccess type_prop_field)
+                    in
+                    (* We've got another type structure in our hands now, so recurse *)
+                    L.d_printfln "type structure for projection=%a" AbstractValue.pp
+                      (fst type_constant_ts) ;
+                    find_name type_constant_ts nullable
+                      (String.Set.add visited_set concatenated_name)
+              | _, _ ->
+                  ret None )
+            else ret None )
+  in
+  let* name_opt = find_name tdict false String.Set.empty in
+  match name_opt with
+  | Some (name, nullable) ->
+      L.d_printfln "type structure test against type name %a" Typ.Name.pp name ;
+      let typ = Typ.mk (Typ.Tstruct name) in
+      let* () = and_equal_instanceof inner_val v typ ~nullable in
+      ret inner_val
+  | None ->
+      ret inner_val
 
 
 (* for now ignores resolve and enforce options *)
@@ -1394,11 +1569,11 @@ let hhbc_verify_param_type_ts v tdict : model =
 
 let hhbc_is_type_prim typname v : model =
   let open DSL.Syntax in
-  start_model
+  let model_desc = Printf.sprintf "hhbc_is_type_%s" (Typ.Name.to_string typname) in
+  start_named_model model_desc
   @@
   let typ = Typ.mk (Typ.Tstruct typname) in
-  let model_desc = Printf.sprintf "hhbc_is_type_%s" (Typ.Name.to_string typname) in
-  let* inner_val = mk_fresh ~model_desc () in
+  let* inner_val = mk_fresh () in
   let* rv = aval_to_hack_bool inner_val in
   let* () = and_equal_instanceof inner_val v typ ~nullable:false in
   assign_ret rv
@@ -1447,7 +1622,7 @@ let hhbc_cast_string arg : model =
          assign_ret rv
      | _ ->
          (* hopefully we will come back later with a dynamic type thanks to specialization *)
-         let* rv = mk_fresh ~model_desc:"hhbc_is_type_struct_c" () in
+         let* rv = mk_fresh () in
          assign_ret rv
 
 
@@ -1482,6 +1657,8 @@ let matchers : matcher list =
   ; -"$builtins" &:: "hhbc_new_vec" &::.*+++> Vec.new_vec
   ; -"$builtins" &:: "hhbc_not" <>$ capt_arg_payload $--> hhbc_not
   ; -"$builtins" &:: "hack_get_class" <>$ capt_arg_payload $--> hack_get_class
+  ; -"$builtins" &:: "hhbc_lazy_class_from_class" <>$ capt_arg_payload
+    $--> hhbc_lazy_class_from_class
   ; -"$builtins" &:: "hack_field_get" <>$ capt_arg_payload $+ capt_arg_payload $--> hack_field_get
   ; -"$builtins" &:: "hhbc_cast_string" <>$ capt_arg_payload $--> hhbc_cast_string
   ; -"$builtins" &:: "hhbc_class_get_c" <>$ capt_arg_payload $--> hhbc_class_get_c
@@ -1515,15 +1692,20 @@ let matchers : matcher list =
     $+ capt_arg_payload $+ capt_arg_payload $--> hhbc_is_type_struct_c
   ; -"$root" &:: "FlibSL::C::contains_key" <>$ any_arg $+ capt_arg_payload $+ capt_arg_payload
     $--> Dict.contains_key
+  ; -"$root" &:: "FlibSL::Vec::map" <>$ capt_arg_payload $+ capt_arg_payload $+ capt_arg_payload
+    $--> Vec.map
   ; -"$root" &:: "FlibSL::Vec::from_async" <>$ capt_arg_payload $+ capt_arg_payload
     $--> Vec.vec_from_async
   ; -"$root" &:: "FlibSL::Dict::from_async" <>$ capt_arg_payload $+ capt_arg_payload
     $--> Dict.dict_from_async
   ; -"Asio$static" &:: "awaitSynchronously" <>$ capt_arg_payload $+ capt_arg_payload
     $--> hack_await_static
+  ; -"$root" &:: "HH::type_structure" <>$ any_arg $+ capt_arg_payload $+ capt_arg_payload
+    $--> hh_type_structure
   ; -"$builtins" &:: "hhbc_iter_base" <>$ capt_arg_payload $--> hhbc_iter_base
   ; -"$builtins" &:: "hhbc_iter_init" <>$ capt_arg_payload $+ capt_arg_payload $+ capt_arg_payload
     $+ capt_arg_payload $--> hhbc_iter_init
   ; -"$builtins" &:: "hhbc_iter_next" <>$ capt_arg_payload $+ capt_arg_payload $+ capt_arg_payload
-    $+ capt_arg_payload $--> hhbc_iter_next ]
+    $+ capt_arg_payload $--> hhbc_iter_next
+  ; -"Infer$static" &:: "newUnconstrainedInt" <>$ any_arg $--> hack_unconstrained_int ]
   |> List.map ~f:(ProcnameDispatcher.Call.contramap_arg_payload ~f:ValueOrigin.addr_hist)

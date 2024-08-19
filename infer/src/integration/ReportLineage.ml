@@ -21,7 +21,7 @@ let report_proc_json {Summary.payloads= {lineage}; proc_name} =
 let worker source_file =
   let t0 = Mtime_clock.now () in
   let status = Format.asprintf "%a" SourceFile.pp source_file in
-  !ProcessPoolState.update_status t0 status ;
+  !ProcessPoolState.update_status (Some t0) status ;
   let proc_names = SourceFiles.proc_names_of_source source_file in
   List.iter
     ~f:(fun proc_name ->
@@ -40,4 +40,25 @@ let report_json () =
   |> Tasks.Runner.run |> ignore
 
 
-let report_taint taint_config = LineageTaint.report taint_config
+let pp_issue_log fmt issue_log =
+  JsonReports.JsonIssuePrinter.pp_open fmt () ;
+  IssueLog.iter
+    ~f:(fun proc_name err_log ->
+      Errlog.iter
+        (fun err_key err_data ->
+          JsonReports.JsonIssuePrinter.pp fmt
+            { JsonReports.error_filter= (fun _ _ -> true)
+            ; proc_name
+            ; proc_location_opt= None
+            ; err_key
+            ; err_data } )
+        err_log )
+    issue_log ;
+  JsonReports.JsonIssuePrinter.pp_close fmt ()
+
+
+let report_taint taint_config =
+  let issue_log = LineageTaint.report taint_config in
+  LineageTaint.export_result ~name:"Traces sample" ~fileparts:["lineage-taint"; "traces.json"]
+    pp_issue_log issue_log ;
+  ()

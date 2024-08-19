@@ -206,6 +206,14 @@ let remove_taint_attrs address memory =
   |> remove_propagate_taint_from address
 
 
+let remove_hack_builder = remove_attribute Attributes.remove_hack_builder
+
+let set_hack_builder address builderstate memory =
+  remove_hack_builder address memory |> add_one address (Attribute.HackBuilder builderstate)
+
+
+let get_hack_builder = get_attribute Attributes.get_hack_builder
+
 let remove_must_be_valid_attr = remove_attribute Attributes.remove_must_be_valid
 
 let map_attributes ~f =
@@ -217,6 +225,8 @@ let map_attributes ~f =
 let make_suitable_for_pre_summary = map_attributes ~f:Attributes.make_suitable_for_pre_summary
 
 let make_suitable_for_post_summary = map_attributes ~f:Attributes.make_suitable_for_post_summary
+
+let remove_all_taint_related_attrs = map_attributes ~f:Attributes.remove_all_taint_related
 
 let initialize address memory =
   add_one address Initialized memory |> remove_attribute Attributes.remove_uninitialized address
@@ -324,6 +334,10 @@ let has_unknown_effect address attrs =
   |> Option.exists ~f:(fun attribute -> Option.is_some (Attributes.get_unknown_effect attribute))
 
 
+let is_hack_sinit_called address attrs =
+  Graph.find_opt address attrs |> Option.exists ~f:Attributes.is_hack_sinit_called
+
+
 let merge attrs attrs' =
   (* "merge" attributes if two different values ([addr] and [addr']) are found to be
      equal after attributes of the same kind were recorded for them. This arbitrarily
@@ -381,6 +395,12 @@ module type S = sig
   val java_resource_release : key -> t -> t
 
   val hack_async_await : key -> t -> t
+
+  val remove_hack_builder : key -> t -> t
+
+  val set_hack_builder : key -> Attribute.Builder.t -> t -> t
+
+  val get_hack_builder : key -> t -> Attribute.Builder.t option
 
   val csharp_resource_release : key -> t -> t
 
@@ -474,4 +494,6 @@ module type S = sig
   val get_address_of_stack_variable : key -> t -> (Var.t * Location.t * ValueHistory.t) option
 
   val has_unknown_effect : key -> t -> bool
+
+  val is_hack_sinit_called : key -> t -> bool
 end

@@ -89,6 +89,7 @@ let pp_map_function f = function
 
 type t =
   | CFree
+  | ComparedToNullInThisProcedure of Location.t
   | ConstantDereference of IntLit.t
   | CppDelete
   | CppDeleteArray
@@ -97,7 +98,11 @@ type t =
   | OptionalEmpty
   | StdVector of std_vector_function
   | CppMap of map_type * map_function
-[@@deriving compare, equal]
+[@@deriving compare, equal, variants]
+
+let is_same_type invalidation1 invalidation2 =
+  Int.equal (Variants.to_rank invalidation1) (Variants.to_rank invalidation2)
+
 
 type must_be_valid_reason =
   | BlockCall
@@ -126,6 +131,8 @@ let issue_type_of_cause ~latent invalidation must_be_valid_reason =
   match invalidation with
   | CFree ->
       IssueType.use_after_free ~latent
+  | ComparedToNullInThisProcedure _ ->
+      IssueType.compared_to_null_and_dereferenced
   | ConstantDereference i when IntLit.iszero i -> (
     match must_be_valid_reason with
     | None ->
@@ -158,6 +165,8 @@ let describe f cause =
   match cause with
   | CFree ->
       F.pp_print_string f "was invalidated by call to `free()`"
+  | ComparedToNullInThisProcedure location ->
+      F.fprintf f "was compared to null on %a" Location.pp location
   | ConstantDereference i when IntLit.iszero i ->
       F.pp_print_string f "is assigned to the null pointer"
   | ConstantDereference i ->
@@ -199,6 +208,8 @@ let pp f invalidation =
   match invalidation with
   | CFree ->
       F.fprintf f "CFree(%a)" describe invalidation
+  | ComparedToNullInThisProcedure location ->
+      F.fprintf f "ComparedToNullInThisProcedure(%a)" Location.pp_file_pos location
   | ConstantDereference _ ->
       F.fprintf f "ConstantDereference(%a)" describe invalidation
   | CppDelete | CppDeleteArray ->

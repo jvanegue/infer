@@ -83,14 +83,6 @@ OPTIONS
            Deactivates: Suppress printing function pointers in cost reports
            (Conversely: --cost-suppress-func-ptr)
 
-       --datalog
-           Activates: datalog checker: Experimental datalog-based points-to
-           analysis. (Conversely: --no-datalog)
-
-       --datalog-only
-           Activates: Enable datalog and disable all other checkers
-           (Conversely: --no-datalog-only)
-
        --debug,-g
            Activates: Debug mode (also sets --debug-level 2,
            --developer-mode, --print-buckets, --print-types,
@@ -145,10 +137,7 @@ OPTIONS
        --no-fragment-retains-view
            Deactivates: fragment-retains-view checker: Detects when Android
            fragments are not explicitly nullified before becoming
-           unreachable.
-           
-           DEPRECATED: Unmaintained due to poor precision.
-            (Conversely: --fragment-retains-view)
+           unreachable. (Conversely: --fragment-retains-view)
 
        --fragment-retains-view-only
            Activates: Enable fragment-retains-view and disable all other
@@ -288,19 +277,6 @@ OPTIONS
            Activates: Also log messages to stdout and stderr (Conversely:
            --no-print-logs)
 
-       --printf-args
-           Activates: printf-args checker: Detect mismatches between the Java
-           `printf` format strings and the argument types For example, this
-           checker will warn about the type error in `printf("Hello %d",
-           "world")`
-           
-           DEPRECATED: Unmaintained.
-            (Conversely: --no-printf-args)
-
-       --printf-args-only
-           Activates: Enable printf-args and disable all other checkers
-           (Conversely: --no-printf-args-only)
-
        --progress-bar-style { auto | plain | multiline }
            Style of the progress bar. auto selects multiline if connected to
            a tty, otherwise plain.
@@ -327,20 +303,6 @@ OPTIONS
 
        --qualified-cpp-name-block-list +string
            Skip analyzing the procedures under the qualified cpp type name.
-
-       --quandary
-           Activates: quandary checker: The Quandary taint analysis detects
-           flows of values between sources and sinks, except if the value
-           went through a "sanitizer". In addition to some defaults, users
-           can specify their own sources, sinks, and sanitizers functions.
-           
-           DEPRECATED: Taint analysis is now supported by the Pulse checker
-           and Quandary will be removed in the next release.
-            (Conversely: --no-quandary)
-
-       --quandary-only
-           Activates: Enable quandary and disable all other checkers
-           (Conversely: --no-quandary-only)
 
        --quiet,-q
            Activates: Do not print anything on standard output. (Conversely:
@@ -802,6 +764,10 @@ PULSE CHECKER OPTIONS
            Regex of methods that should be modelled as returning non-null in
            Pulse
 
+       --pulse-model-return-nonnull-list +string
+           Regex of methods that should be modelled as returning non-null in
+           Pulse
+
        --pulse-model-return-this string
            Regex of methods that should be modelled as returning the `this`
            or `self` argument of an instance method in Pulse. Languages
@@ -909,6 +875,11 @@ PULSE CHECKER OPTIONS
            only. If a source has such a kind, only data flows to sinks which
            originate at the source will be reported. If a sink has such a
            kind, only sensitive data flows to the sink will be reported.
+
+       --pulse-taint-opaque-files +path
+           Specify files that should be treated as opaque for taint analysis
+           to make sure that procedure's belonging to these files are always
+           free of any potential taint flows.
 
        --pulse-taint-policies json
            A description of which taint flows should be reported, following
@@ -1046,19 +1017,6 @@ PULSE CHECKER OPTIONS
 
        --pulse-widen-threshold int
            Stop exploring new paths after int loop iterations
-
-QUANDARY CHECKER OPTIONS
-       --quandary-endpoints json
-           Specify endpoint classes for Quandary
-
-       --quandary-sanitizers json
-           Specify custom sanitizers for Quandary
-
-       --quandary-sinks json
-           Specify custom sinks for Quandary
-
-       --quandary-sources json
-           Specify custom sources for Quandary
 
 RACERD CHECKER OPTIONS
        --racerd-always-report-java

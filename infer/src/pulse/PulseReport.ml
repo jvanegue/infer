@@ -75,12 +75,32 @@ let report {InterproceduralAnalysis.tenv; proc_desc; err_log} ~is_suppressed ~la
         | _ ->
             None
       in
+      let taint_report_as_issue_type, taint_report_as_category =
+        match diagnostic with
+        | TaintFlow {report_as_issue_type; report_as_category} ->
+            (report_as_issue_type, report_as_category)
+        | _ ->
+            (None, None)
+      in
       let taint_extra : Jsonbug_t.taint_extra option =
-        match (taint_source, taint_sink, taint_policy_privacy_effect, tainted_expression) with
-        | None, None, None, None ->
+        match
+          ( taint_source
+          , taint_sink
+          , taint_policy_privacy_effect
+          , tainted_expression
+          , taint_report_as_issue_type
+          , taint_report_as_category )
+        with
+        | None, None, None, None, None, None ->
             None
-        | _, _, _, _ ->
-            Some {taint_source; taint_sink; taint_policy_privacy_effect; tainted_expression}
+        | _, _, _, _, _, _ ->
+            Some
+              { taint_source
+              ; taint_sink
+              ; taint_policy_privacy_effect
+              ; tainted_expression
+              ; report_as_issue_type= taint_report_as_issue_type
+              ; report_as_category= taint_report_as_category }
       in
       let config_usage_extra : Jsonbug_t.config_usage_extra option =
         match diagnostic with
@@ -135,8 +155,14 @@ let report_latent_issue analysis_data latent_issue ~is_suppressed =
 let is_constant_deref_without_invalidation (invalidation : Invalidation.t) access_trace =
   let res =
     match invalidation with
-    | ConstantDereference _ ->
-        not (Trace.exists_main access_trace ~f:(function Invalidated _ -> true | _ -> false))
+    | ConstantDereference _ | ComparedToNullInThisProcedure _ ->
+        not
+          (Trace.exists_main access_trace ~f:(function
+            | Invalidated (trace_invalidation, _, _)
+              when Invalidation.is_same_type trace_invalidation invalidation ->
+                true
+            | _ ->
+                false ) )
     | CFree
     | CppDelete
     | CppDeleteArray
@@ -158,21 +184,20 @@ let is_constant_deref_without_invalidation_diagnostic (diagnostic : Diagnostic.t
   match diagnostic with
   | ConfigUsage _
   | ConstRefableParameter _
-  | CSharpResourceLeak _
   | DynamicTypeMismatch _
   | ErlangError _
   | InfiniteError _
   | TransitiveAccess _
   | JavaResourceLeak _
   | HackCannotInstantiateAbstractClass _
-  | HackUnawaitedAwaitable _
-  | MemoryLeak _
   | MutualRecursionCycle _
   | ReadonlySharedPtrParameter _
   | ReadUninitialized _
+  | ResourceLeak _
   | RetainCycle _
   | StackVariableAddressEscape _
   | TaintFlow _
+  | TransitiveAccess _
   | UnnecessaryCopy _ ->
       false
   | AccessToInvalidAddress {invalidation; access_trace} ->
@@ -219,6 +244,7 @@ let summary_of_error_post proc_desc location mk_error astate =
       ( Error (`MemoryLeak (summary, _, _, _, _))
       | Error (`JavaResourceLeak (summary, _, _, _, _))
       | Error (`HackUnawaitedAwaitable (summary, _, _, _))
+      | Error (`HackUnfinishedBuilder (summary, _, _, _, _))
       | Error (`CSharpResourceLeak (summary, _, _, _, _)) ) ->
       (* ignore potential memory leaks: error'ing in the middle of a function will typically produce
          spurious leaks *)

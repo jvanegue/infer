@@ -164,10 +164,6 @@ let all_checkers =
          ; (racerd_file, Clang)
          ; (racerd_file, Java)
          ; (racerd_file, CIL) ] ) }
-  ; { checker= Quandary
-    ; callbacks=
-        [ (interprocedural Payloads.Fields.quandary JavaTaintAnalysis.checker, Java)
-        ; (interprocedural Payloads.Fields.quandary ClangTaintAnalysis.checker, Clang) ] }
   ; { checker= DisjunctiveDemo
     ; callbacks= [(interprocedural Payloads.Fields.disjunctive_demo DisjunctiveDemo.checker, Clang)]
     }
@@ -183,17 +179,12 @@ let all_checkers =
          ; (pulse, Java)
          ; (pulse, CIL)
          ; (pulse, Python) ] ) }
-  ; { checker= Datalog
-    ; callbacks=
-        (let datalog = intraprocedural DatalogAnalysis.checker in
-         [(datalog, Java)] ) }
   ; { checker= Impurity
     ; callbacks=
         (let impurity =
            intraprocedural_with_field_dependency Payloads.Fields.pulse Impurity.checker
          in
-         [(impurity, Java); (impurity, Clang)] ) }
-  ; {checker= PrintfArgs; callbacks= [(intraprocedural PrintfArgs.checker, Java)]}
+         [(impurity, Java); (impurity, Clang); (impurity, Hack)] ) }
   ; {checker= Liveness; callbacks= [(intraprocedural Liveness.checker, Clang)]}
   ; { checker= InefficientKeysetIterator
     ; callbacks= [(intraprocedural InefficientKeysetIterator.checker, Java)] }

@@ -318,6 +318,11 @@ CLANG OPTIONS
        --headers
            Activates: Analyze code in header files (Conversely: --no-headers)
 
+       --objc-synthesize-dealloc
+           Activates: If enabled, the capture tries to synthesize code in the
+           dealloc methods of Objective-C classes corresponding to what the
+           compiler does. (Conversely: --no-objc-synthesize-dealloc)
+
        --skip-non-capture-clang-commands
            Activates: Skip clang commands that Infer doesn't use to capture
            data (Conversely: --no-skip-non-capture-clang-commands)
@@ -394,6 +399,10 @@ JAVA OPTIONS
        --no-mask-sawja-exceptions
            Deactivates: Mask exceptions thrown by Sawja/Javalib during Java
            capture (Conversely: --mask-sawja-exceptions)
+
+       --no-read-java-modules
+           Deactivates: Read java modules file using jimage. (Conversely:
+           --read-java-modules)
 
 ENVIRONMENT
        INFER_ARGS, INFERCONFIG, INFER_STRICT_MODE

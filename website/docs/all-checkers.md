@@ -37,12 +37,6 @@ Computes the asymptotic complexity of functions with respect to execution cost o
 
 [Visit here for more information.](/docs/next/checker-cost)
 
-## Datalog-based points-to analysis
-
-Experimental datalog-based points-to analysis.
-
-[Visit here for more information.](/docs/next/checker-datalog)
-
 ## Fragment Retains View
 
 Detects when Android fragments are not explicitly nullified before becoming unreachable.
@@ -112,14 +106,6 @@ General-purpose memory and value analysis engine.
 Detects pure (side-effect-free) functions. A different implementation of "impurity".
 
 [Visit here for more information.](/docs/next/checker-purity)
-
-## Quandary
-
-The Quandary taint analysis detects flows of values between sources and sinks, except if the value went through a "sanitizer". In addition to some defaults, users can specify their own sources, sinks, and sanitizers functions.
-
-**\*\*\*DEPRECATED\*\*\*** Taint analysis is now supported by the Pulse checker and Quandary will be removed in the next release.
-
-[Visit here for more information.](/docs/next/checker-quandary)
 
 ## RacerD
 

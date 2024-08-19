@@ -89,13 +89,17 @@ let exec_summary_of_post_common ({InterproceduralAnalysis.proc_desc} as analysis
         | _ -> r)
     | Error (`MemoryLeak (summary, astate, allocator, allocation_trace, location)) ->
         PulseReport.report_summary_error analysis_data
-          ( ReportableError {astate; diagnostic= MemoryLeak {allocator; allocation_trace; location}}
+          ( ReportableError
+              { astate
+              ; diagnostic= ResourceLeak {resource= Memory allocator; allocation_trace; location} }
           , summary )
         |> Option.value ~default:(exec_domain_of_summary summary)
     | Error (`JavaResourceLeak (summary, astate, class_name, allocation_trace, location)) ->
         PulseReport.report_summary_error analysis_data
           ( ReportableError
-              {astate; diagnostic= JavaResourceLeak {class_name; allocation_trace; location}}
+              { astate
+              ; diagnostic= ResourceLeak {resource= JavaClass class_name; allocation_trace; location}
+              }
           , summary )
         |> Option.value ~default:(exec_domain_of_summary summary)
     | Error (`HackUnawaitedAwaitable (summary, astate, allocation_trace, location)) ->
@@ -107,13 +111,28 @@ let exec_summary_of_post_common ({InterproceduralAnalysis.proc_desc} as analysis
         else
           PulseReport.report_summary_error analysis_data
             ( ReportableError
-                {astate; diagnostic= HackUnawaitedAwaitable {allocation_trace; location}}
+                {astate; diagnostic= ResourceLeak {resource= HackAsync; allocation_trace; location}}
+            , summary )
+          |> Option.value ~default:(exec_domain_of_summary summary)
+    | Error (`HackUnfinishedBuilder (summary, astate, allocation_trace, location, builder_type)) ->
+        if is_exceptional_state then (
+          L.d_printfln "Suppressing Unfinished Builder report because exception thown" ;
+          exec_domain_of_summary summary )
+        else
+          PulseReport.report_summary_error analysis_data
+            ( ReportableError
+                { astate
+                ; diagnostic=
+                    ResourceLeak
+                      {resource= HackBuilderResource builder_type; allocation_trace; location} }
             , summary )
           |> Option.value ~default:(exec_domain_of_summary summary)
     | Error (`CSharpResourceLeak (summary, astate, class_name, allocation_trace, location)) ->
         PulseReport.report_summary_error analysis_data
           ( ReportableError
-              {astate; diagnostic= CSharpResourceLeak {class_name; allocation_trace; location}}
+              { astate
+              ; diagnostic=
+                  ResourceLeak {resource= CSharpClass class_name; allocation_trace; location} }
           , summary )
         |> Option.value ~default:(exec_domain_of_summary summary)
     | Error (`PotentialInvalidAccessSummary (summary, astate, address, must_be_valid)) -> (

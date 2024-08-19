@@ -34,6 +34,7 @@ Issue types in this category:
 - [PULSE_REFERENCE_STABILITY](/docs/next/all-issue-types#pulse_reference_stability)
 - [PULSE_UNINITIALIZED_VALUE](/docs/next/all-issue-types#pulse_uninitialized_value)
 - [STACK_VARIABLE_ADDRESS_ESCAPE](/docs/next/all-issue-types#stack_variable_address_escape)
+- [STATIC_INITIALIZATION_ORDER_FIASCO](/docs/next/all-issue-types#static_initialization_order_fiasco)
 - [STRONG_SELF_NOT_CHECKED](/docs/next/all-issue-types#strong_self_not_checked)
 - [USE_AFTER_DELETE](/docs/next/all-issue-types#use_after_delete)
 - [USE_AFTER_DELETE_LATENT](/docs/next/all-issue-types#use_after_delete_latent)
@@ -96,9 +97,11 @@ Issue types in this category:
 - [MIXED_SELF_WEAKSELF](/docs/next/all-issue-types#mixed_self_weakself)
 - [PULSE_RESOURCE_LEAK](/docs/next/all-issue-types#pulse_resource_leak)
 - [PULSE_UNAWAITED_AWAITABLE](/docs/next/all-issue-types#pulse_unawaited_awaitable)
+- [PULSE_UNFINISHED_BUILDER](/docs/next/all-issue-types#pulse_unfinished_builder)
 - [RESOURCE_LEAK](/docs/next/all-issue-types#resource_leak)
 - [RETAIN_CYCLE](/docs/next/all-issue-types#retain_cycle)
 - [RETAIN_CYCLE_NO_WEAK_INFO](/docs/next/all-issue-types#retain_cycle_no_weak_info)
+- [SELF_IN_BLOCK_PASSED_TO_INIT](/docs/next/all-issue-types#self_in_block_passed_to_init)
 
 ## Runtime exception
 

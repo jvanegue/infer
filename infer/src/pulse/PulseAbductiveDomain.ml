@@ -178,6 +178,10 @@ module Internal = struct
   [@@inline always]
 
 
+  let downcast_value_origin vo = (vo : CanonValue.t ValueOrigin.t_ :> ValueOrigin.t)
+  [@@inline always]
+
+
   module SafeBaseMemory = struct
     module Edges = struct
       let fold astate edges ~init ~f =
@@ -211,15 +215,15 @@ module Internal = struct
 
 
     let eval origin var astate =
-      let astate, addr_hist =
+      let astate, vo =
         match BaseStack.find_opt var (astate.post :> base_domain).stack with
-        | Some addr_hist ->
-            (astate, addr_hist) |> CanonValue.canon_snd_fst astate
+        | Some vo ->
+            (astate, CanonValue.canon_value_origin astate vo)
         | None ->
             let addr = CanonValue.mk_fresh () in
-            let addr_hist = (addr, origin) in
+            let vo = ValueOrigin.Unknown (addr, origin) in
             let post_stack =
-              BaseStack.add var (addr_hist |> downcast_fst) (astate.post :> base_domain).stack
+              BaseStack.add var (downcast_value_origin vo) (astate.post :> base_domain).stack
             in
             let post_heap = (astate.post :> base_domain).heap in
             let post_attrs = (astate.post :> base_domain).attrs in
@@ -232,7 +236,7 @@ module Internal = struct
                 (* HACK: do not record the history of values in the pre as they are unused *)
                 let foot_stack =
                   BaseStack.add var
-                    (downcast addr, ValueHistory.epoch)
+                    (ValueOrigin.Unknown (downcast addr, ValueHistory.epoch))
                     (astate.pre :> base_domain).stack
                 in
                 let foot_heap = BaseMemory.register_address addr (astate.pre :> base_domain).heap in
@@ -242,13 +246,13 @@ module Internal = struct
             let post =
               PostDomain.update astate.post ~stack:post_stack ~heap:post_heap ~attrs:post_attrs
             in
-            ({astate with post; pre}, addr_hist)
+            ({astate with post; pre}, vo)
       in
       let astate =
         map_decompiler astate ~f:(fun decompiler ->
-            Decompiler.add_var_source (fst addr_hist |> downcast) var decompiler )
+            Decompiler.add_var_source (ValueOrigin.value vo |> downcast) var decompiler )
       in
-      (astate, addr_hist)
+      (astate, vo)
 
 
     let add var addr_hist astate =
@@ -278,19 +282,20 @@ module Internal = struct
           .stack
       in
       BaseStack.fold
-        (fun var addr_hist acc -> f var (CanonValue.canon_fst astate addr_hist) acc)
+        (fun var vo acc -> f var (CanonValue.canon_value_origin astate vo) acc)
         stack accum
 
 
     let find_opt var astate =
-      BaseStack.find_opt var (astate.post :> base_domain).stack |> CanonValue.canon_opt_fst astate
+      BaseStack.find_opt var (astate.post :> base_domain).stack
+      |> CanonValue.canon_opt_value_origin astate
 
 
     let mem var astate = BaseStack.mem var (astate.post :> base_domain).stack
 
     let exists f astate =
       BaseStack.exists
-        (fun var addr_hist -> f var (CanonValue.canon_fst astate addr_hist))
+        (fun var vo -> f var (CanonValue.canon_value_origin astate vo))
         (astate.post :> base_domain).stack
 
 
@@ -394,7 +399,10 @@ module Internal = struct
         | None ->
             let addr = CanonValue.mk_fresh () in
             let history = ValueHistory.singleton (VariableDeclared (pvar, location, timestamp)) in
-            (BaseStack.add (Var.of_pvar pvar) (downcast addr, history) stack, addr)
+            ( BaseStack.add (Var.of_pvar pvar)
+                (downcast_value_origin (ValueOrigin.Unknown (addr, history)))
+                stack
+            , addr )
         | Some addr ->
             (stack, addr) )
       | `Malloc addr ->
@@ -463,6 +471,18 @@ module Internal = struct
 
     let hack_async_await address astate =
       map_post_attrs astate ~f:(BaseAddressAttributes.hack_async_await address)
+
+
+    let remove_hack_builder address astate =
+      map_post_attrs astate ~f:(BaseAddressAttributes.remove_hack_builder address)
+
+
+    let set_hack_builder address builderstate astate =
+      map_post_attrs astate ~f:(BaseAddressAttributes.set_hack_builder address builderstate)
+
+
+    let get_hack_builder address astate =
+      BaseAddressAttributes.get_hack_builder address (astate.post :> base_domain).attrs
 
 
     let csharp_resource_release address astate =
@@ -633,6 +653,10 @@ module Internal = struct
 
     let has_unknown_effect addr astate =
       BaseAddressAttributes.has_unknown_effect addr (astate.post :> base_domain).attrs
+
+
+    let is_hack_sinit_called addr astate =
+      BaseAddressAttributes.is_hack_sinit_called addr (astate.post :> base_domain).attrs
   end
 
   module SafeMemory = struct
@@ -841,13 +865,13 @@ module Internal = struct
                         BaseMemory.add_edge addr access (downcast_fst addr_hist_dest) post_heap )
                     |> restore_pre_var_value visited ~is_value_visible_outside addr_dest )
     in
-    let restore_pre_var x addr_hist astate =
+    let restore_pre_var x vo astate =
       (* the address of a variable never changes *)
-      let ((addr, _) as addr_hist) = CanonValue.canon_fst astate addr_hist in
-      let astate = SafeStack.add x (downcast_fst addr_hist) astate in
+      let vo = CanonValue.canon_value_origin astate vo in
+      let astate = SafeStack.add x (downcast_value_origin vo) astate in
       restore_pre_var_value AbstractValue.Set.empty
         ~is_value_visible_outside:(Var.is_global x || Var.is_return x)
-        addr astate
+        (ValueOrigin.value vo) astate
     in
     let post_stack =
       BaseStack.filter
@@ -911,8 +935,9 @@ module Internal = struct
   let get_stack_allocated astate =
     (* OPTIM: the post stack contains at least the pre stack so no need to check both *)
     SafeStack.fold `Post
-      (fun var (address, _) allocated ->
-        if Var.is_pvar var then AbstractValue.Set.add (downcast address) allocated else allocated )
+      (fun var vo allocated ->
+        if Var.is_pvar var then AbstractValue.Set.add (downcast (ValueOrigin.value vo)) allocated
+        else allocated )
       astate AbstractValue.Set.empty
 
 
@@ -1035,7 +1060,17 @@ module Internal = struct
 
 
   (** it's a good idea to normalize the path condition before calling this function *)
-  let canonicalize astate =
+  let canonicalize location astate =
+    let remove_taint_attrs_from_opaque_files attrs location =
+      let is_opaque_for_taint (location : Location.t) =
+        let file = location.file in
+        let path = SourceFile.to_abs_path file in
+        List.mem Config.pulse_taint_opaque_files ~equal:String.equal path
+      in
+      if is_opaque_for_taint location then
+        PulseBaseAddressAttributes.remove_all_taint_related_attrs attrs
+      else attrs
+    in
     let open SatUnsat.Import in
     let get_var_repr v = Formula.get_var_repr astate.path_condition v in
     let canonicalize_pre (pre : PreDomain.t) =
@@ -1046,6 +1081,7 @@ module Internal = struct
       let attrs' =
         PulseBaseAddressAttributes.make_suitable_for_pre_summary (pre :> BaseDomain.t).attrs
       in
+      let attrs' = remove_taint_attrs_from_opaque_files attrs' location in
       PreDomain.update ~stack:stack' ~heap:heap' ~attrs:attrs' pre
     in
     let canonicalize_post (post : PostDomain.t) =
@@ -1055,6 +1091,7 @@ module Internal = struct
       let attrs' =
         PulseBaseAddressAttributes.canonicalize_post ~get_var_repr (post :> BaseDomain.t).attrs
       in
+      let attrs' = remove_taint_attrs_from_opaque_files attrs' location in
       PostDomain.update ~stack:stack' ~heap:heap' ~attrs:attrs' post
     in
     let* pre = canonicalize_pre astate.pre in
@@ -1194,11 +1231,10 @@ module Internal = struct
       match (stack_lhs, stack_rhs) with
       | [], [] ->
           IsomorphicUpTo mapping
-      | ( (var_lhs, (addr_lhs, _trace_lhs)) :: stack_lhs
-        , (var_rhs, (addr_rhs, _trace_rhs)) :: stack_rhs )
+      | (var_lhs, vo_lhs) :: stack_lhs, (var_rhs, vo_rhs) :: stack_rhs
         when Var.equal var_lhs var_rhs -> (
-          let addr_lhs = CanonValue.canon' astate_lhs addr_lhs in
-          let addr_rhs = CanonValue.canon' astate_rhs addr_rhs in
+          let addr_lhs = CanonValue.canon' astate_lhs (ValueOrigin.value vo_lhs) in
+          let addr_rhs = CanonValue.canon' astate_rhs (ValueOrigin.value vo_rhs) in
           match
             isograph_map_from_address ~astate_lhs ~lhs ~addr_lhs ~astate_rhs ~rhs ~addr_rhs mapping
           with
@@ -1317,10 +1353,10 @@ module Internal = struct
           Continue visited_accum
 
 
-    let visit_address_from_var ~edge_filter (orig_var, (address, _loc)) ~f ~f_revisit rev_accesses
-        astate heap visited_accum =
-      visit_address ~edge_filter address ~f:(f orig_var) ~f_revisit:(f_revisit orig_var)
-        rev_accesses astate heap visited_accum
+    let visit_address_from_var ~edge_filter (orig_var, vo) ~f ~f_revisit rev_accesses astate heap
+        visited_accum =
+      visit_address ~edge_filter (ValueOrigin.value vo) ~f:(f orig_var)
+        ~f_revisit:(f_revisit orig_var) rev_accesses astate heap visited_accum
 
 
     let fold_common x astate heap ~fold ~filter ~visit ~init ~already_visited ~f ~f_revisit ~finish
@@ -1400,8 +1436,10 @@ let update_pre_for_kotlin_proc astate (proc_attrs : ProcAttributes.t) formals =
            is emitted by kotlinc to denote non-nullable function parameters *)
         let is_not_nullable = Option.exists annot_opt ~f:Annotations.ia_is_jetbrains_notnull in
         if is_not_nullable then
-          let acc, (value, history) = SafeStack.eval history var acc in
-          let acc, (value, history) = SafeMemory.eval_edge (value, history) Dereference acc in
+          let acc, vo = SafeStack.eval history var acc in
+          let acc, (value, history) =
+            SafeMemory.eval_edge (ValueOrigin.addr_hist vo) Dereference acc
+          in
           let attribute =
             Attribute.MustBeValid
               ( Timestamp.t0
@@ -1446,7 +1484,8 @@ let mk_initial tenv (proc_attrs : ProcAttributes.t) =
   let formals_and_captured = captured @ formals in
   let initial_stack =
     List.fold formals_and_captured ~init:(PreDomain.empty :> BaseDomain.t).stack
-      ~f:(fun stack (formal, _, _, addr_loc) -> BaseStack.add formal addr_loc stack )
+      ~f:(fun stack (formal, _, _, addr_hist) ->
+        BaseStack.add formal (ValueOrigin.unknown addr_hist) stack )
   in
   let initial_heap =
     let register heap (_, _, _, (addr, _)) =
@@ -1572,8 +1611,9 @@ let filter_live_addresses ~is_dead_root potential_leak_addrs astate =
        meaningless for callers so are not reachable outside the current function *)
     let formal_values =
       BaseStack.to_seq pre.stack
-      |> Seq.flat_map (fun (_, (formal_addr, _)) ->
-             match BaseMemory.find_opt (CanonValue.canon astate formal_addr) pre.heap with
+      |> Seq.flat_map (fun (_, formal_vo) ->
+             let addr = CanonValue.canon astate (ValueOrigin.value formal_vo) in
+             match BaseMemory.find_opt addr pre.heap with
              | None ->
                  Seq.empty
              | Some edges ->
@@ -1753,12 +1793,12 @@ let discard_unreachable_ ~for_summary ({pre; post} as astate) =
   (astate, pre_addresses, post_addresses, dead_addresses)
 
 
-let filter_for_summary proc_name astate0 =
+let filter_for_summary proc_name location astate0 =
   let open SatUnsat.Import in
   L.d_printfln "state *before* calling canonicalize:" ;
   L.d_printfln "%a" pp astate0 ;
   L.d_printfln "Canonicalizing..." ;
-  let* astate_before_filter = canonicalize astate0 in
+  let* astate_before_filter = canonicalize location astate0 in
   let pp_state = Pp.html_collapsible_block ~name:"Show/hide canonicalized state" HTML pp in
   L.d_printfln "%a" pp_state astate_before_filter ;
   (* Remove the stack from the post as it's not used: the values of formals are the same as in the
@@ -1902,21 +1942,14 @@ module Summary = struct
 
   let of_post_ proc_name (proc_attrs : ProcAttributes.t) location astate0 =
     let open SatUnsat.Import in
-    let astate = astate0 in
-    (* NOTE: we normalize (to strengthen the equality relation used by canonicalization) then
-       canonicalize *before* garbage collecting unused addresses in case we detect any last-minute
-       contradictions about addresses we are about to garbage collect *)
-    let* path_condition, new_eqs = Formula.normalize ~location astate.path_condition in
-    let astate = {astate with path_condition=path_condition} in
-    let* astate, error = incorporate_new_eqs astate new_eqs in
     let astate_before_filter = astate in
     (* do not store the decompiler in the summary and make sure we only use the original one by
        marking it invalid *)
     let astate = {astate with decompiler= Decompiler.invalid} in
-    let* astate, live_addresses, dead_addresses, new_eqs = filter_for_summary proc_name astate in
-    let+ astate, error =
-      match error with None -> incorporate_new_eqs astate new_eqs | Some _ -> Sat (astate, error)
+    let* astate, live_addresses, dead_addresses, new_eqs =
+      filter_for_summary proc_name location astate
     in
+    let+ astate, error = incorporate_new_eqs astate new_eqs in
     match error with
     | None -> (
       (* NOTE: it's important for correctness that we check leaks last because we are going to carry
@@ -1943,6 +1976,14 @@ module Summary = struct
               , astate_before_filter
               , trace
               , Option.value unreachable_location ~default:location ) )
+      | Error (unreachable_location, HackBuilderResource builder_type, trace) ->
+          Error
+            (`HackUnfinishedBuilder
+              ( astate
+              , astate_before_filter
+              , trace
+              , Option.value unreachable_location ~default:location
+              , builder_type ) )
       | Error (unreachable_location, CSharpResource class_name, trace) ->
           Error
             (`CSharpResourceLeak
@@ -2105,7 +2146,9 @@ let is_allocated_this_pointer proc_attrs astate address =
   let address = CanonValue.canon' astate address in
   Option.exists ~f:Fn.id
     (let* this = ProcAttributes.get_this proc_attrs in
-     let* this_pointer_address, _ = SafeStack.find_opt (Var.of_pvar this) astate in
+     let* this_pointer_address =
+       SafeStack.find_opt (Var.of_pvar this) astate >>| ValueOrigin.value
+     in
      let+ this_pointer, _ = SafeMemory.find_edge_opt this_pointer_address Dereference astate in
      CanonValue.equal this_pointer address )
 
@@ -2162,17 +2205,17 @@ module Stack = struct
   include SafeStack
 
   let fold ?(pre_or_post = `Post) f astate init =
-    SafeStack.fold pre_or_post
-      (fun var addr_hist acc -> f var (downcast_fst addr_hist) acc)
-      astate init
+    SafeStack.fold pre_or_post (fun var vo acc -> f var (downcast_value_origin vo) acc) astate init
 
 
-  let find_opt var astate = SafeStack.find_opt var astate |> Option.map ~f:downcast_fst
+  let find_opt var astate = SafeStack.find_opt var astate |> Option.map ~f:downcast_value_origin
 
-  let eval origin var astate = SafeStack.eval origin var astate |> downcast_snd_fst
+  let eval origin var astate =
+    let astate, vo = SafeStack.eval origin var astate in
+    (astate, downcast_value_origin vo)
 
-  let exists f astate =
-    SafeStack.exists (fun var addr_hist -> f var (downcast_fst addr_hist)) astate
+
+  let exists f astate = SafeStack.exists (fun var vo -> f var (downcast_value_origin vo)) astate
 end
 
 module Memory = struct
@@ -2284,6 +2327,18 @@ module AddressAttributes = struct
     SafeAttributes.hack_async_await (CanonValue.canon' astate v) astate
 
 
+  let remove_hack_builder v astate =
+    SafeAttributes.remove_hack_builder (CanonValue.canon' astate v) astate
+
+
+  let set_hack_builder v builderstate astate =
+    SafeAttributes.set_hack_builder (CanonValue.canon' astate v) builderstate astate
+
+
+  let get_hack_builder v astate =
+    SafeAttributes.get_hack_builder (CanonValue.canon' astate v) astate
+
+
   let is_java_resource_released v astate =
     SafeAttributes.is_java_resource_released (CanonValue.canon' astate v) astate
 
@@ -2322,6 +2377,10 @@ module AddressAttributes = struct
 
   let add_static_type tenv typ v location astate =
     add_static_type tenv typ (CanonValue.canon' astate v) location astate
+
+
+  let get_allocation_attr v astate =
+    SafeAttributes.get_allocation (CanonValue.canon' astate v) astate
 
 
   let remove_allocation_attr v astate =
@@ -2411,7 +2470,51 @@ module AddressAttributes = struct
 
   let has_unknown_effect v astate =
     SafeAttributes.has_unknown_effect (CanonValue.canon' astate v) astate
+
+
+  let is_hack_sinit_called v astate =
+    SafeAttributes.is_hack_sinit_called (CanonValue.canon' astate v) astate
 end
+
+(* [recurse] is here to enforce that we can only ever make one recursive call when calling into this
+      function. That's what the code should ensure already as we should only ever need one recursive
+      call (namely when we are changing the history of a logical var: we should also update the history
+      of the program var or memory location where it came from) but better safe than infinite
+      loop-y. *)
+let rec add_event_to_value_origin_ ~recurse (path : PathContext.t) location event value_origin
+    astate =
+  match (value_origin : ValueOrigin.t) with
+  | InMemory {src; access; dest= dest_addr, dest_hist} ->
+      let dest_hist = ValueHistory.sequence event dest_hist ~context:path.conditions in
+      Memory.add_edge path src access (dest_addr, dest_hist) location astate
+  | OnStack {var; addr_hist= addr, hist} ->
+      let hist = ValueHistory.sequence event hist ~context:path.conditions in
+      let astate, new_origin =
+        match Stack.find_opt var astate with
+        | None ->
+            (astate, ValueOrigin.Unknown (addr, hist))
+        | Some var_origin ->
+            let astate =
+              if recurse then
+                add_event_to_value_origin_ ~recurse:false path location event var_origin astate
+              else astate
+            in
+            let origin =
+              ValueOrigin.with_hist
+                (ValueHistory.sequence event (ValueOrigin.hist var_origin) ~context:path.conditions)
+                var_origin
+            in
+            (astate, origin)
+      in
+      Stack.add var new_origin astate
+  | Unknown (v, _) ->
+      L.d_printfln "could not add event to %a with Unknown origin" AbstractValue.pp v ;
+      astate
+
+
+let add_event_to_value_origin path location event value_origin astate =
+  add_event_to_value_origin_ ~recurse:true path location event value_origin astate
+
 
 module CanonValue = struct
   include CanonValue

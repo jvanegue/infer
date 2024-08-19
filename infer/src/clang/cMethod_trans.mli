@@ -34,7 +34,7 @@ val create_local_procdesc :
   -> Tenv.t
   -> CMethodSignature.t
   -> Clang_ast_t.stmt list
-  -> (Pvar.t * Typ.t * CapturedVar.capture_mode) list
+  -> CapturedVar.t list
   -> bool
 
 val create_attributes :
@@ -44,7 +44,6 @@ val create_attributes :
   -> Tenv.t
   -> CMethodSignature.t
   -> Clang_ast_t.stmt list
-  -> (Pvar.t * Typ.t * CapturedVar.capture_mode) list
   -> ProcAttributes.t
 
 val create_external_procdesc :
@@ -69,7 +68,7 @@ val get_method_name_from_clang : CMethodSignature.t option -> Procname.t option
 
 val create_procdesc_with_pointer :
      ?is_cpp_lambda_call_operator:bool
-  -> ?captured_vars:(Pvar.t * Typ.t * CapturedVar.capture_mode) list
+  -> ?captured_vars:CapturedVar.t list
   -> CContext.t
   -> Clang_ast_t.pointer
   -> Typ.Name.t option
@@ -77,6 +76,6 @@ val create_procdesc_with_pointer :
   -> Procname.t
 
 val get_procname_from_cpp_lambda :
-  CContext.t -> Clang_ast_t.decl -> (Pvar.t * Typ.t * CapturedVar.capture_mode) list -> Procname.t
+  CContext.t -> Clang_ast_t.decl -> CapturedVar.t list -> Procname.t
 
 val get_captures_from_cpp_lambda : Clang_ast_t.decl -> Clang_ast_t.lambda_capture_info list

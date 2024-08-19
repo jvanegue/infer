@@ -333,8 +333,6 @@ val debug_level_capture : int
 
 val debug_level_report : int
 
-val debug_level_test_determinator : int
-
 val debug_mode : bool
 
 val deduplicate : bool
@@ -370,8 +368,6 @@ val erlang_reliability : bool
 val erlang_skip_compile : bool
 
 val erlang_with_otp_specs : bool
-
-val export_changed_functions : bool
 
 val extract_capture_from : string option
 
@@ -409,13 +405,17 @@ val genrule_mode : bool
 
 val global_tenv : bool
 
+val hackc_binary : string option
+
+val hack_builder_patterns : (string * string list) list
+
 val hack_builtin_models : string
 
 val hack_models : string list
 
 val hack_naming_table : string option [@@warning "-unused-value-declaration"]
 
-val hackc_binary : string option
+val hack_verify_capture_only : bool
 
 val help_checker : Checker.t list
 
@@ -458,7 +458,7 @@ val java_debug_source_file_info : string option
 
 val java_jar_compiler : string option
 
-val java_reflection : bool
+val java_read_modules : bool
 
 val java_source_parser_experimental : bool
 
@@ -474,9 +474,9 @@ val keep_going : bool
 
 val kotlin_capture : bool
 
-val lineage_source : string option
+val lineage_source : string list
 
-val lineage_sink : string option
+val lineage_sink : string list
 
 val lineage_sanitizers : string list
 
@@ -544,11 +544,7 @@ val merge_report : string list
 
 val merge_summaries : string list
 
-val method_decls_info : string option
-
 val modeled_expensive : string * Yojson.Safe.t
-
-val modified_lines : string option
 
 val never_returning_null : string * Yojson.Safe.t
 
@@ -561,6 +557,8 @@ val nullable_annotation : string option
 val only_cheap_debug : bool
 
 val oom_threshold : int option
+
+val objc_synthesize_dealloc : bool
 
 val pmd_xml : bool
 
@@ -603,8 +601,6 @@ val procedures_summary_json : bool
 val procedures_summary_skip_empty : bool
 
 val process_clang_ast : bool
-
-val profiler_samples : string option
 
 val progress_bar : [`MultiLine | `Plain | `Quiet]
 
@@ -702,6 +698,8 @@ type pulse_taint_config =
 
 val pulse_taint_config : pulse_taint_config
 
+val pulse_taint_opaque_files : string list
+
 val pulse_taint_short_traces : bool
 
 val pulse_taint_skip_sources : bool
@@ -723,16 +721,6 @@ val pyc_file : string list
 val python_builtin_models : string
 
 val qualified_cpp_name_block_list : string list
-
-val quandary_endpoints : Yojson.Safe.t
-
-val quandary_sanitizers : Yojson.Safe.t
-
-val quandary_show_passthroughs : bool
-
-val quandary_sinks : Yojson.Safe.t
-
-val quandary_sources : Yojson.Safe.t
 
 val quiet : bool
 
@@ -878,9 +866,9 @@ val summaries_caches_max_size : int [@@warning "-unused-value-declaration"]
 
 val suppress_lint_ignore_types : bool
 
-val tenv_json : string option
+val suppressions : bool
 
-val test_determinator : bool
+val tenv_json : string option
 
 val testing_mode : bool
 

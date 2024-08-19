@@ -41,6 +41,7 @@ val pp_map_function : F.formatter -> map_function -> unit
 
 type t =
   | CFree
+  | ComparedToNullInThisProcedure of Location.t
   | ConstantDereference of IntLit.t
   | CppDelete
   | CppDeleteArray
@@ -56,6 +57,9 @@ val pp : F.formatter -> t -> unit
 val describe : F.formatter -> t -> unit
 
 val suggest : t -> string option
+
+val is_same_type : t -> t -> bool
+(** whether both invalidations have are of the same variant case *)
 
 type must_be_valid_reason =
   | BlockCall

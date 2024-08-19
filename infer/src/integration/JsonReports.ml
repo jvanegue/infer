@@ -113,23 +113,22 @@ let should_report proc_name issue_type error_desc =
     if issue_type_is_null_deref then Localise.error_desc_is_reportable_bucket error_desc else true
 
 
-let should_not_censor (issue_type : IssueType.t) =
+let should_not_censor ~issue_id =
   List.exists Config.no_censor_report ~f:(fun issue_type_re ->
-      Str.string_match issue_type_re issue_type.unique_id 0 )
+      Str.string_match issue_type_re issue_id 0 )
 
 
 (* The reason an issue should be censored (that is, not reported). The empty
    string (that is "no reason") means that the issue should be reported. *)
-let censored_reason (issue_type : IssueType.t) source_file =
-  if should_not_censor issue_type then None
+let censored_reason ~issue_id source_file =
+  if should_not_censor ~issue_id then None
   else
     let filename = SourceFile.to_rel_path source_file in
     let rejected_by ((issue_type_polarity, issue_type_re), (filename_polarity, filename_re), reason)
         =
       let accepted =
         (* matches issue_type_re implies matches filename_re *)
-        (not
-           (Bool.equal issue_type_polarity (Str.string_match issue_type_re issue_type.unique_id 0)) )
+        (not (Bool.equal issue_type_polarity (Str.string_match issue_type_re issue_id 0)))
         || Bool.equal filename_polarity (Str.string_match filename_re filename 0)
       in
       Option.some_if (not accepted) reason
@@ -227,6 +226,27 @@ let issue_in_report_block_list_specs ~file ~issue ~proc =
 module JsonIssuePrinter = MakeJsonListPrinter (struct
   type elt = json_issue_printer_typ
 
+  let suppressions_cache = ref SourceFile.Map.empty
+
+  let is_suppressed source_file ~issue_type ~line =
+    let suppressions =
+      match SourceFile.Map.find_opt source_file !suppressions_cache with
+      | Some s ->
+          s
+      | None -> (
+          let filename = SourceFile.to_abs_path source_file in
+          L.debug Report Verbose "Parsing suppressions for %s@\n" filename ;
+          match Utils.read_file filename with
+          | Error _ ->
+              L.user_error "Could not read file %s@\n" filename ;
+              String.Map.empty
+          | Ok lines ->
+              Suppressions.parse_lines ~file:filename lines )
+    in
+    suppressions_cache := SourceFile.Map.add source_file suppressions !suppressions_cache ;
+    Suppressions.is_suppressed ~suppressions ~issue_type ~line
+
+
   let to_string ({error_filter; proc_name; proc_location_opt; err_key; err_data} : elt) =
     let source_file, procedure_start_line =
       match proc_location_opt with
@@ -253,8 +273,14 @@ module JsonIssuePrinter = MakeJsonListPrinter (struct
               ~proc:proc_name )
     then
       let severity = IssueType.string_of_severity err_key.severity in
-      let category = IssueType.string_of_category err_key.issue_type.category in
-      let bug_type = err_key.issue_type.unique_id in
+      let category =
+        Option.value
+          (Errlog.category_override err_data)
+          ~default:(IssueType.string_of_category err_key.issue_type.category)
+      in
+      let bug_type =
+        Option.value (Errlog.issue_type_override err_data) ~default:err_key.issue_type.unique_id
+      in
       let file =
         SourceFile.to_string ~force_relative:Config.report_force_relative_path source_file
       in
@@ -280,6 +306,10 @@ module JsonIssuePrinter = MakeJsonListPrinter (struct
         else base_qualifier
       in
       let suggestion = error_desc_to_suggestion_string err_key.err_desc in
+      let suppressed =
+        Config.suppressions
+        && is_suppressed source_file ~issue_type:bug_type ~line:err_data.loc.Location.line
+      in
       let bug =
         { Jsonbug_j.bug_type
         ; qualifier
@@ -301,9 +331,10 @@ module JsonIssuePrinter = MakeJsonListPrinter (struct
         ; infer_source_loc= json_ml_loc
         ; bug_type_hum= err_key.issue_type.hum
         ; traceview_id= None
-        ; censored_reason= censored_reason err_key.issue_type source_file
+        ; censored_reason= censored_reason ~issue_id:bug_type source_file
         ; access= err_data.access
-        ; extras= err_data.extras }
+        ; extras= err_data.extras
+        ; suppressed }
       in
       Some (Jsonbug_j.string_of_jsonbug bug)
     else None

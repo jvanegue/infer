@@ -12,14 +12,16 @@ module TaintConfig : sig
   type t
 
   val parse :
-       lineage_source:string option
-    -> lineage_sink:string option
+       lineage_source:string list
+    -> lineage_sink:string list
     -> lineage_sanitizers:string list
     -> lineage_limit:int option
     -> t option
 end
 
-val report : TaintConfig.t -> unit
+val export_result : name:string -> fileparts:string list -> 'a Fmt.t -> 'a -> unit
+
+val report : TaintConfig.t -> IssueLog.t
 
 include sig
   (** Used for tests*)

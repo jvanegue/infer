@@ -254,9 +254,7 @@ let report_debug_level = debug_level_of_int Config.debug_level_report
 
 let mergecapture_debug_level = Quiet
 
-let test_determinator_debug_level = debug_level_of_int Config.debug_level_test_determinator
-
-type debug_kind = Analysis | BufferOverrun | Capture | MergeCapture | Report | TestDeterminator
+type debug_kind = Analysis | BufferOverrun | Capture | MergeCapture | Report
 
 let debug kind level fmt =
   let base_level =
@@ -271,8 +269,6 @@ let debug kind level fmt =
         mergecapture_debug_level
     | Report ->
         report_debug_level
-    | TestDeterminator ->
-        test_determinator_debug_level
   in
   let to_file = compare_debug_level level base_level <= 0 in
   log ~to_console:false ~to_file debug_file_fmts fmt
@@ -368,6 +364,7 @@ let setup_log_file () =
       log_file := Some (fmt, chan) ;
       if preexisting_logfile then is_newline := false ;
       reset_formatters () ;
+      EarlyScubaLogging.finish () |> ScubaLogging.log_many ;
       if Config.is_originator && preexisting_logfile then
         phase
           "============================================================@\n\
@@ -506,7 +503,7 @@ let with_indent ?name_color ?(collapsible = false) ?(escape_result = true) ?pp_r
       d_printf_escaped ?color:name_color "%s" name ;
       d_printf "</%s>" name_tag ;
       (* Open a paragraph for the log of [f] *)
-      d_printf "<DIV class='details_child'>" ;
+      d_printf "<DIV class='details_child'>@\n" ;
       let result = f () in
       d_printf "</DIV>" ;
       (* Print result if needed *)

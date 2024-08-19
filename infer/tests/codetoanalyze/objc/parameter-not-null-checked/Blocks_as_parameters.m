@@ -8,6 +8,8 @@
 
 typedef void (^MyBlock)();
 
+typedef void (^MyBlock1)(int x);
+
 @interface Blocks_as_parameters : NSObject
 
 @end
@@ -17,6 +19,11 @@ typedef void (^MyBlock)();
 + (void)blockNotCheckedBad:(int)z and:(MyBlock)block {
   block();
 }
+
++ (void)blockNotCheckedBad1:(int)z and:(MyBlock1)block {
+  block(z);
+}
+
 + (void)blockCheckedOk:(int)z and:(MyBlock)block {
   if (block) {
     block();
@@ -80,17 +87,36 @@ typedef void (^MyBlock)();
 + (void)addOperationWithBlock:(void (^)())completion {
 }
 
-- (void)uploadTaskWithRequestOk:(NSURLRequest*)urlRequest
-                       fromFile:(NSURL*)fileURL
-                       delegate:(id)delegate
-                  delegateQueue:(NSOperationQueue*)delegateQueue
-                     completion:(void (^)())completion {
+- (void)uploadTaskWithRequestOk_FP:(NSURLRequest*)urlRequest
+                          fromFile:(NSURL*)fileURL
+                          delegate:(id)delegate
+                     delegateQueue:(NSOperationQueue*)delegateQueue
+                        completion:(void (^)())completion {
   if (!completion) {
     return;
   }
 
   [Blocks_as_parameters addOperationWithBlock:^{
     completion();
+  }];
+}
+
+
+- (void)uploadTaskWithRequestBad:(NSURLRequest*)urlRequest
+                        fromFile:(NSURL*)fileURL
+                        delegate:(id)delegate
+                   delegateQueue:(NSOperationQueue*)delegateQueue
+                      completion:(void (^)())completion {
+  [Blocks_as_parameters addOperationWithBlock:^{
+    completion();
+  }];
+}
+
+- (void)capturedNotFormalOK {
+  MyBlock block;
+
+  [Blocks_as_parameters addOperationWithBlock:^{
+    block();
   }];
 }
 

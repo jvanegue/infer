@@ -334,6 +334,8 @@ val is_pointer_to_cpp_class : t -> bool
 
 val is_pointer_to_smart_pointer : t -> bool
 
+val is_unique_pointer : t -> bool
+
 val is_pointer_to_unique_pointer : t -> bool
 
 val shared_pointer_matcher : QualifiedCppName.Match.quals_matcher
@@ -341,6 +343,8 @@ val shared_pointer_matcher : QualifiedCppName.Match.quals_matcher
 val is_shared_pointer : t -> bool
 
 val is_folly_coro : t -> bool
+
+val is_thrift_field_ref : t -> bool
 
 val is_pointer_to_void : t -> bool
 

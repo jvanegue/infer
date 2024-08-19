@@ -35,6 +35,12 @@ module type S = sig
 
   val hack_async_await : key -> t -> t
 
+  val remove_hack_builder : key -> t -> t
+
+  val set_hack_builder : key -> Attribute.Builder.t -> t -> t
+
+  val get_hack_builder : key -> t -> Attribute.Builder.t option
+
   val csharp_resource_release : key -> t -> t
 
   val in_reported_retain_cycle : key -> t -> t
@@ -127,11 +133,15 @@ module type S = sig
   val get_address_of_stack_variable : key -> t -> (Var.t * Location.t * ValueHistory.t) option
 
   val has_unknown_effect : key -> t -> bool
+
+  val is_hack_sinit_called : key -> t -> bool
 end
 
 include S with type key := AbstractValue.t
 
 val make_suitable_for_pre_summary : t -> t
+
+val remove_all_taint_related_attrs : t -> t
 
 val canonicalize_post : get_var_repr:(AbstractValue.t -> AbstractValue.t) -> t -> t
 (** merge the attributes of all the variables that are equal according to [get_var_repr] and remove

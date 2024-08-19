@@ -217,13 +217,15 @@ module Resource = struct
 
 
   let release this : model_no_non_disj =
-   fun _ astate ->
-    PulseOperations.java_resource_release ~recursive:true (fst this) astate |> Basic.ok_continue
+   fun model_data astate ->
+    PulseOperations.java_resource_release ~recursive:true (fst this) astate
+    |> use ~exn_class_name:"java.io.IOException" model_data
 
 
   let release_this_only this : model_no_non_disj =
-   fun _ astate ->
-    PulseOperations.java_resource_release ~recursive:false (fst this) astate |> Basic.ok_continue
+   fun model_data astate ->
+    PulseOperations.java_resource_release ~recursive:false (fst this) astate
+    |> use ~exn_class_name:"java.io.IOException" model_data
 end
 
 module Collection = struct
@@ -568,7 +570,7 @@ module Integer = struct
   let value_of init_value : model =
     let open DSL.Syntax in
     start_model
-    @@ let* res = mk_fresh ~model_desc:"Integer.valueOf" () in
+    @@ let* res = mk_fresh () in
        let* () = lift_to_monad (init res init_value) in
        assign_ret res
 end
@@ -600,7 +602,7 @@ module Boolean = struct
   let value_of init_value : model =
     let open DSL.Syntax in
     start_model
-    @@ let* res = mk_fresh ~model_desc:"Boolean.valueOf" () in
+    @@ let* res = mk_fresh () in
        let* () = lift_to_monad (init res init_value) in
        assign_ret res
 end

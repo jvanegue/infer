@@ -484,16 +484,6 @@ OPTIONS
            without being reported as dead stores.
            See also infer-analyze(1).
 
-       --datalog
-           Activates: datalog checker: Experimental datalog-based points-to
-           analysis. (Conversely: --no-datalog)
-           See also infer-analyze(1).
-
-       --datalog-only
-           Activates: Enable datalog and disable all other checkers
-           (Conversely: --no-datalog-only)
-           See also infer-analyze(1).
-
        --debug,-g
            Activates: Debug mode (also sets --debug-level 2,
            --developer-mode, --print-buckets, --print-types,
@@ -612,8 +602,8 @@ OPTIONS
              CHECKERS_CALLS_EXPENSIVE_METHOD (enabled by default),
              CHECKERS_EXPENSIVE_OVERRIDES_UNANNOTATED (enabled by default),
              CHECKERS_FRAGMENT_RETAINS_VIEW (enabled by default),
-             CHECKERS_PRINTF_ARGS (enabled by default),
              CLASS_CAST_EXCEPTION (disabled by default),
+             COMPARED_TO_NULL_AND_DEREFERENCED (disabled by default),
              CONDITION_ALWAYS_FALSE (disabled by default),
              CONDITION_ALWAYS_TRUE (disabled by default),
              CONFIG_IMPACT (enabled by default),
@@ -621,13 +611,10 @@ OPTIONS
              CONFIG_USAGE (disabled by default),
              CONSTANT_ADDRESS_DEREFERENCE (disabled by default),
              CONSTANT_ADDRESS_DEREFERENCE_LATENT (disabled by default),
-             CREATE_INTENT_FROM_URI (enabled by default),
-             CROSS_SITE_SCRIPTING (enabled by default),
              CXX_REF_CAPTURED_IN_BLOCK (enabled by default),
              Cannot_star (enabled by default),
              DANGLING_POINTER_DEREFERENCE (disabled by default),
              DANGLING_POINTER_DEREFERENCE_MAYBE (disabled by default),
-             DATALOG_FACT (enabled by default),
              DATA_FLOW_TO_SINK (disabled by default),
              DEADLOCK (enabled by default),
              DEAD_STORE (enabled by default),
@@ -640,7 +627,6 @@ OPTIONS
              EXECUTION_TIME_UNREACHABLE_AT_EXIT (disabled by default),
              EXPENSIVE_EXECUTION_TIME (disabled by default),
              EXPENSIVE_LOOP_INVARIANT_CALL (enabled by default),
-             EXPOSED_INSECURE_INTENT_HANDLING (enabled by default),
              Failure_exe (enabled by default),
              GUARDEDBY_VIOLATION (enabled by default),
              IMPURE_FUNCTION (enabled by default),
@@ -652,7 +638,6 @@ OPTIONS
              INFERBO_ALLOC_MAY_BE_NEGATIVE (enabled by default),
              INFINITE_EXECUTION_TIME (disabled by default),
              INHERENTLY_DANGEROUS_FUNCTION (enabled by default),
-             INSECURE_INTENT_HANDLING (enabled by default),
              INTEGER_OVERFLOW_L1 (enabled by default),
              INTEGER_OVERFLOW_L2 (enabled by default),
              INTEGER_OVERFLOW_L5 (disabled by default),
@@ -662,11 +647,10 @@ OPTIONS
              INVARIANT_CALL (disabled by default),
              IPC_ON_UI_THREAD (enabled by default),
              Internal_error (enabled by default),
-             JAVASCRIPT_INJECTION (enabled by default),
              LAB_RESOURCE_LEAK (enabled by default),
+             LINEAGE_FLOW (enabled by default),
              LOCKLESS_VIOLATION (enabled by default),
              LOCK_CONSISTENCY_VIOLATION (enabled by default),
-             LOGGING_PRIVATE_DATA (enabled by default),
              Leak_after_array_abstraction (enabled by default),
              Leak_in_footprint (enabled by default),
              Leak_unknown_origin (disabled by default),
@@ -718,6 +702,7 @@ OPTIONS
              PULSE_RESOURCE_LEAK (enabled by default),
              PULSE_TRANSITIVE_ACCESS (enabled by default),
              PULSE_UNAWAITED_AWAITABLE (enabled by default),
+             PULSE_UNFINISHED_BUILDER (disabled by default),
              PULSE_UNINITIALIZED_CONST (disabled by default),
              PULSE_UNINITIALIZED_VALUE (enabled by default),
              PULSE_UNNECESSARY_COPY (enabled by default),
@@ -732,18 +717,14 @@ OPTIONS
              PULSE_UNNECESSARY_COPY_OPTIONAL_CONST (disabled by default),
              PULSE_UNNECESSARY_COPY_RETURN (disabled by default),
              PURE_FUNCTION (enabled by default),
-             QUANDARY_TAINT_ERROR (enabled by default),
              REGEX_OP_ON_UI_THREAD (enabled by default),
              RESOURCE_LEAK (enabled by default),
              RETAIN_CYCLE (enabled by default),
              RETAIN_CYCLE_NO_WEAK_INFO (disabled by default),
              SCOPE_LEAKAGE (enabled by default),
+             SELF_IN_BLOCK_PASSED_TO_INIT (enabled by default),
              SENSITIVE_DATA_FLOW (disabled by default),
-             SHELL_INJECTION (enabled by default),
-             SHELL_INJECTION_RISK (enabled by default),
              SKIP_FUNCTION (disabled by default),
-             SQL_INJECTION (enabled by default),
-             SQL_INJECTION_RISK (enabled by default),
              STACK_VARIABLE_ADDRESS_ESCAPE (enabled by default),
              STARVATION (enabled by default),
              STATIC_INITIALIZATION_ORDER_FIASCO (enabled by default),
@@ -755,17 +736,6 @@ OPTIONS
              TOPL_ERROR (enabled by default),
              TOPL_ERROR_LATENT (disabled by default),
              UNREACHABLE_CODE (enabled by default),
-             UNTRUSTED_BUFFER_ACCESS (disabled by default),
-             UNTRUSTED_DESERIALIZATION (enabled by default),
-             UNTRUSTED_DESERIALIZATION_RISK (enabled by default),
-             UNTRUSTED_ENVIRONMENT_CHANGE_RISK (enabled by default),
-             UNTRUSTED_FILE (enabled by default),
-             UNTRUSTED_FILE_RISK (enabled by default),
-             UNTRUSTED_HEAP_ALLOCATION (disabled by default),
-             UNTRUSTED_INTENT_CREATION (enabled by default),
-             UNTRUSTED_URL_RISK (enabled by default),
-             UNTRUSTED_VARIABLE_LENGTH_ARRAY (enabled by default),
-             USER_CONTROLLED_SQL_RISK (enabled by default),
              USE_AFTER_DELETE (enabled by default),
              USE_AFTER_DELETE_LATENT (disabled by default),
              USE_AFTER_FREE (enabled by default),
@@ -885,10 +855,7 @@ OPTIONS
        --no-fragment-retains-view
            Deactivates: fragment-retains-view checker: Detects when Android
            fragments are not explicitly nullified before becoming
-           unreachable.
-           
-           DEPRECATED: Unmaintained due to poor precision.
-            (Conversely: --fragment-retains-view)
+           unreachable. (Conversely: --fragment-retains-view)
            See also infer-analyze(1).
 
        --fragment-retains-view-only
@@ -1027,7 +994,7 @@ OPTIONS
        qualifier | suggestion | severity | line | column | procedure |
        procedure_start_line | file | bug_trace | key | hash | line_offset |
        qualifier_contains_potential_exception_note | taint_extra |
-       transitive_callees_extra }
+       transitive_callees_extra | suppressed }
            Fields to emit with --issues-tests
            See also infer-report(1).
 
@@ -1132,14 +1099,23 @@ OPTIONS
            different seed.
            See also infer-analyze(1).
 
-       --lineage-sink string
-           [EXPERIMENTAL; UNSTABLE API] Lineage sink for taint finding,
-           format [module:]function/arity.{ret,argN}
+       --lineage-sink +string
+           [EXPERIMENTAL; UNSTABLE API] Lineage sinks for taint finding,
+           format [module:]function/arity.{ret,argN}, comma-separated. Must
+           be used with --lineage-source as options to the report subcommand.
+           
+           Will produce a graph materializing the flows between the sources
+           and the sinks along with a json issues file. The issues file will
+           contain one trace per sink, exhibiting a shortest path from a
+           source. The report command will print the filesystem paths of the
+           files containing those results.
            See also infer-report(1).
 
-       --lineage-source string
-           [EXPERIMENTAL; UNSTABLE API] Lineage source for taint finding,
-           format [module:]function/arity.{ret,argN}
+       --lineage-source +string
+           [EXPERIMENTAL; UNSTABLE API] Lineage sources for taint finding,
+           format [module:]function/arity.{ret,argN}, comma-separated.
+           
+           See --lineage-sink for additional documentation.
            See also infer-report(1).
 
        --lineage-variant-width int
@@ -1306,6 +1282,12 @@ OPTIONS
            functions that never return null.
            See also infer-analyze(1), infer-capture(1), and infer-run(1).
 
+       --objc-synthesize-dealloc
+           Activates: If enabled, the capture tries to synthesize code in the
+           dealloc methods of Objective-C classes corresponding to what the
+           compiler does. (Conversely: --no-objc-synthesize-dealloc)
+           See also infer-capture(1).
+
        --no-parameter-not-null-checked
            Deactivates: parameter-not-null-checked checker: An
            Objective-C-specific analysis to detect when a block parameter is
@@ -1340,21 +1322,6 @@ OPTIONS
            --no-print-logs)
            See also infer-analyze(1), infer-capture(1), infer-report(1), and
            infer-run(1).
-
-       --printf-args
-           Activates: printf-args checker: Detect mismatches between the Java
-           `printf` format strings and the argument types For example, this
-           checker will warn about the type error in `printf("Hello %d",
-           "world")`
-           
-           DEPRECATED: Unmaintained.
-            (Conversely: --no-printf-args)
-           See also infer-analyze(1).
-
-       --printf-args-only
-           Activates: Enable printf-args and disable all other checkers
-           (Conversely: --no-printf-args-only)
-           See also infer-analyze(1).
 
        --procedures
            Activates: Print functions and methods discovered by infer
@@ -1535,6 +1502,11 @@ OPTIONS
            Pulse
            See also infer-analyze(1).
 
+       --pulse-model-return-nonnull-list +string
+           Regex of methods that should be modelled as returning non-null in
+           Pulse
+           See also infer-analyze(1).
+
        --pulse-model-return-this string
            Regex of methods that should be modelled as returning the `this`
            or `self` argument of an instance method in Pulse. Languages
@@ -1669,6 +1641,12 @@ OPTIONS
            only. If a source has such a kind, only data flows to sinks which
            originate at the source will be reported. If a sink has such a
            kind, only sensitive data flows to the sink will be reported.
+           See also infer-analyze(1).
+
+       --pulse-taint-opaque-files +path
+           Specify files that should be treated as opaque for taint analysis
+           to make sure that procedure's belonging to these files are always
+           free of any potential taint flows.
            See also infer-analyze(1).
 
        --pulse-taint-policies json
@@ -1836,38 +1814,6 @@ OPTIONS
            Skip analyzing the procedures under the qualified cpp type name.
            See also infer-analyze(1).
 
-       --quandary
-           Activates: quandary checker: The Quandary taint analysis detects
-           flows of values between sources and sinks, except if the value
-           went through a "sanitizer". In addition to some defaults, users
-           can specify their own sources, sinks, and sanitizers functions.
-           
-           DEPRECATED: Taint analysis is now supported by the Pulse checker
-           and Quandary will be removed in the next release.
-            (Conversely: --no-quandary)
-           See also infer-analyze(1).
-
-       --quandary-endpoints json
-           Specify endpoint classes for Quandary
-           See also infer-analyze(1).
-
-       --quandary-only
-           Activates: Enable quandary and disable all other checkers
-           (Conversely: --no-quandary-only)
-           See also infer-analyze(1).
-
-       --quandary-sanitizers json
-           Specify custom sanitizers for Quandary
-           See also infer-analyze(1).
-
-       --quandary-sinks json
-           Specify custom sinks for Quandary
-           See also infer-analyze(1).
-
-       --quandary-sources json
-           Specify custom sources for Quandary
-           See also infer-analyze(1).
-
        --quiet,-q
            Activates: Do not print anything on standard output. (Conversely:
            --no-quiet | -Q)
@@ -1911,6 +1857,11 @@ OPTIONS
            only available for the Hack frontend for now. (Conversely:
            --no-reactive-capture)
            See also infer-analyze(1).
+
+       --no-read-java-modules
+           Deactivates: Read java modules file using jimage. (Conversely:
+           --read-java-modules)
+           See also infer-capture(1).
 
        --replay-analysis-schedule
            Activates: Replay the analysis schedule stored in
@@ -2236,6 +2187,13 @@ OPTIONS
            variables
                 (Conversely: --no-struct-as-cpp-class)
            See also infer-capture(1).
+
+       --no-suppressions
+           Deactivates: Suppress infer issues on source lines matching the
+           @infer-disable ISSUE_TYPE1, ISSUE_TYPE2, ... and
+           @infer-disable-every ISSUE_TYPE1, ISSUE_TYPE2, ... keywords.
+           (Conversely: --suppressions)
+           See also infer-report(1).
 
        --tenv-json file
            Path to TEnv json file

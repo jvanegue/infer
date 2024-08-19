@@ -396,7 +396,7 @@ let bad_return =
 
 
 let block_parameter_not_null_checked =
-  register ~category:NoCategory ~id:"BLOCK_PARAMETER_NOT_NULL_CHECKED" Warning
+  register ~category:NullPointerDereference ~id:"BLOCK_PARAMETER_NOT_NULL_CHECKED" Warning
     ParameterNotNullChecked
     ~user_documentation:[%blob "./documentation/issues/BLOCK_PARAMETER_NOT_NULL_CHECKED.md"]
 
@@ -482,13 +482,20 @@ let checkers_fragment_retain_view =
     ~user_documentation:[%blob "./documentation/issues/CHECKERS_FRAGMENT_RETAINS_VIEW.md"]
 
 
-let checkers_printf_args =
-  register ~category:NoCategory ~id:"CHECKERS_PRINTF_ARGS" Error PrintfArgs
-    ~user_documentation:[%blob "./documentation/issues/CHECKERS_PRINTF_ARGS.md"]
-
-
 let class_cast_exception =
   register_hidden ~enabled:false ~id:"CLASS_CAST_EXCEPTION" Error Biabduction
+
+
+let compared_to_null_and_dereferenced =
+  register ~enabled:false ~category:NullPointerDereference ~id:"COMPARED_TO_NULL_AND_DEREFERENCED"
+    Error Pulse
+    ~user_documentation:
+      "A pointer that has both been compared to null, whcich suggests that it could be null, but \
+       has also been dereferenced without a null check."
+
+
+let complexity_increase ~kind ~is_on_ui_thread =
+  register_cost ~kind ~is_on_ui_thread "%s_COMPLEXITY_INCREASE"
 
 
 let condition_always_false =
@@ -533,18 +540,6 @@ let cxx_ref_captured_in_block =
     ~user_documentation:[%blob "./documentation/issues/CXX_REF_CAPTURED_IN_BLOCK.md"]
 
 
-let create_intent_from_uri =
-  register ~category:NoCategory ~id:"CREATE_INTENT_FROM_URI" Error Quandary
-    ~user_documentation:
-      "Create an intent/start a component using a (possibly user-controlled) URI. may or may not \
-       be an issue depending on where the URI comes from."
-
-
-let cross_site_scripting =
-  register ~category:NoCategory ~id:"CROSS_SITE_SCRIPTING" Error Quandary
-    ~user_documentation:"Untrusted data flows into HTML; XSS risk."
-
-
 let dangling_pointer_dereference =
   register ~category:NoCategory ~enabled:false ~id:"DANGLING_POINTER_DEREFERENCE" Error
     Biabduction (* TODO *)
@@ -570,16 +565,11 @@ let divide_by_zero =
     ~user_documentation:""
 
 
-let do_not_report = register_hidden ~id:"DO_NOT_REPORT" Error Quandary
+let do_not_report = register_hidden ~id:"DO_NOT_REPORT" Error SIOF
 
 let empty_vector_access =
   register ~category:NoCategory ~id:"EMPTY_VECTOR_ACCESS" Error Biabduction
     ~user_documentation:[%blob "./documentation/issues/EMPTY_VECTOR_ACCESS.md"]
-
-
-let exposed_insecure_intent_handling =
-  register ~category:NoCategory ~id:"EXPOSED_INSECURE_INTENT_HANDLING" Error Quandary
-    ~user_documentation:"Undocumented."
 
 
 let expensive_cost_call ~kind = register_cost ~enabled:false "EXPENSIVE_%s" ~kind
@@ -649,11 +639,6 @@ let inherently_dangerous_function =
   register_hidden ~id:"INHERENTLY_DANGEROUS_FUNCTION" Warning Biabduction
 
 
-let insecure_intent_handling =
-  register ~category:NoCategory ~id:"INSECURE_INTENT_HANDLING" Error Quandary
-    ~user_documentation:"Undocumented."
-
-
 let integer_overflow_l1 =
   register ~category:NoCategory ~id:"INTEGER_OVERFLOW_L1" Error BufferOverrunChecker
     ~user_documentation:[%blob "./documentation/issues/INTEGER_OVERFLOW.md"]
@@ -696,11 +681,6 @@ let ipc_on_ui_thread =
     ~user_documentation:"A blocking `Binder` IPC call occurs on the UI thread."
 
 
-let javascript_injection =
-  register ~category:NoCategory ~id:"JAVASCRIPT_INJECTION" Error Quandary
-    ~user_documentation:"Untrusted data flows into JavaScript."
-
-
 let lab_resource_leak =
   register ~category:NoCategory ~id:"LAB_RESOURCE_LEAK" Error ResourceLeakLabExercise
     ~user_documentation:"Toy issue."
@@ -724,11 +704,6 @@ let lockless_violation =
     ~user_documentation:[%blob "./documentation/issues/LOCKLESS_VIOLATION.md"]
 
 
-let logging_private_data =
-  register ~category:NoCategory ~id:"LOGGING_PRIVATE_DATA" Error Quandary
-    ~user_documentation:"Undocumented."
-
-
 let expensive_loop_invariant_call =
   register ~category:NoCategory ~id:"EXPENSIVE_LOOP_INVARIANT_CALL" Error LoopHoisting
     ~user_documentation:[%blob "./documentation/issues/EXPENSIVE_LOOP_INVARIANT_CALL.md"]
@@ -736,7 +711,7 @@ let expensive_loop_invariant_call =
 
 let memory_leak =
   register ~enabled:false ~category:ResourceLeak ~id:"BIABDUCTION_MEMORY_LEAK" ~hum:"Memory Leak"
-    Error Biabduction ~user_documentation:"See [MEMORY_LEAK](#memory_leak)."
+    Error Biabduction ~user_documentation:"See [MEMORY_LEAK_C](#memory_leak_c)."
 
 
 let missing_fld = register_hidden ~id:"Missing_fld" ~hum:"Missing Field" Error Biabduction
@@ -890,6 +865,11 @@ let pulse_unawaited_awaitable =
     ~user_documentation:[%blob "./documentation/issues/PULSE_UNAWAITED_AWAITABLE.md"]
 
 
+let pulse_unfinished_builder =
+  register ~enabled:false ~category:ResourceLeak ~id:"PULSE_UNFINISHED_BUILDER" Error Pulse
+    ~hum:"Unfinished Builder" ~user_documentation:"See [RESOURCE_LEAK](#resource_leak)"
+
+
 let pulse_uninitialized_const =
   register ~category:RuntimeException ~enabled:false ~id:"PULSE_UNINITIALIZED_CONST" Error Pulse
     ~hum:"Uninitialized Const"
@@ -903,11 +883,6 @@ let pure_function =
 let pulse_infinite =
   register ~category:NoCategory ~enabled:true ~id:"PULSE_INFINITE" Error Pulse
     ~user_documentation:"None yet"
-
-let quandary_taint_error =
-  register ~category:NoCategory ~hum:"Taint Error" ~id:"QUANDARY_TAINT_ERROR" Error Quandary
-    ~user_documentation:"Generic taint error when nothing else fits."
-
 
 let readonly_shared_ptr_param =
   register ~category:PerfRegression ~id:"PULSE_READONLY_SHARED_PTR_PARAM" Error Pulse
@@ -930,11 +905,6 @@ let data_flow_to_sink =
   register ~enabled:false ~hum:"Data Flow to Sink" ~category:SensitiveDataFlow
     ~id:"DATA_FLOW_TO_SINK" Advice Pulse
     ~user_documentation:"A flow of data was detected to a sink."
-
-
-let datalog_fact =
-  register ~category:NoCategory ~id:"DATALOG_FACT" Info Datalog
-    ~user_documentation:"Datalog fact used as input for a datalog solver."
 
 
 let regex_op_on_ui_thread =
@@ -963,27 +933,12 @@ let scope_leakage =
     ~user_documentation:[%blob "./documentation/issues/SCOPE_LEAKAGE.md"]
 
 
+let self_in_block_passed_to_init =
+  register ~category:ResourceLeak ~enabled:true ~id:"SELF_IN_BLOCK_PASSED_TO_INIT" Error SelfInBlock
+    ~user_documentation:[%blob "./documentation/issues/SELF_IN_BLOCK_PASSED_TO_INIT.md"]
+
+
 let skip_function = register_hidden ~enabled:false ~id:"SKIP_FUNCTION" Info Biabduction
-
-let shell_injection =
-  register ~category:NoCategory ~id:"SHELL_INJECTION" Error Quandary
-    ~user_documentation:"Environment variable or file data flowing to shell."
-
-
-let shell_injection_risk =
-  register ~category:NoCategory ~id:"SHELL_INJECTION_RISK" Error Quandary
-    ~user_documentation:"Code injection if the caller of the endpoint doesn't sanitize on its end."
-
-
-let sql_injection =
-  register ~category:NoCategory ~id:"SQL_INJECTION" Error Quandary
-    ~user_documentation:"Untrusted and unescaped data flows to SQL."
-
-
-let sql_injection_risk =
-  register ~category:NoCategory ~id:"SQL_INJECTION_RISK" Error Quandary
-    ~user_documentation:"Untrusted and unescaped data flows to SQL."
-
 
 let stack_variable_address_escape =
   register ~category:MemoryError ~id:"STACK_VARIABLE_ADDRESS_ESCAPE" Error Pulse
@@ -996,7 +951,7 @@ let starvation =
 
 
 let static_initialization_order_fiasco =
-  register ~category:NoCategory ~id:"STATIC_INITIALIZATION_ORDER_FIASCO" Error SIOF
+  register ~category:MemoryError ~id:"STATIC_INITIALIZATION_ORDER_FIASCO" Error SIOF
     ~user_documentation:[%blob "./documentation/issues/STATIC_INITIALIZATION_ORDER_FIASCO.md"]
 
 
@@ -1018,10 +973,6 @@ let symexec_memory_error =
 let thread_safety_violation =
   register Warning ~category:Concurrency ~id:"THREAD_SAFETY_VIOLATION" RacerD
     ~user_documentation:[%blob "./documentation/issues/THREAD_SAFETY_VIOLATION.md"]
-
-
-let complexity_increase ~kind ~is_on_ui_thread =
-  register_cost ~kind ~is_on_ui_thread "%s_COMPLEXITY_INCREASE"
 
 
 let topl_error =
@@ -1111,66 +1062,6 @@ let use_after_lifetime =
     ~user_documentation:[%blob "./documentation/issues/USE_AFTER_LIFETIME.md"]
 
 
-let user_controlled_sql_risk =
-  register ~category:NoCategory ~id:"USER_CONTROLLED_SQL_RISK" Error Quandary
-    ~user_documentation:"Untrusted data flows to SQL (no injection risk)."
-
-
-let untrusted_buffer_access =
-  register ~category:NoCategory ~enabled:false ~id:"UNTRUSTED_BUFFER_ACCESS" Error Quandary
-    ~user_documentation:"Untrusted data of any kind flowing to buffer."
-
-
-let untrusted_deserialization =
-  register ~category:NoCategory ~id:"UNTRUSTED_DESERIALIZATION" Error Quandary
-    ~user_documentation:"User-controlled deserialization."
-
-
-let untrusted_deserialization_risk =
-  register ~category:NoCategory ~id:"UNTRUSTED_DESERIALIZATION_RISK" Error Quandary
-    ~user_documentation:"User-controlled deserialization"
-
-
-let untrusted_environment_change_risk =
-  register ~category:NoCategory ~id:"UNTRUSTED_ENVIRONMENT_CHANGE_RISK" Error Quandary
-    ~user_documentation:"User-controlled environment mutation."
-
-
-let untrusted_file =
-  register ~category:NoCategory ~id:"UNTRUSTED_FILE" Error Quandary
-    ~user_documentation:
-      "User-controlled file creation; may be vulnerable to path traversal and more."
-
-
-let untrusted_file_risk =
-  register ~category:NoCategory ~id:"UNTRUSTED_FILE_RISK" Error Quandary
-    ~user_documentation:
-      "User-controlled file creation; may be vulnerable to path traversal and more."
-
-
-let untrusted_heap_allocation =
-  register ~category:NoCategory ~enabled:false ~id:"UNTRUSTED_HEAP_ALLOCATION" Error Quandary
-    ~user_documentation:
-      "Untrusted data of any kind flowing to heap allocation. this can cause crashes or DOS."
-
-
-let untrusted_intent_creation =
-  register ~category:NoCategory ~id:"UNTRUSTED_INTENT_CREATION" Error Quandary
-    ~user_documentation:"Creating an Intent from user-controlled data."
-
-
-let untrusted_url_risk =
-  register ~category:NoCategory ~id:"UNTRUSTED_URL_RISK" Error Quandary
-    ~user_documentation:"Untrusted flag, environment variable, or file data flowing to URL."
-
-
-let untrusted_variable_length_array =
-  register ~category:NoCategory ~id:"UNTRUSTED_VARIABLE_LENGTH_ARRAY" Error Quandary
-    ~user_documentation:
-      "Untrusted data of any kind flowing to stack buffer allocation. Trying to allocate a stack \
-       buffer that's too large will cause a stack overflow."
-
-
 let vector_invalidation =
   register_with_latent ~category:MemoryError ~id:"VECTOR_INVALIDATION" Error Pulse
     ~user_documentation:[%blob "./documentation/issues/VECTOR_INVALIDATION.md"]
@@ -1184,6 +1075,11 @@ let pulse_reference_stability =
 let weak_self_in_noescape_block =
   register ~category:NoCategory ~id:"WEAK_SELF_IN_NO_ESCAPE_BLOCK" Error SelfInBlock
     ~user_documentation:[%blob "./documentation/issues/WEAK_SELF_IN_NO_ESCAPE_BLOCK.md"]
+
+
+let lineage_flow =
+  register ~category:SensitiveDataFlow ~id:"LINEAGE_FLOW" Error Lineage ~hum:"Lineage Flow"
+    ~user_documentation:[%blob "./documentation/issues/LINEAGE_FLOW.md"]
 
 
 let wrong_argument_number =

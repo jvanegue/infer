@@ -65,7 +65,7 @@ void* malloc_via_ptr(size_t size) {
 
 void free_via_ptr(void* x) { free_func(x); }
 
-void malloc_ptr_leak_bad_FN() { int* p = (int*)malloc_via_ptr(sizeof(int)); }
+void malloc_ptr_leak_bad() { int* p = (int*)malloc_via_ptr(sizeof(int)); }
 
 void malloc_ptr_no_check_leak_bad() {
   int* p = (int*)malloc_via_ptr(sizeof(int));
@@ -233,13 +233,9 @@ void alloc_then_free_all_in_array_ok() {
   free_all_in_array(array);
 }
 
-void allocate_42_in_array(int* array[]) {
-  array[42] = malloc(sizeof(int));
-}
+void allocate_42_in_array(int* array[]) { array[42] = malloc(sizeof(int)); }
 
-void free_42_in_array(int* array[]) {
-  free(array[42]);
-}
+void free_42_in_array(int* array[]) { free(array[42]); }
 
 void alloc_then_free_42_in_array_ok() {
   int* array[64];
@@ -247,13 +243,9 @@ void alloc_then_free_42_in_array_ok() {
   free_42_in_array(array);
 }
 
-void allocate_in_array(int* array[], int i) {
-  array[i] = malloc(sizeof(int));
-}
+void allocate_in_array(int* array[], int i) { array[i] = malloc(sizeof(int)); }
 
-void free_in_array(int* array[], int i) {
-  free(array[i]);
-}
+void free_in_array(int* array[], int i) { free(array[i]); }
 
 void alloc_then_free_fixed_index_ok() {
   int* array[64];

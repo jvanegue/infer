@@ -21,7 +21,8 @@ type 'a result = 'a AccessResult.t
 type aval = AbstractValue.t * ValueHistory.t
 
 (* we work on a disjunction of executions *)
-type 'a model_monad = model_data -> astate -> non_disj -> 'a execution result list * non_disj
+type 'a model_monad =
+  CallEvent.t * model_data -> astate -> non_disj -> 'a execution result list * non_disj
 
 and 'a execution =
   | ContinueProgram of 'a * astate
@@ -88,9 +89,13 @@ module Syntax = struct
     List.rev rev_res |> ret
 
 
-  let option_iter (o : 'a option) ~(f : 'a -> unit model_monad) : unit model_monad =
-    Option.value_map o ~default:(ret ()) ~f
+  let option_value_map o ~default ~f = match o with Some v -> f v | None -> ret default
 
+  let option_bind o ~f = option_value_map o ~default:None ~f
+
+  let option_exists o ~f = option_value_map o ~default:false ~f
+
+  let option_iter o ~f = option_value_map o ~default:() ~f
 
   (* TODO: this isn't quite as general as one might like, could put a functor in here *)
   let absvalue_set_fold (s : AbstractValue.Set.t) ~(init : 'accum)
@@ -112,7 +117,27 @@ module Syntax = struct
     ret ()
 
 
-  let get_data : model_data model_monad = fun data astate -> ret data data astate
+  let get_data : model_data model_monad = fun (desc, data) astate -> ret data (desc, data) astate
+
+  let get_desc : CallEvent.t model_monad = fun (desc, data) astate -> ret desc (desc, data) astate
+
+  let mk_event ?more (desc, data) =
+    let desc =
+      match more with
+      | None ->
+          desc
+      | Some more ->
+          CallEvent.Model (Format.asprintf "%a %s" CallEvent.pp_name_only desc more)
+    in
+    ValueHistory.Call
+      {f= desc; location= data.location; in_call= ValueHistory.epoch; timestamp= data.path.timestamp}
+
+
+  let get_event ?more () : ValueHistory.event model_monad =
+    let* data = get_data in
+    let* desc = get_desc in
+    ret (mk_event ?more (desc, data))
+
 
   let ok x = Ok x
 
@@ -120,9 +145,22 @@ module Syntax = struct
 
   let ( >> ) f g x = f x |> g
 
-  let start_model (monad : unit model_monad) : model =
+  let lift_to_monad (model : model) : unit model_monad =
+   fun (_desc, data) astate non_disj ->
+    let execs, non_disj = model data astate non_disj in
+    ( List.map execs
+        ~f:
+          (PulseResult.map ~f:(function
+            | ExecutionDomain.ContinueProgram astate ->
+                ContinueProgram ((), astate)
+            | exec ->
+                Other exec ) )
+    , non_disj )
+
+
+  let start_model_ desc (monad : unit model_monad) : model =
    fun data astate non_disj ->
-    let execs, non_disj = monad data astate non_disj in
+    let execs, non_disj = monad (desc, data) astate non_disj in
     ( List.map execs
         ~f:
           (PulseResult.map ~f:(function
@@ -133,17 +171,12 @@ module Syntax = struct
     , non_disj )
 
 
-  let lift_to_monad (model : model) : unit model_monad =
-   fun data astate non_disj ->
-    let execs, non_disj = model data astate non_disj in
-    ( List.map execs
-        ~f:
-          (PulseResult.map ~f:(function
-            | ExecutionDomain.ContinueProgram astate ->
-                ContinueProgram ((), astate)
-            | exec ->
-                Other exec ) )
-    , non_disj )
+  let start_named_model desc monad data astate non_disj =
+    start_model_ (Model desc) monad data astate non_disj
+
+
+  let start_model monad data astate non_disj =
+    start_model_ (ModelName data.callee_procname) monad data astate non_disj
 
 
   let disjuncts (list : 'a model_monad list) : 'a model_monad =
@@ -185,6 +218,12 @@ module Syntax = struct
     ret a data astate
 
 
+  let add_model_call hist =
+    let* {path} = get_data in
+    let* event = get_event () in
+    ret (Hist.add_event path event hist)
+
+
   let as_constant_q (v, _) : Q.t option model_monad =
    fun data astate ->
     let phi = astate.path_condition in
@@ -209,10 +248,18 @@ module Syntax = struct
     ret (Formula.as_constant_string phi v) data astate
 
 
-  let aval_of_int hist i : aval model_monad =
-   fun data astate ->
+  let mk_int ?hist i : aval model_monad =
+   fun (desc, data) astate ->
     let astate, v = PulseArithmetic.absval_of_int astate (IntLit.of_int i) in
-    ret (v, hist) data astate
+    let hist =
+      match hist with
+      | Some hist ->
+          hist
+      | None ->
+          let event = mk_event (desc, data) in
+          Hist.single_event data.path event
+    in
+    ret (v, hist) (desc, data) astate
 
 
   let get_known_fields (v, _) =
@@ -249,15 +296,14 @@ module Syntax = struct
         ret aval
 
 
-  let eval_access ?desc access_mode aval access : aval model_monad =
+  let eval_access access_mode aval access : aval model_monad =
     let* {path; location} = get_data in
     let* addr, hist =
       PulseOperations.eval_access path access_mode location aval access
       >> sat |> exec_partial_operation
     in
-    let hist =
-      Option.value_map desc ~default:hist ~f:(fun desc -> Hist.add_call path location desc hist)
-    in
+    let* event = get_event () in
+    let hist = Hist.add_event path event hist in
     ret (addr, hist)
 
 
@@ -304,21 +350,20 @@ module Syntax = struct
 
 
   let is_dict_non_alias formals addr : bool model_monad =
-    let opt_bind ~default opt_x f =
-      let* opt_x in
-      match opt_x with None -> ret default | Some x -> f x
-    in
     let rec get_field_typ typ accesses : Typ.name option model_monad =
       match (accesses : DecompilerExpr.access list) with
       | FieldAccess fld :: Dereference :: accesses ->
-          let ( let** ) opt_x f = opt_bind ~default:None opt_x f in
-          let** {Struct.typ} = resolve_field_info typ fld in
-          let** typ = Typ.name (Typ.strip_ptr typ) |> ret in
-          get_field_typ typ accesses
+          let* field_info = resolve_field_info typ fld in
+          option_bind field_info ~f:(fun {Struct.typ} ->
+              option_bind (Typ.name (Typ.strip_ptr typ)) ~f:(fun typ -> get_field_typ typ accesses) )
       | [] ->
           ret (Some typ)
       | _ ->
           ret None
+    in
+    let is_field_dict_typ base_typ accesses =
+      let* typ = get_field_typ base_typ accesses in
+      ret (Option.exists typ ~f:(Typ.Name.equal TextualSil.hack_dict_type_name))
     in
     let* decompiled = find_decompiler_expr addr in
     match (decompiled : DecompilerExpr.t) with
@@ -327,10 +372,11 @@ module Syntax = struct
          e.g. the access of [x->f->g] is [\[*; g; *; f; *\]]. *)
       match List.rev rev_accesses with
       | Dereference :: accesses ->
-          let ( let** ) opt_x f = opt_bind ~default:false opt_x f in
-          let** base_typ = get_pvar_deref_typ formals pvar in
-          let** typ = get_field_typ base_typ accesses in
-          ret (Typ.Name.equal typ TextualSil.hack_dict_type_name)
+          let* base_typ = get_pvar_deref_typ formals pvar in
+          option_exists base_typ ~f:(fun base_typ -> is_field_dict_typ base_typ accesses)
+      | accesses when Pvar.is_static_companion pvar ->
+          let base_typ = Typ.HackClass (HackClassName.make (Pvar.to_string pvar)) in
+          is_field_dict_typ base_typ accesses
       | _ ->
           ret false )
     | _ ->
@@ -348,6 +394,14 @@ module Syntax = struct
 
   let remove_dict_contain_const_keys (addr, _) : unit model_monad =
     PulseOperations.remove_dict_contain_const_keys addr |> exec_command
+
+
+  let is_hack_sinit_called (addr, _) : bool model_monad =
+    AddressAttributes.is_hack_sinit_called addr |> exec_pure_operation
+
+
+  let set_hack_sinit_called (addr, _) : unit model_monad =
+    AddressAttributes.add_one addr HackSinitCalled |> exec_command
 
 
   let and_dynamic_type_is (v, _) t : unit model_monad =
@@ -385,7 +439,7 @@ module Syntax = struct
 
 
   let add_static_type typ_name (addr, _) : unit model_monad =
-   fun ({analysis_data= {tenv}; location} as data) astate ->
+   fun ((_, {analysis_data= {tenv}; location}) as data) astate ->
     let astate =
       AbductiveDomain.AddressAttributes.add_static_type tenv typ_name addr location astate
     in
@@ -397,15 +451,26 @@ module Syntax = struct
 
 
   let tenv_resolve_field_info typ_name field_name : Struct.field_info option model_monad =
-   fun ({analysis_data= {tenv}} as data) astate ->
+   fun ((_desc, {analysis_data= {tenv}}) as data) astate ->
     let info = Tenv.resolve_field_info tenv typ_name field_name in
     ret info data astate
 
 
   let tenv_resolve_fieldname typ_name name : Fieldname.t option model_monad =
-   fun ({analysis_data= {tenv}} as data) astate ->
+   fun ((_desc, {analysis_data= {tenv}}) as data) astate ->
     let field_name = Tenv.resolve_fieldname tenv typ_name name in
     ret field_name data astate
+
+
+  let tenv_resolve_method typ_name proc_name : Procname.t option model_monad =
+   fun ((_desc, {analysis_data= {tenv}}) as data) astate ->
+    (* Remark: this is a simplified resolution that will work well for closure resolution,
+       but does not implement all the steps proposed for regular virtual calls in Pulse.ml *)
+    let method_exists proc_name methods = List.mem ~equal:Procname.equal methods proc_name in
+    let opt_info, _ = Tenv.resolve_method ~method_exists tenv typ_name proc_name in
+    (* warning: we skipped missed capture informations here *)
+    let opt_resolved_proc_name = Option.map opt_info ~f:Tenv.MethodInfo.get_procname in
+    ret opt_resolved_proc_name data astate
 
 
   let eval_read exp : aval model_monad =
@@ -428,20 +493,16 @@ module Syntax = struct
     ret (v, hist)
 
 
-  let eval_to_value_origin exp : ValueOrigin.t model_monad =
-    let* {path; location} = get_data in
-    PulseOperations.eval_to_value_origin path Read location exp |> exec_partial_operation
-
-
   let allocation attr (addr, _) : unit model_monad =
     let* {location} = get_data in
     PulseOperations.allocate attr location addr |> exec_command
 
 
-  let mk_fresh ~model_desc ?more () : aval model_monad =
-    let* {path; location} = get_data in
+  let mk_fresh ?more () : aval model_monad =
+    let* {path} = get_data in
     let addr = AbstractValue.mk_fresh () in
-    let hist = Hist.single_call path location model_desc ?more in
+    let* event = get_event ?more () in
+    let hist = Hist.single_event path event in
     ret (addr, hist)
 
 
@@ -483,12 +544,30 @@ module Syntax = struct
     |> lift_model
 
 
+  let is_hack_builder_in_config tenv hacktypname =
+    L.d_printfln "typname = %a" HackClassName.pp hacktypname ;
+    (* TODO: deal with namespaces properly! *)
+    List.exists Config.hack_builder_patterns ~f:(fun (builder_class_name, _) ->
+        let builder_class_name = Typ.HackClass (HackClassName.make builder_class_name) in
+        PatternMatch.is_subtype tenv (HackClass hacktypname) builder_class_name )
+
+
   let new_ type_name_exp =
+    let* {analysis_data= {tenv}} = get_data in
     let* new_obj = lift_to_monad_and_get_result (internal_new_ type_name_exp) in
     match type_name_exp with
     | Exp.Sizeof {typ} ->
         (* TODO: pass a nullable parameter to and_dynamic_type_is *)
         let* () = and_dynamic_type_is new_obj typ in
+        let* () =
+          match Typ.name typ with
+          | Some (HackClass hacktypname) when is_hack_builder_in_config tenv hacktypname ->
+              let* () = allocation (Attribute.HackBuilderResource hacktypname) new_obj in
+              AddressAttributes.set_hack_builder (fst new_obj) Attribute.Builder.NonDiscardable
+              |> exec_command
+          | _ ->
+              ret ()
+        in
         ret new_obj
     | _ ->
         unreachable
@@ -510,6 +589,10 @@ module Syntax = struct
           write_deref_field ~ref:new_obj field ~obj )
     in
     ret new_obj
+
+
+  let remove_hack_builder_attributes bv : unit model_monad =
+    AddressAttributes.remove_hack_builder (fst bv) |> exec_command
 
 
   let deep_copy ?depth_max source : aval model_monad =
@@ -589,6 +672,10 @@ module Syntax = struct
 
   let prune_gt arg1 arg2 = prune_lt arg2 arg1
 
+  let prune_gt_int arg1 i : unit model_monad =
+    prune_binop Gt (aval_operand arg1) (ConstOperand (Cint i))
+
+
   let prune_le arg1 arg2 = prune_ge arg2 arg1
 
   let prune_eq arg1 arg2 : unit model_monad = prune_binop Eq (aval_operand arg1) (aval_operand arg2)
@@ -607,34 +694,84 @@ module Syntax = struct
     | Some {Formula.typ= {Typ.desc= Tstruct type_name}} -> (
       match (List.find cases ~f:(fun case -> fst case |> Typ.Name.equal type_name), default) with
       | Some (_, case_fun), _ ->
-          Logging.d_printfln
-            "[ocaml model] dynamic_dispatch: executing case for type %a on value %a" Typ.Name.pp
-            type_name AbstractValue.pp (fst aval) ;
+          L.d_printfln "[ocaml model] dynamic_dispatch: executing case for type %a on value %a"
+            Typ.Name.pp type_name AbstractValue.pp (fst aval) ;
           case_fun ()
       | None, Some default ->
           default ()
       | None, None ->
-          Logging.d_printfln "[ocaml model] dynamic_dispatch: no case for type %a" Typ.Name.pp
-            type_name ;
+          L.d_printfln "[ocaml model] dynamic_dispatch: no case for type %a" Typ.Name.pp type_name ;
           unreachable )
     | _ ->
-        Logging.d_printfln "[ocaml model] No dynamic type found for value %a!" AbstractValue.pp
-          (fst aval) ;
+        L.d_printfln "[ocaml model] No dynamic type found for value %a!" AbstractValue.pp (fst aval) ;
         Option.value_map default ~default:unreachable ~f:(fun f -> f ())
 
 
-  let dispatch_call ret pname actuals func_args : unit model_monad =
+  let dispatch_call ret pname func_args : unit model_monad =
     lift_to_monad
     @@ fun {analysis_data; dispatch_call_eval_args; path; location} astate non_disj ->
-    dispatch_call_eval_args analysis_data path ret (Const (Cfun pname)) actuals func_args location
+    dispatch_call_eval_args analysis_data path ret (Const (Cfun pname)) func_args location
       CallFlags.default astate non_disj (Some pname)
+
+
+  let register_class_object_for_value (aval, _) (class_object, _) : unit model_monad =
+    let f =
+      Formula.Procname
+        (Procname.make_hack ~class_name:None ~function_name:"hack_get_static_class" ~arity:(Some 1))
+    in
+    PulseArithmetic.and_equal (AbstractValueOperand class_object)
+      (FunctionApplicationOperand {f; actuals= [aval]})
+    |> exec_partial_command
+
+
+  let apply_hack_closure (closure : aval) closure_args : aval model_monad =
+    let typ = Typ.mk_ptr (Typ.mk_struct TextualSil.hack_mixed_type_name) in
+    let args = closure :: closure_args in
+    let unresolved_pname =
+      Procname.make_hack ~class_name:(Some HackClassName.wildcard) ~function_name:"__invoke"
+        ~arity:(Some (List.length args))
+    in
+    let* opt_dynamic_type_data = get_dynamic_type ~ask_specialization:true closure in
+    match opt_dynamic_type_data with
+    | Some {Formula.typ= {Typ.desc= Tstruct type_name}} -> (
+        let* opt_resolved_pname = tenv_resolve_method type_name unresolved_pname in
+        match opt_resolved_pname with
+        | None ->
+            L.d_printfln "[ocaml model] Closure dynamic type is %a but no implementation was found!"
+              Typ.Name.pp type_name ;
+            let* unknown_res = mk_fresh () in
+            ret unknown_res
+        | Some resolved_pname ->
+            L.d_printfln "[ocaml model] Closure resolved to a call to %a" Procname.pp resolved_pname ;
+            let ret_id = Ident.create_none () in
+            let call_args =
+              List.mapi args ~f:(fun i arg : ValueOrigin.t ProcnameDispatcher.Call.FuncArg.t ->
+                  let pvar =
+                    Pvar.mk (Mangled.from_string (Printf.sprintf "CLOSURE_ARG%d" i)) resolved_pname
+                  in
+                  let exp = Exp.Lvar pvar in
+                  let arg_payload = ValueOrigin.OnStack {var= Var.of_pvar pvar; addr_hist= arg} in
+                  {exp; typ; arg_payload} )
+            in
+            let* () = dispatch_call (ret_id, typ) resolved_pname call_args in
+            let* res = eval_read (Exp.Var ret_id) in
+            L.d_printfln "[ocaml model] Closure return value is %a." AbstractValue.pp (fst res) ;
+            ret res )
+    | _ ->
+        L.d_printfln "[ocaml model] Closure dynamic type is unknown." ;
+        let* unknown_res = mk_fresh () in
+        ret unknown_res
 
 
   module Basic = struct
     (* See internal_new_. We do some crafty unboxing to make the external API nicer *)
-    let alloc_not_null ?desc allocator size ~initialize : unit model_monad =
+    let alloc_not_null allocator size ~initialize : unit model_monad =
+      let* desc = get_desc in
       let model_ model_data astate =
-        let<++> astate = Basic.alloc_not_null ?desc allocator size ~initialize model_data astate in
+        let<++> astate =
+          Basic.alloc_not_null ~desc:(CallEvent.to_name_only desc) allocator size ~initialize
+            model_data astate
+        in
         astate
       in
       lift_to_monad (lift_model model_)
@@ -642,7 +779,7 @@ module Syntax = struct
 end
 
 let unsafe_to_astate_transformer (monad : 'a model_monad) :
-    model_data -> astate -> ('a * astate) sat_unsat_t =
+    CallEvent.t * model_data -> astate -> ('a * astate) sat_unsat_t =
  fun data astate ->
   (* warning: we currently ignore the non-disjunctive state *)
   match monad data astate NonDisjDomain.bottom |> fst with

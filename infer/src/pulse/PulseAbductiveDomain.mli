@@ -91,7 +91,7 @@ module Stack : sig
 
   val find_opt : Var.t -> t -> PulseBaseStack.value option
 
-  val eval : ValueHistory.t -> Var.t -> t -> t * (AbstractValue.t * ValueHistory.t)
+  val eval : ValueHistory.t -> Var.t -> t -> t * ValueOrigin.t
   (** return the value of the variable in the stack or create a fresh one if needed *)
 
   val mem : Var.t -> t -> bool
@@ -189,6 +189,14 @@ module AddressAttributes : sig
 
   val hack_async_await : AbstractValue.t -> t -> t
 
+  val remove_hack_builder : AbstractValue.t -> t -> t [@@warning "-unused-value-declaration"]
+
+  val set_hack_builder : AbstractValue.t -> Attribute.Builder.t -> t -> t
+  [@@warning "-unused-value-declaration"]
+
+  val get_hack_builder : AbstractValue.t -> t -> Attribute.Builder.t option
+  [@@warning "-unused-value-declaration"]
+
   val is_java_resource_released : AbstractValue.t -> t -> bool
 
   val csharp_resource_release : AbstractValue.t -> t -> t
@@ -212,6 +220,8 @@ module AddressAttributes : sig
   val remove_allocation_attr : AbstractValue.t -> t -> t
 
   val remove_taint_attrs : AbstractValue.t -> t -> t
+
+  val get_allocation_attr : AbstractValue.t -> t -> (Attribute.allocator * Trace.t) option
 
   val get_static_type : AbstractValue.t -> t -> Typ.Name.t option
 
@@ -265,6 +275,8 @@ module AddressAttributes : sig
     AbstractValue.t -> t -> (Var.t * Location.t * ValueHistory.t) option
 
   val has_unknown_effect : AbstractValue.t -> t -> bool
+
+  val is_hack_sinit_called : AbstractValue.t -> t -> bool
 end
 
 val should_havoc_if_unknown : unit -> [> `ShouldHavoc | `ShouldOnlyHavocResources]
@@ -375,6 +387,7 @@ module Summary : sig
     -> ( summary
        , [> `JavaResourceLeak of summary * t * JavaClassName.t * Trace.t * Location.t
          | `HackUnawaitedAwaitable of summary * t * Trace.t * Location.t
+         | `HackUnfinishedBuilder of summary * t * Trace.t * Location.t * HackClassName.t
          | `CSharpResourceLeak of summary * t * CSharpClassName.t * Trace.t * Location.t
          | `MemoryLeak of summary * t * Attribute.allocator * Trace.t * Location.t
          | `PotentialInvalidAccessSummary of
@@ -425,6 +438,9 @@ module Summary : sig
 
   val get_transitive_info : t -> TransitiveInfo.t
 end
+
+val add_event_to_value_origin :
+  PathContext.t -> Location.t -> ValueHistory.event -> ValueOrigin.t -> t -> t
 
 val transfer_transitive_info_to_caller : Procname.t -> Location.t -> Summary.t -> t -> t
 

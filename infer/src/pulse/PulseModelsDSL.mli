@@ -64,11 +64,14 @@ module Syntax : sig
   val dispatch_call :
        Ident.t * Typ.t
     -> Procname.t
-    -> (Exp.t * Typ.t) list
     -> ValueOrigin.t ProcnameDispatcher.Call.FuncArg.t list
     -> unit model_monad
 
+  val apply_hack_closure : aval -> aval list -> aval model_monad
+
   val get_data : PulseModelsImport.model_data model_monad
+
+  val add_model_call : ValueHistory.t -> ValueHistory.t model_monad
 
   (** {2 Disjunctive reasoning} *)
 
@@ -76,6 +79,8 @@ module Syntax : sig
 
   val start_model : unit model_monad -> PulseModelsImport.model
   (** get a model from a disjunctive model_monad *)
+
+  val start_named_model : string -> unit model_monad -> PulseModelsImport.model
 
   val lift_to_monad : PulseModelsImport.model -> unit model_monad
   (** beware that the model may modify the [PulseModelsImport.model_data.ret] field *)
@@ -96,6 +101,10 @@ module Syntax : sig
 
   val remove_dict_contain_const_keys : aval -> unit model_monad
 
+  val is_hack_sinit_called : aval -> bool model_monad
+
+  val set_hack_sinit_called : aval -> unit model_monad
+
   val add_static_type : Typ.name -> aval -> unit model_monad
 
   val deep_copy : ?depth_max:int -> aval -> aval model_monad
@@ -112,9 +121,7 @@ module Syntax : sig
 
   val eval_string_concat : aval -> aval -> aval model_monad
 
-  val eval_to_value_origin : Exp.t -> ValueOrigin.t model_monad
-
-  val eval_access : ?desc:string -> access_mode -> aval -> Access.t -> aval model_monad
+  val eval_access : access_mode -> aval -> Access.t -> aval model_monad
 
   val eval_deref_access : access_mode -> aval -> Access.t -> aval model_monad
 
@@ -127,9 +134,12 @@ module Syntax : sig
   (** [constructor_dsl typ_name fields] builds a fresh object of type [typ_name] and initializes its
       fields using list [fields] *)
 
+  val remove_hack_builder_attributes : aval -> unit model_monad
+  [@@warning "-unused-value-declaration"]
+
   val get_const_string : aval -> string option model_monad
 
-  val mk_fresh : model_desc:string -> ?more:string -> unit -> aval model_monad
+  val mk_fresh : ?more:string -> unit -> aval model_monad
 
   val write_field : ref:aval -> obj:aval -> Fieldname.t -> unit model_monad
 
@@ -160,6 +170,8 @@ module Syntax : sig
 
   val prune_gt : aval -> aval -> unit model_monad
 
+  val prune_gt_int : aval -> IntLit.t -> unit model_monad
+
   val prune_ge : aval -> aval -> unit model_monad
 
   val prune_ge_int : aval -> IntLit.t -> unit model_monad
@@ -186,7 +198,7 @@ module Syntax : sig
 
   val as_constant_string : aval -> string option model_monad
 
-  val aval_of_int : ValueHistory.t -> int -> aval model_monad
+  val mk_int : ?hist:ValueHistory.t -> int -> aval model_monad
 
   (** {2 Tenv operations} *)
 
@@ -214,14 +226,19 @@ module Syntax : sig
 
   val exec_pure_operation : (astate -> 'a) -> 'a model_monad
 
+  val register_class_object_for_value : aval -> aval -> unit model_monad
+  (** This is used to make hack_get_static_class behave like a pure function *)
+
   module Basic : sig
-    val alloc_not_null :
-      ?desc:string -> Attribute.allocator -> Exp.t option -> initialize:bool -> unit model_monad
+    val alloc_not_null : Attribute.allocator -> Exp.t option -> initialize:bool -> unit model_monad
   end
 end
 
 val unsafe_to_astate_transformer :
-  'a model_monad -> PulseModelsImport.model_data -> astate -> ('a * astate) sat_unsat_t
+     'a model_monad
+  -> CallEvent.t * PulseModelsImport.model_data
+  -> astate
+  -> ('a * astate) sat_unsat_t
 (** warning: the transformation will fail if the result of the computation is not a single abstract
     state with no error and it ignores the non-disjunctive state. You should think twice before
     using it... *)

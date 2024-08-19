@@ -41,14 +41,6 @@ AC_CHECK_FILE([.git], [is_git_repo=yes], [is_git_repo=no])
 IS_GIT_REPO=$is_git_repo
 AC_SUBST([IS_GIT_REPO])
 
-AC_ARG_ENABLE(opam-pin-ocamlformat,
-  AS_HELP_STRING([--disable-opam-pin-ocamlformat],
-    [do not pin ocamlformat to the right version using opam and use the already-installed ocamlformat instead]),
-  ,
-  enable_opam_pin_ocamlformat=yes,)
-OPAM_PIN_OCAMLFORMAT=$enable_opam_pin_ocamlformat
-AC_SUBST([OPAM_PIN_OCAMLFORMAT])
-
 AC_ARG_VAR([PATH], [the shell's $PATH list of directories to search for executables])
 
 # to compile the facebook-clang-plugins
@@ -325,7 +317,7 @@ AS_IF([test "$OPAM" != "no"], [
     *) AC_MSG_ERROR([opam version $opam_version is not supported, please install opam version 2 instead]); break;;
   esac
   AC_MSG_CHECKING([current opam root])
-  OPAMROOT=$("$OPAM" config var root)
+  OPAMROOT=$("$OPAM" var root)
   AC_MSG_RESULT([$OPAMROOT])
   AC_MSG_CHECKING([current opam switch])
   OPAMSWITCH=$("$OPAM" switch show)
@@ -362,14 +354,17 @@ if test "x$enable_java_analyzers" = "xyes"; then
   AC_ARG_VAR([KOTLIN_HOME], [Root of a Kotlin installation.])
   AC_CHECK_TOOL([KOTLINC], [kotlinc], [no])
 
+  JAVAC_VERSION=`"$JAVAC" -version 2>&1`
+  AC_MSG_NOTICE([output of javac --version: $JAVAC_VERSION])
   AC_MSG_CHECKING([for Java major version])
   JAVA_MAJOR_VERSION=`"$JAVAC" -version 2>&1 | head -n 1 | cut -d ' ' -f 2`
-  AS_IF([test "x`echo $JAVA_MAJOR_VERSION | cut -d '.' -f 1`" = "x1"], [
+  JAVA_MAJOR_VERSION_FIRST_NUMBER=`echo $JAVA_MAJOR_VERSION | cut -d '.' -f 1`
+  AS_IF([test "x$JAVA_MAJOR_VERSION_FIRST_NUMBER" = "x1"], [
     # version 1.8.xx -> 8
-    JAVA_MAJOR_VERSION=`echo $JAVA_MAJOR_VERSION | cut -d '.' -f 2`
+    JAVA_MAJOR_VERSION=`echo $JAVA_MAJOR_VERSION | cut -d . -f 2`
   ], [
     # otherwise pick the first number as the major version
-    JAVA_MAJOR_VERSION=`echo $JAVA_MAJOR_VERSION | $AWK -F'[[.-]]' '{print $1}'`
+    JAVA_MAJOR_VERSION=`echo $JAVA_MAJOR_VERSION | tr - . | cut -d . -f 1`
   ])
   AC_MSG_RESULT([$JAVA_MAJOR_VERSION])
   AC_SUBST([JAVA_MAJOR_VERSION])
@@ -479,16 +474,6 @@ AS_IF([test "$SED" != "xno"], [
 ])
 AC_SUBST([GNU_SED])
 
-AC_ASSERT_PROG([diff], [$DIFF])
-AC_MSG_CHECKING([if diff supports --LTYPE-line-format=LFMT options])
-# there are several such options but just test one of them and hope for the best
-AS_IF([diff --unchanged-line-format=A /dev/null /dev/null 2>/dev/null], [
-  DIFF_CAN_FORMAT=yes
-], [
-  DIFF_CAN_FORMAT=no
-])
-AC_MSG_RESULT([$DIFF_CAN_FORMAT])
-AC_SUBST([DIFF_CAN_FORMAT])
 
 AC_CHECK_TOOL([BREW], [brew], [no])
 AC_CHECK_TOOL([INSTALL_NAME_TOOL], [install_name_tool], [no])

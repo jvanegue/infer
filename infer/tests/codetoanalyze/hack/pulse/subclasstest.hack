@@ -300,4 +300,68 @@ class Wrapper {
       $_ = $this->fail();
     }
   }
+
+  // two booleans should be equal here
+  public async function earlyInstanceOfOK(): Awaitable<void> {
+    $x = new F();
+    $b1 = $x is D;
+    $b2 = $x is E;
+    if ($b1 == $b2) { // always succeeds
+      return;
+    } else {
+      $_ = $this->fail();
+    }
+  }
+
+  // same but with below
+  // this is only an FP when we use v>0 in propagate_atom, rather than v != 0
+  // TODO: investigate
+  public async function earlyInstanceOf2OK_FP(mixed $x): Awaitable<void> {
+    if ($x is F) {
+      $b1 = $x is D;
+      $b2 = $x is E;
+      if ($b1 == $b2) { // always succeeds
+        return;
+      } else {
+        $_ = $this->fail();
+      }
+    } else {
+      return;
+    }
+  }
+
+  // this is an FP because either x is null, in which case both booleans are false
+  // or x is not null, in which case they're both true
+  // but we don't do case splitting in the solver :-(
+  // Note that we *could* do it in the model of boolean equality at the cost
+  // of some blowup
+  public async function earlyInstanceOf3_FP(mixed $x): Awaitable<void> {
+    if ($x is ?F) {
+      $b1 = $x is D;
+      $b2 = $x is E;
+      if ($b1 == $b2) { // always succeeds
+        return;
+      } else {
+        $_ = $this->fail();
+      }
+    } else {
+      return;
+    }
+  }
+
+  public function return_arraykey(): arraykey {
+    return 3;
+  }
+
+  public async function hhiAliasImportedOK(mixed $m): Awaitable<void> {
+    if ($m is \HH\ClassKind) {
+      // here we  should know that's just and alias to string underneath
+      if ($m is string) {
+        return;
+      } else {
+        $_ = $this->fail();
+      }
+    }
+    return;
+  }
 }

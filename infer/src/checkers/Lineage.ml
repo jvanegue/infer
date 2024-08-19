@@ -27,12 +27,40 @@ module PPNode = struct
     in
     let dummy_instr_index = -42 in
     (Procdesc.Node.dummy dummy_procname, dummy_instr_index)
+
+
+  let procname t = Procdesc.Node.get_proc_name (underlying_node t)
 end
 
 open LineageShape.StdModules
 module Shapes = LineageShape.Summary
 
 type shapes = Shapes.t option
+
+(** For easier nested-tuples: [a & b & c] is [(a, (b, c))] *)
+let ( & ) x y = (x, y)
+
+module F = struct
+  (* Pretty printing common utilities *)
+
+  let arg = Fmt.fmt "$arg%d"
+
+  let ret = Fmt.any "$ret"
+
+  let captured = Fmt.fmt "$cap%d"
+
+  let fun_ = Fmt.any "fun"
+
+  let self = Fmt.any "self"
+
+  let in_procname pp_v fmt (proc, v) = Fmt.pf fmt "%a.%a" Procname.pp_verbose proc pp_v v
+
+  let with_path pp_v fmt (v, path) = Fmt.pf fmt "%a%a" pp_v v FieldPath.pp path
+
+  let arg_path fmt = with_path arg fmt
+
+  let ret_path fmt path = with_path ret fmt (() & path)
+end
 
 module Local = struct
   module T = struct
@@ -50,13 +78,13 @@ module Local = struct
   let pp fmt local =
     match local with
     | ConstantAtom atom_name ->
-        Format.fprintf fmt "A(%s)" atom_name
+        Fmt.string fmt atom_name
     | ConstantInt digits ->
-        Format.fprintf fmt "I(%s)" digits
+        Fmt.string fmt digits
     | ConstantString s ->
-        Format.fprintf fmt "S(%s)" s
+        Fmt.string fmt s
     | Cell cell ->
-        Format.fprintf fmt "V(%a)" Cell.pp cell
+        Cell.pp fmt cell
 
 
   module Set = struct
@@ -98,21 +126,21 @@ module Vertex = struct
     | Local (local, node) ->
         Format.fprintf fmt "%a@@%a" Local.pp local PPNode.pp node
     | Argument (index, field_path) ->
-        Format.fprintf fmt "arg%d%a" index FieldPath.pp field_path
+        F.arg_path fmt (index & field_path)
     | Captured index ->
-        Format.fprintf fmt "cap%d" index
+        F.captured fmt index
     | Return field_path ->
-        Format.fprintf fmt "ret%a" FieldPath.pp field_path
+        F.ret_path fmt field_path
     | CapturedBy (proc_name, index) ->
-        Format.fprintf fmt "%a.cap%d" Procname.pp proc_name index
+        F.in_procname F.captured fmt (proc_name & index)
     | ArgumentOf (proc_name, index, field_path) ->
-        Format.fprintf fmt "%a.arg%d%a" Procname.pp proc_name index FieldPath.pp field_path
+        F.in_procname F.arg_path fmt (proc_name & index & field_path)
     | ReturnOf (proc_name, field_path) ->
-        Format.fprintf fmt "%a.ret%a" Procname.pp proc_name FieldPath.pp field_path
+        F.in_procname F.ret_path fmt (proc_name & field_path)
     | Function proc_name ->
-        Format.fprintf fmt "%a.fun" Procname.pp proc_name
+        F.in_procname F.fun_ fmt (proc_name & ())
     | Self ->
-        Format.fprintf fmt "self"
+        F.self fmt ()
 end
 
 module Edge = struct
@@ -166,9 +194,15 @@ module Edge = struct
 
   let default = {kind= Direct; node= PPNode.dummy ()}
 
-  let pp_e fmt (src, {kind; node}, dst) =
-    Format.fprintf fmt "@[<2>[%a@ ->@ %a@ (%a@@%a)]@]@;" Vertex.pp src Vertex.pp dst Kind.pp kind
-      PPNode.pp node
+  let pp fmt {kind; node} = Fmt.pf fmt "%a@@%a" Kind.pp kind PPNode.pp node
+
+  let pp_e fmt (src, edge, dst) =
+    Format.fprintf fmt "@[<2>[%a@ ->@ %a@ (%a)]@]@;" Vertex.pp src Vertex.pp dst pp edge
+
+
+  let location {node; _} = PPNode.loc node
+
+  let procname {node; _} = PPNode.procname node
 end
 
 module G = struct
@@ -208,6 +242,128 @@ module G = struct
         false (* TODO T154077173: investigate if more precision is worthwile *)
     | DynamicCallFunction | DynamicCallModule ->
         false (* TODO T154077173: model as a call? *)
+end
+
+module Unified = struct
+  module UVertex = struct
+    type v =
+      | Local of Local.t * (PPNode.t[@sexp.opaque])
+      | Argument of int * FieldPath.t
+      | Return of FieldPath.t
+      | Captured of int
+      | Function
+    [@@deriving sexp, compare, equal, hash]
+
+    let pp_v fmt v =
+      match v with
+      | Local (local, _node) ->
+          Local.pp fmt local
+      | Argument (index, path) ->
+          F.arg_path fmt (index, path)
+      | Return path ->
+          F.ret_path fmt path
+      | Captured index ->
+          F.captured fmt index
+      | Function ->
+          F.fun_ fmt ()
+
+
+    type t = {procname: Procname.t; vertex: v} [@@deriving sexp, compare, equal, hash]
+
+    let pp fmt {procname; vertex} = F.in_procname pp_v fmt (procname, vertex)
+  end
+
+  module UEdge = struct
+    include Edge
+
+    let pp fmt {kind; _} =
+      (* Print the edge mimicking the json terminology *)
+      match kind with
+      | Direct ->
+          Fmt.string fmt "Copy"
+      | Call ->
+          Fmt.string fmt "Call"
+      | Return ->
+          Fmt.string fmt "Return"
+      | Capture ->
+          Fmt.string fmt "Capture"
+      | Builtin ->
+          Fmt.string fmt "Builtin"
+      | Summary {callee; _} ->
+          Fmt.pf fmt "Derive.%a" Procname.pp_verbose callee
+      | DynamicCallFunction ->
+          Fmt.string fmt "DynamicCallFunction"
+      | DynamicCallModule ->
+          Fmt.string fmt "DynamicCallModule"
+  end
+
+  module G = Graph.Persistent.Digraph.ConcreteBidirectionalLabeled (UVertex) (UEdge)
+
+  let transform_v fetch_shapes procname (vertex : Vertex.t) : UVertex.t list =
+    match vertex with
+    | Local (local, node) ->
+        [{procname; vertex= Local (local, node)}]
+    | Argument (index, path) ->
+        [{procname; vertex= Argument (index, path)}]
+    | ArgumentOf (callee, index, path) ->
+        let shapes = fetch_shapes callee in
+        Shapes.map_argument shapes index path ~f:(fun path' ->
+            {UVertex.procname= callee; vertex= Argument (index, path')} )
+    | Captured index ->
+        [{procname; vertex= Captured index}]
+    | CapturedBy (closure, index) ->
+        [{procname= closure; vertex= Captured index}]
+    | Return path ->
+        [{procname; vertex= Return path}]
+    | ReturnOf (callee, path) ->
+        let shapes = fetch_shapes callee in
+        Shapes.map_return shapes path ~f:(fun path' ->
+            {UVertex.procname= callee; vertex= Return path'} )
+    | Self ->
+        [{procname; vertex= Function}]
+    | Function fun_ ->
+        [{procname= fun_; vertex= Function}]
+
+
+  let transform_e fetch_shapes procname (src, edge, dst) : G.E.t list =
+    let srcs = transform_v fetch_shapes procname src in
+    let dsts = transform_v fetch_shapes procname dst in
+    List.cartesian_product srcs dsts |> List.map ~f:(fun (src', dst') -> (src', edge, dst'))
+
+
+  module Dot = struct
+    include Graph.Graphviz.Dot (struct
+      include G
+
+      module Color = struct
+        let blue_gray_900 = 0x263238
+
+        let blue_gray_600 = 0x546E7A
+
+        let edge = blue_gray_600
+
+        let vertex = blue_gray_900
+      end
+
+      let vertex_name v = string_of_int @@ [%hash: UVertex.t] v
+
+      let graph_attributes _ = []
+
+      let default_vertex_attributes _ =
+        [`Shape `Box; `Style `Rounded; `Color Color.vertex; `Color Color.vertex]
+
+
+      let vertex_attributes v = [`Label (Fmt.to_to_string UVertex.pp v)]
+
+      let get_subgraph _ = None
+
+      let default_edge_attributes _ = [`Color Color.edge; `Fontcolor Color.edge]
+
+      let edge_attributes (_, edge, _) = [`Label (Fmt.to_to_string UEdge.pp edge)]
+    end)
+
+    let pp = fprint_graph
+  end
 end
 
 (** Helper function. *)
@@ -273,12 +429,6 @@ module Tito : sig
           -> 'accum )
     -> 'accum
 end = struct
-  (* Utility pretty printers *)
-
-  let pp_arg_index = Fmt.fmt "$arg%d"
-
-  let pp_ret = Fmt.any "$ret"
-
   module ArgPathSet = struct
     module FieldPathSet = struct
       (* Sets of field paths, that shall be associated to an argument index *)
@@ -288,7 +438,7 @@ end = struct
 
       let pp ~arg_index =
         (* Prints: $argN#foo#bar $argN#other#field *)
-        let pp_field_path = Fmt.(const pp_arg_index arg_index ++ FieldPath.pp) in
+        let pp_field_path = Fmt.using (fun path -> arg_index & path) F.arg_path in
         IFmt.Labelled.iter ~sep:Fmt.sp M.iter pp_field_path
     end
 
@@ -346,7 +496,7 @@ end = struct
     let pp fmt source =
       match source with
       | Shape_preserved {arg_index; arg_field_path} ->
-          Fmt.pf fmt "=%a%a" pp_arg_index arg_index FieldPath.pp arg_field_path
+          Fmt.pf fmt "=%a" F.arg_path (arg_index & arg_field_path)
       | Shape_mixed arg_path_set ->
           Fmt.pf fmt "{%a}" ArgPathSet.pp arg_path_set
 
@@ -391,7 +541,7 @@ end = struct
   let pp =
     (* Prints: ($ret#field: $arg0#foo) ($ret#other:$arg2 $arg3#bar) *)
     IFmt.Labelled.iter_bindings ~sep:Fmt.comma RetPathMap.iteri
-      Fmt.(parens @@ pair ~sep:IFmt.colon_sp Fmt.(pp_ret ++ FieldPath.pp) Sources.pp)
+      Fmt.(parens @@ pair ~sep:IFmt.colon_sp F.ret_path Sources.pp)
 
 
   let empty = RetPathMap.empty
@@ -812,14 +962,6 @@ module Out = struct
 
   type state_local = Start of Location.t | Exit of Location.t | Normal of PPNode.t
 
-  (** Like [G.vertex], but :
-
-      - Without the ability to refer to other procedures, which makes it "local".
-      - With some information lost/summarised, such as fields of procedure arguments/return
-        (although the Derive edges will be generated taking fields into account, we only output one
-        node for each argument in the Json graph to denote function calls). *)
-  type local_vertex = Argument of int | Captured of int | Return | Normal of Local.t | Function
-
   module Id = struct
     (** Internal representation of an Id. *)
     type t = Z.t
@@ -898,35 +1040,43 @@ module Out = struct
       try Z.to_int64 id with Z.Overflow -> L.die InternalError "Hash does not fit in int64"
   end
 
+  (** Like [G.vertex], but :
+
+      - Without the ability to refer to other procedures, which makes it "local".
+      - With some information lost/summarised, such as fields of procedure arguments/return
+        (although the Derive edges will be generated taking fields into account, we only output one
+        node for each argument in the Json graph to denote function calls). *)
+  type local_vertex = Argument of int | Captured of int | Return | Local of Local.t | Function
+
+  let pp_local_vertex fmt vertex =
+    match vertex with
+    | Argument index ->
+        F.arg fmt index
+    | Captured index ->
+        F.captured fmt index
+    | Return ->
+        F.ret fmt ()
+    | Local local ->
+        Local.pp fmt local
+    | Function ->
+        F.fun_ fmt ()
+
+
   let term_of_vertex (vertex : local_vertex) : Json.term =
-    let term_name =
-      match vertex with
-      | Argument index ->
-          Format.asprintf "$arg%d" index
-      | Captured index ->
-          Format.asprintf "$cap%d" index
-      | Return ->
-          Format.asprintf "$ret"
-      | Normal (Cell cell) ->
-          Format.asprintf "%a" Cell.pp cell
-      | Normal (ConstantAtom x) | Normal (ConstantInt x) | Normal (ConstantString x) ->
-          x
-      | Function ->
-          "$fun"
-    in
+    let term_name = Fmt.to_to_string pp_local_vertex vertex in
     let term_type : Json.term_type =
       match vertex with
       | Argument _ | Captured _ ->
           Argument
       | Return ->
           Return
-      | Normal (Cell cell) ->
+      | Local (Cell cell) ->
           if Cell.var_appears_in_source_code cell then UserVariable else TemporaryVariable
-      | Normal (ConstantAtom _) ->
+      | Local (ConstantAtom _) ->
           ConstantAtom
-      | Normal (ConstantInt _) ->
+      | Local (ConstantInt _) ->
           ConstantInt
-      | Normal (ConstantString _) ->
+      | Local (ConstantString _) ->
           ConstantString
       | Function ->
           Function
@@ -1007,7 +1157,7 @@ module Out = struct
     let exit = Exit (Procdesc.Node.get_loc (Procdesc.get_exit_node proc_desc)) in
     match vertex with
     | Local (var, node) ->
-        save procname (Normal node) (Normal var)
+        save procname (Normal node) (Local var)
     | Argument (index, _field_path) ->
         save procname start (Argument index)
     | ArgumentOf (callee_procname, index, _field_path) ->
@@ -1095,8 +1245,6 @@ module Out = struct
     write_graph json_dedup_cache outchan proc_desc graph ;
     Out_channel.flush outchan
 
-
-  let report_graph outchan proc_desc graph = with_dedup_cache write_graph outchan proc_desc graph
 
   let report_summary proc_desc summary =
     let outchan = get_pid_channel () in
@@ -1611,7 +1759,7 @@ module TransferFunctions = struct
   (** Return variables that are captured by the closures occurring in [e]. *)
   let captured_locals_of_exp shapes (e : Exp.t) : Local.Set.t =
     let add locals {Exp.captured_vars} =
-      List.fold captured_vars ~init:locals ~f:(fun locals (_exp, pvar, _typ, _mode) ->
+      List.fold captured_vars ~init:locals ~f:(fun locals (_exp, {CapturedVar.pvar}) ->
           Local.Set.union locals (free_locals_from_path shapes (VarPath.pvar pvar)) )
     in
     Sequence.fold ~init:Local.Set.empty ~f:add (Exp.closures e)
@@ -1650,7 +1798,7 @@ module TransferFunctions = struct
       | Closure c ->
           closure astate c
     and closure astate ({name; captured_vars} : Exp.closure) =
-      let one_var index astate (_exp, pvar, _typ, _mode) =
+      let one_var index astate (_exp, {CapturedVar.pvar}) =
         Domain.add_flow ~shapes ~node ~kind:Direct
           ~src:(Src.silence @@ Src.pvar pvar)
           ~dst:(Dst.captured_by name index) astate
@@ -1795,6 +1943,28 @@ module TransferFunctions = struct
 
 
   module CustomModel = struct
+    let nop_model _shapes _node _analyze_dependency _ret_id _procname _args astate =
+      (* A model that does nothing. *)
+      astate
+
+
+    let with_call_flow model shapes node analyze_dependency ret_id procname args astate =
+      (* A model transformer that will run the original model and add [Call] and [Return] flows as if
+         it was a standard procedure.
+
+         The idea is to use the original model to generate edges that would be more precise than the
+         default Derive ones, but still have the function appear in the graph in the standard way,
+         for instance to be able to find flows into it. *)
+      let _ : payload AnalysisResult.t =
+        (* Request procname payload to have it registered in the callgraph *)
+        analyze_dependency procname
+      in
+      astate
+      |> model shapes node analyze_dependency ret_id procname args
+      |> add_arg_flows shapes node procname args
+      |> add_ret_flows shapes node procname ret_id
+
+
     let call_unqualified shapes node analyze_dependency ret_id procname args astate =
       match args with
       | fun_ :: _ ->
@@ -1906,11 +2076,9 @@ module TransferFunctions = struct
 
 
     let maps_new =
-      (* The generic call model with zero parameter will simply add a flow from maps:new$ret to
-         ret_id. We could also consider doing nothing and simply return the abstract state, which
-         would amount to considering maps:new as a zero-argument builtin and would generate no flow
-         at all. *)
-      generic_call_model
+      (* [maps:new] adds no flow by itself. Used in conjunction with {!with_call_flow}, one can
+           generate a single edge from [maps:new.ret] to the ret_id destination variable. *)
+      nop_model
 
 
     let maps_put shapes node _analyze_dependency ret_id _procname args astate =
@@ -1997,12 +2165,17 @@ module TransferFunctions = struct
       let pairs =
         [ (BuiltinDecl.__erlang_make_atom, make_atom)
         ; (BuiltinDecl.__erlang_make_tuple, make_tuple)
-        ; (BuiltinDecl.__erlang_make_map, make_map)
-        ; (Procname.make_erlang ~module_name:"maps" ~function_name:"new" ~arity:0, maps_new)
-        ; (Procname.make_erlang ~module_name:"maps" ~function_name:"get" ~arity:2, maps_get_2)
-        ; (Procname.make_erlang ~module_name:"maps" ~function_name:"get" ~arity:3, maps_get_3)
-        ; (Procname.make_erlang ~module_name:"maps" ~function_name:"find" ~arity:2, maps_find)
-        ; (Procname.make_erlang ~module_name:"maps" ~function_name:"put" ~arity:3, maps_put)
+        ; (BuiltinDecl.__erlang_make_map, with_call_flow make_map)
+        ; ( Procname.make_erlang ~module_name:"maps" ~function_name:"new" ~arity:0
+          , with_call_flow maps_new )
+        ; ( Procname.make_erlang ~module_name:"maps" ~function_name:"get" ~arity:2
+          , with_call_flow maps_get_2 )
+        ; ( Procname.make_erlang ~module_name:"maps" ~function_name:"get" ~arity:3
+          , with_call_flow maps_get_3 )
+        ; ( Procname.make_erlang ~module_name:"maps" ~function_name:"find" ~arity:2
+          , with_call_flow maps_find )
+        ; ( Procname.make_erlang ~module_name:"maps" ~function_name:"put" ~arity:3
+          , with_call_flow maps_put )
         ; (BuiltinDecl.__erlang_make_cons, make_cons)
         ; (apply 2, call_unqualified)
         ; (apply 3, call_qualified) ]

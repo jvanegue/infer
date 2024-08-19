@@ -155,6 +155,9 @@ val realloc_pvar :
   Tenv.t -> PathContext.t -> set_uninitialized:bool -> Pvar.t -> Typ.t -> Location.t -> t -> t
 
 val write_id : Ident.t -> AbstractValue.t * ValueHistory.t -> t -> t
+(** does not record the value origin, unlike [write_load_id], so only use for return values *)
+
+val write_load_id : Ident.t -> ValueOrigin.t -> t -> t
 
 val read_id : Ident.t -> t -> (AbstractValue.t * ValueHistory.t) option
 
@@ -310,16 +313,13 @@ val remove_vars : Var.t list -> Location.t -> t -> t SatUnsat.t
 val check_address_escape :
   Location.t -> Procdesc.t -> AbstractValue.t -> ValueHistory.t -> t -> t AccessResult.t
 
-type call_kind =
-  [ `Closure of (Exp.t * Pvar.t * Typ.t * CapturedVar.capture_mode) list
-  | `Var of Ident.t
-  | `ResolvedProcname ]
+type call_kind = [`Closure of (Exp.t * CapturedVar.t) list | `Var of Ident.t | `ResolvedProcname]
 
 val get_captured_actuals :
      Procname.t
   -> PathContext.t
   -> Location.t
-  -> captured_formals:(Pvar.t * CapturedVar.capture_mode * Typ.t) list
+  -> captured_formals:CapturedVar.t list
   -> call_kind:call_kind
   -> actuals:((AbstractValue.t * ValueHistory.t) * Typ.t) list
   -> t

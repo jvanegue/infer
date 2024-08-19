@@ -218,7 +218,7 @@ class DictFieldUsingConstKey {
     return $o->f[ConstKey::HI];
   }
 
-  public function read_dict_hi_bad_FN(): int {
+  public function read_dict_hi_bad(): int {
     $o = new DictFieldUsingConstKey();
     return $o->f[ConstKey::BYE];
   }
@@ -227,11 +227,63 @@ class DictFieldUsingConstKey {
 abstract final class StaticDictField {
   const dict<string, int> f = dict['hi' => 42];
 
-  public static function call_read_dict_hi_ok(): int {
+  public static function read_self_dict_hi(): int {
     return self::f['hi'];
   }
 
-  public static function call_read_dict_hi_bad_FN(): int {
+  public static function read_self_dict_bye(): int {
     return self::f['bye'];
+  }
+}
+
+function call_read_self_dict_hi_ok(): int {
+  return StaticDictField::read_self_dict_hi();
+}
+
+function call_read_self_dict_bye_bad(): int {
+  return StaticDictField::read_self_dict_bye();
+}
+
+class InitStaticField {
+  const int DUMMY = -1;
+  public static bool $b = false;
+  public static function nop(): void {}
+}
+
+class CallInitStaticField {
+  public function call_get_bad(): void {
+    InitStaticField::$b = true;
+    InitStaticField::nop();
+    if (InitStaticField::$b) {
+      dict_argument(dict['hi' => 42]);
+    }
+  }
+
+  public function call_get_ok(): void {
+    InitStaticField::$b = true;
+    InitStaticField::nop();
+    if (!InitStaticField::$b) {
+      dict_argument(dict['hi' => 42]);
+    }
+  }
+
+  public function call_nop(): void {
+    InitStaticField::nop();
+  }
+
+  public function call_get_interproc_bad(): void {
+    InitStaticField::$b = true;
+    $this->call_nop();
+    if (InitStaticField::$b) {
+      dict_argument(dict['hi' => 42]);
+    }
+  }
+
+  public function call_get_interproc_ok_FP(): void {
+    InitStaticField::$b = true;
+    $this->call_nop();
+    if (!InitStaticField::$b) {
+      dict_argument(dict['hi' => 42]);
+    }
   }
 }

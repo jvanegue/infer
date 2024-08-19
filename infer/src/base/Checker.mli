@@ -15,7 +15,6 @@ type t =
   | BufferOverrunChecker
   | ConfigImpactAnalysis
   | Cost
-  | Datalog
   | DisjunctiveDemo
   | FragmentRetainsView
   | Impurity
@@ -26,11 +25,9 @@ type t =
   | Liveness
   | LoopHoisting
   | ParameterNotNullChecked
-  | PrintfArgs
   | Pulse
   | PurityAnalysis
   | PurityChecker
-  | Quandary
   | RacerD
   | ResourceLeakLabExercise
   | SILValidation

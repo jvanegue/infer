@@ -17,7 +17,10 @@ module type S = sig
   val equal : t -> t -> bool
 end
 
-include S with type value = AbstractValue.t * ValueHistory.t
+(** Values are [ValueOrigin.t], which should always be [Unknown] for program variables, and always
+    be not [Unknown] for logical variables, as we record what was loaded into each logical variable.
+    For example, after [n$1 = *&p], [n$1] should have [p] as its value origin. *)
+include S with type value = ValueOrigin.t
 
 val yojson_of_t : t -> Yojson.Safe.t
 

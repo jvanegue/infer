@@ -26,7 +26,7 @@ struct Vector {
 };
 
 // missing a more precise model for vector::push_back
-int FP_push_back0_ok(int* value) {
+int push_back0_ok(int* value) {
   std::unique_ptr<int> ptr(value);
   Vector* v = Vector::getInstance();
   v->add(std::move(ptr));
@@ -269,7 +269,7 @@ void FP_init_fill_then_push_back_ok(std::vector<int>& vec_other) {
   std::cout << *elt << "\n";
 }
 
-void push_back_loop_latent(std::vector<int>& vec_other) {
+void push_back_loop_bad(std::vector<int>& vec_other) {
   std::vector<int> vec(2);
   int* elt = &vec[1];
   for (const auto& i : vec_other) {

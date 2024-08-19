@@ -12,7 +12,18 @@ module L = Logging
 
 module TenvMerger = struct
   let merge paths =
-    let output = Tenv.create () in
+    let output =
+      if Config.(continue_capture || reactive_capture) then (
+        match Tenv.read_global () with
+        | None ->
+            L.progress "Merge found no pre-existing global type environment@\n" ;
+            Tenv.create ()
+        | Some tenv ->
+            L.progress "Merge found pre-existing global type environment with %d entries@\n"
+              (Tenv.length tenv) ;
+            tenv )
+      else Tenv.create ()
+    in
     let do_merge path =
       Tenv.read path |> Option.iter ~f:(fun tenv -> Tenv.merge ~src:tenv ~dst:output)
     in
@@ -67,27 +78,6 @@ end
 
 let merge_global_tenv = TenvMerger.merge_into_global
 
-let merge_changed_functions () =
-  L.progress "Merging changed functions files...@." ;
-  let tgt_dir = ResultsDir.get_path ChangedFunctionsTempResults in
-  let infer_deps_file = ResultsDir.get_path CaptureDependencies in
-  Utils.iter_infer_deps infer_deps_file ~root:Config.project_root ~f:(fun infer_out_src ->
-      let src_dir =
-        ResultsDirEntryName.get_path ~results_dir:infer_out_src ChangedFunctionsTempResults
-      in
-      match Sys.is_directory src_dir with
-      | `Yes ->
-          Utils.create_dir tgt_dir ;
-          Utils.directory_iter
-            (fun src ->
-              let data = In_channel.read_all src in
-              Out_channel.write_all (tgt_dir ^/ Filename.basename src) ~data )
-            src_dir
-      | `No | `Unknown ->
-          () ) ;
-  L.progress "Done merging changed functions files@."
-
-
 let merge_captured_targets ~root =
   let time0 = Mtime_clock.counter () in
   L.progress "Merging captured targets...@\n%!" ;
@@ -95,6 +85,7 @@ let merge_captured_targets ~root =
   let tenv_merger_child = TenvMerger.start infer_deps_file in
   DBWriter.merge_captures ~root ~infer_deps_file ;
   TenvMerger.wait tenv_merger_child ;
+  Tenv.force_load_global () |> ignore ;
   let targets_num =
     let counter = ref 0 in
     let incr_counter _line = incr counter in

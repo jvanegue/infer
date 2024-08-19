@@ -479,10 +479,14 @@ module StructBridge = struct
       |> List.map ~f:(ProcDeclBridge.to_sil lang)
     in
     let fields =
-      List.map fields ~f:(fun (fdecl : FieldDecl.t) ->
-          SilStruct.mk_field
+      List.map fields ~f:(fun ({FieldDecl.typ; attributes} as fdecl) ->
+          let annot =
+            List.filter_map attributes ~f:(fun attr ->
+                if Attr.is_abstract attr then Some Annot.abstract else None )
+          in
+          SilStruct.mk_field ~annot
             (FieldDeclBridge.to_sil lang fdecl)
-            (TypBridge.to_sil lang ~attrs:fdecl.attributes fdecl.typ) )
+            (TypBridge.to_sil lang ~attrs:attributes typ) )
     in
     let annots =
       List.filter_map attributes ~f:(fun attr ->
@@ -1206,11 +1210,7 @@ module ModuleBridge = struct
         let cfgs = Cfg.create () in
         let tenv = Tenv.create () in
         TypeName.Set.iter
-          (fun name ->
-            let proc_entries = TypeName.Map.find name all_proc_entries in
-            let struct_ = {Textual.Struct.name; supers= []; fields= []; attributes= []} in
-            let source_file = None in
-            StructBridge.to_sil lang decls_env tenv proc_entries source_file struct_ )
+          (fun name -> TypeNameBridge.to_sil lang name |> Tenv.mk_struct ~dummy:true tenv |> ignore)
           types_used_as_enclosing_but_not_defined ;
         List.iter module_.decls ~f:(fun decl ->
             match decl with
