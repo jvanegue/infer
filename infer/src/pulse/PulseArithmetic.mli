@@ -75,7 +75,6 @@ val prune_binop :
   -> operand
   -> operand
   -> AbductiveDomain.t
-  -> negated:bool
   -> AbductiveDomain.t AccessResult.t SatUnsat.t
   
 val prune_eq_zero :

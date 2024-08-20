@@ -1942,6 +1942,7 @@ module Summary = struct
 
   let of_post_ proc_name (proc_attrs : ProcAttributes.t) location astate0 =
     let open SatUnsat.Import in
+    let astate = astate0 in
     let astate_before_filter = astate in
     (* do not store the decompiler in the summary and make sure we only use the original one by
        marking it invalid *)

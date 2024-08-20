@@ -3480,7 +3480,7 @@ module Formula = struct
                                       Atom.eval ~is_neq_zero:(is_neq_zero phi)
                                         (NotEqual (Var var, Term.zero))
                                     in
-                                    and_normalized_atoms (phi, new_eqs) atoms >>| snd )
+                                    and_normalized_atoms (phi, new_eqs) atoms ~orig_atom:atoms ~add_term:true >>| snd )
                                   else Sat (phi, new_eqs) )
                                 else if
                                   match tx with
@@ -3498,7 +3498,7 @@ module Formula = struct
                                       Atom.eval ~is_neq_zero:(is_neq_zero phi)
                                         (NotEqual (Var var, Term.zero))
                                     in
-                                    and_normalized_atoms (phi, new_eqs) atoms >>| snd
+                                    and_normalized_atoms (phi, new_eqs) atoms ~orig_atom:atoms ~add_term:true >>| snd
                                   else Sat (phi, new_eqs) )
                                 else (
                                   Debug.p "%a is neither zero nor non-zero, leaving phi alone@\n"
@@ -3685,7 +3685,7 @@ module Formula = struct
                                   Atom.eval ~is_neq_zero:(is_neq_zero phi)
                                     (LessThan (Term.zero, Var var))
                                 in
-                                and_normalized_atoms (phi, new_eqs) atoms >>| snd )
+                                and_normalized_atoms (phi, new_eqs) atoms ~orig_atom:atoms ~add_term:true >>| snd )
                               else Sat (phi, new_eqs)
                             in
                             and_below var typ (phi, new_eqs)
@@ -4218,7 +4218,7 @@ let prune_atoms ~depth atoms formula_new_eqs ifk =
       (* L.debug Analysis Quiet "JV: Called prune_atom from prune_atoms \n"; *)
       prune_atom ~depth atom formula_new_eqs false)
 
-let prune_binop ~(depth = 0) ~negated (bop:Binop.t) ?(ifk=false) x y formula =
+let prune_binop ?(depth=0) ~negated (bop:Binop.t) ?(ifk=false) x y formula =
 
   let tx = Term.of_operand x in
   let ty = Term.of_operand y in

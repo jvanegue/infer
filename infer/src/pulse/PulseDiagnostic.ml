@@ -193,18 +193,7 @@ type t =
   | ConstRefableParameter of {param: Var.t; typ: Typ.t; location: Location.t}
   | DynamicTypeMismatch of {location: Location.t}
   | ErlangError of ErlangError.t
-<<<<<<< HEAD
   | InfiniteError of {location: Location.t}
-  | TransitiveAccess of
-      { tag: string
-      ; description: string
-      ; call_trace: Trace.t
-      ; transitive_callees: TransitiveInfo.Callees.t [@ignore]
-      ; transitive_missed_captures: Typ.Name.Set.t [@ignore] }
-  | JavaResourceLeak of
-      {class_name: JavaClassName.t; allocation_trace: Trace.t; location: Location.t}
-=======
->>>>>>> fborigin/main
   | HackCannotInstantiateAbstractClass of {type_name: Typ.Name.t; trace: Trace.t}
   | MutualRecursionCycle of {cycle: PulseMutualRecursion.t; location: Location.t}
   | ReadonlySharedPtrParameter of
@@ -257,26 +246,9 @@ let pp fmt diagnostic =
   | DynamicTypeMismatch {location} ->
       F.fprintf fmt "DynamicTypeMismatch {@[location:%a@]}" Location.pp location
   | ErlangError erlang_error ->
-<<<<<<< HEAD
      ErlangError.pp fmt erlang_error
   | InfiniteError {location} ->
      F.fprintf fmt "InfiniteExecution {@[location:%a@]}" Location.pp location
-  | JavaResourceLeak {class_name; allocation_trace; location} ->
-      F.fprintf fmt "ResourceLeak {@[class_name=%a;@;allocation_trace:%a;@;location:%a@]}"
-        JavaClassName.pp class_name (Trace.pp ~pp_immediate) allocation_trace Location.pp location
-  | TransitiveAccess {tag; description; call_trace; transitive_callees; transitive_missed_captures}
-    ->
-      F.fprintf fmt "TransitiveAccess {@[tag=%s;description=%s;call_trace:%a%t%t@]}" tag description
-        (Trace.pp ~pp_immediate) call_trace
-        (fun fmt ->
-          if TransitiveInfo.Callees.is_bottom transitive_callees then ()
-          else TransitiveInfo.Callees.pp fmt transitive_callees )
-        (fun fmt ->
-          if Typ.Name.Set.is_empty transitive_missed_captures then ()
-          else Typ.Name.Set.pp fmt transitive_missed_captures )
-=======
-      ErlangError.pp fmt erlang_error
->>>>>>> fborigin/main
   | HackCannotInstantiateAbstractClass {type_name; trace} ->
       F.fprintf fmt "HackCannotInstantiateAbstractClass {@[type_name:%a;@;trace:%a@]" Typ.Name.pp
         type_name (Trace.pp ~pp_immediate) trace
