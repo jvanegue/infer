@@ -248,7 +248,7 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
              Caml.Hashtbl.add wstate key ();
              record_pathcond tl
           | Some _ ->
-             match (Formula.set_is_empty termcond),(Formula.set_is_empty pathcond),(Formula.termset_is_empty termcond2) with 
+             match (Formula.set_is_empty termcond),(Formula.map_is_empty pathcond),(Formula.termset_is_empty termcond2) with 
              | true,true,true -> 
              (* match (Formula.set_is_empty pathcond) with
              | true -> *)

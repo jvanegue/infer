@@ -2299,9 +2299,9 @@ module Formula = struct
 
     val set_intervals : intervals -> t -> t
 
-    val reset_atoms : t -> t
+    (* val reset_atoms : t -> t *)
 
-    val reset_term_eqs : t -> t
+    (* val reset_term_eqs : t -> t *)
 
     val get_terminal_conds : t -> Atom.Set.t
 
@@ -2837,10 +2837,10 @@ module Formula = struct
 
     let set_intervals intervals phi = {phi with intervals}
 
-    let reset_atoms phi = {phi with atoms= Atom.Set.empty; atoms_occurrences= Var.Map.empty}
+    (* let reset_atoms phi = {phi with atoms= Atom.Set.empty; atoms_occurrences= Var.Map.empty} *)
 
-    let reset_term_eqs phi =
-      {phi with term_eqs= Term.VarMap.empty; term_eqs_occurrences= Var.Map.empty}
+    (* let reset_term_eqs phi =
+      {phi with term_eqs= Term.VarMap.empty; term_eqs_occurrences= Var.Map.empty} *)
 
     let get_terminal_conds t = t.term_conditions
 
@@ -3928,13 +3928,14 @@ let add_conditions (atoms, depth) conditions =
 let ttrue = {conditions= Atom.Map.empty; phi= Formula.ttrue}
 
 (* added pulse-infinite *)
-let extract_path_cond (var:t) = var.conditions 
+let extract_path_cond (var:t) : int Atom.Map.t = var.conditions 
 let extract_term_cond (var:t) = (Formula.get_terminal_conds var.phi)
-let extract_term_cond2 (var:t) = (Formula.get_terminal_terms var.phi)                              
+let extract_term_cond2 (var:t) = (Formula.get_terminal_terms var.phi)
+let map_is_empty (conds: int Atom.Map.t) = (Atom.Map.is_empty conds)
 let set_is_empty (conds: Atom.Set.t) = (Atom.Set.is_empty conds)
 let termset_is_empty (conds: Term.Set.t) = (Term.Set.is_empty conds)
 
-let formula_is_empty (var:t) = set_is_empty(extract_path_cond(var)) 
+let formula_is_empty (var:t) = map_is_empty(extract_path_cond(var)) 
                                && set_is_empty(extract_term_cond(var))
                                && termset_is_empty(extract_term_cond2(var))
                                          
@@ -4192,7 +4193,7 @@ let and_equal_string_concat v x y formula =
 
 
 
-let prune_atom atom (formula, new_eqs) ifk =
+let prune_atom ~depth atom (formula, new_eqs) ifk =
   (* Use [phi] to normalize [atom] here to take previous [prune]s into account. *)
   Debug.p "prune atom %a" (Atom.pp_with_pp_var Var.pp) atom ;
   let* normalized_atoms = Formula.Normalizer.normalize_atom formula.phi atom in
@@ -4356,7 +4357,7 @@ let and_equal_instanceof v1 v2 t ~nullable formula =
         let* phi, neweqs' =
           (* It might look odd to keep the instanceof around, but removing it messes up the latency calculations
              because there's then no dependency on v2 *)
-          Formula.Normalizer.and_atom (Atom.equal (Var v1) value_term) (formula.phi, new_eqs')
+          Formula.Normalizer.and_atom (Atom.equal (Var v1) value_term) (formula.phi, new_eqs') false
         in
         Sat ({formula with phi}, neweqs')
   in

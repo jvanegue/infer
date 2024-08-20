@@ -72,6 +72,7 @@ module Atom : sig
   val equal : Term.t -> Term.t -> t
                 
   module Set : Caml.Set.S [@@deriving compare]
+  module Map : Caml.Map.S [@@deriving compare]
 end
 
 module Formula : sig
@@ -79,7 +80,7 @@ module Formula : sig
 end
 
 type t =
-  { conditions: Atom.Set.t
+  { conditions: int Atom.Map.t
         (** collection of conditions that have been assumed (via [PRUNE] CFG nodes) along the path.
             Note that these conditions are *not* normalized w.r.t. [phi]: [phi] already contains
             them so normalization w.r.t. [phi] would make them trivially true most of the time. *)
@@ -91,11 +92,13 @@ type t =
   }
 [@@deriving compare, equal, yojson_of]
 
-val extract_path_cond : t -> Atom.Set.t
+val extract_path_cond : t -> int Atom.Map.t
 
 val extract_term_cond : t -> Atom.Set.t
 
 val extract_term_cond2 : t -> Term.Set.t
+
+val map_is_empty : int Atom.Map.t -> bool
 
 val set_is_empty : Atom.Set.t -> bool
 
