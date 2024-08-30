@@ -47,6 +47,12 @@ The Pulse-♾️ checker is a DEVELOPMENT build which prints a lot of debug outp
 
 To remove the verbose debug output printed by default in pulse-♾️, please delete "--debug-level=2" and "-g" from the pulse invocation line in the script.
 
+# Zenodo URL (OOPSLA 2024 Artifact)
+
+This repository was packaged in March 2024 and uploaded at https://zenodo.org/records/12637589
+
+Pulse-♾️ received the reusable artifact badge at OOPSLA'24
+
 Enjoy!
 
 
