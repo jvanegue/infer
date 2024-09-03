@@ -6,6 +6,8 @@ Program termination is a well-known undecidable problem in the general case, and
 
 The new checker adds a new Error Type in Pulse: PULSE_INFINITE, which is now part of the error report printed by Pulse at the end of analysis.
 
+# Quick Start
+
 To compile Pulse-♾️, just build infer the normal way. We currently test on C/C++ programs, so it suffices to build infer as such:
 
 $ build-infer clang  
@@ -49,9 +51,11 @@ To remove the verbose debug output printed by default in pulse-♾️, please de
 
 # Zenodo URL (OOPSLA 2024 Artifact)
 
-This repository was packaged in March 2024 and uploaded at https://zenodo.org/records/12637589
+Pulse-♾️ received the reusable artifact badge at OOPSLA'24!
 
-Pulse-♾️ received the reusable artifact badge at OOPSLA'24
+The artifact documentation can be found on: https://github.com/jvanegue/infer/blob/main/Pulse_Infinite_Artifact_Doc_OOPSLA24.pdf
+
+The Zenodo URL for the artifact is: https://zenodo.org/records/12637589 (Pulse-Infinite packaged as of March 2024)
 
 Enjoy!
 
