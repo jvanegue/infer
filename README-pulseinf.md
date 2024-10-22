@@ -53,9 +53,13 @@ To remove the verbose debug output printed by default in pulse-♾️, please de
 
 Pulse-♾️ received the reusable artifact badge at OOPSLA'24!
 
-The artifact documentation can be found on: https://github.com/jvanegue/infer/blob/main/Pulse_Infinite_Artifact_Doc_OOPSLA24.pdf
+The artifact documentation can be found [here](https://github.com/jvanegue/infer/blob/main/Pulse_Infinite_Artifact_Doc_OOPSLA24.pdf)
 
-The Zenodo URL for the artifact is: https://zenodo.org/records/12637589 (Pulse-Infinite packaged as of March 2024)
+The Zenodo URL for the artifact is [here](https://zenodo.org/records/12637589) (Pulse-Infinite packaged as of March 2024)
+
+# Results page
+
+Results covered in the OOPSLA'24 paper are available in details on [results page](pulseinf-results-oopsla24.md)
 
 Enjoy!
 
