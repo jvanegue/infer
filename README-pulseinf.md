@@ -12,7 +12,7 @@ To compile Pulse-♾️, just build infer the normal way. We currently test on C
 
 $ build-infer clang  
 
-# Run Pulse-♾️ on divergence test cases (infinite.cpp) 
+## Run Pulse-♾️ on divergence test cases (infinite.cpp) 
 
 Tests are currently all written into a single file infinite.cpp located as below.
 
@@ -26,11 +26,11 @@ The results go into infer-run.log as well as on the standard output.
 
 The full structured list of bug reports is stored in pulseinf-report.json 
 
-# Run Pulse-♾️ on an SV-COMP NLA testsuite
+## Run Pulse-♾️ on an SV-COMP NLA testsuite
 
 $ ./termination-run-svcomp.sh
 
-# Run Pulse-♾️ on an OSS project (ex: openssl)
+## Run Pulse-♾️ on an OSS project (ex: openssl)
 
 git clone https://github.com/openssl/openssl  
 cp termination-run-all.sh ./openssl/termination-run-openssl.sh  
