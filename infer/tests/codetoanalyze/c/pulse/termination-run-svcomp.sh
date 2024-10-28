@@ -13,8 +13,8 @@ rm -fr infer-out/ infinite.o infer-run.log
 rm -fr pulseinf-svcomp-logs
 mkdir pulseinf-svcomp-logs
 
-# for i in `ls pulseinf/svcomp-nla/*.c`; do
-for i in pulseinf/svcomp-nla/dijkstra2-both-nt.c; do 
+for i in `ls pulseinf/svcomp-nla/*.c`; do
+# for i in pulseinf/svcomp-nla/dijkstra2-both-nt.c; do 
     echo Running infer on $i
     NEWNAME=`echo $i | sed s/pulseinf.svcomp.nla.//g`
     echo Short name for test: $NEWNAME
