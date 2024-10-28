@@ -30,7 +30,8 @@ end
 module type NAME = sig
   type t = {value: string; loc: Location.t} [@@deriving compare, equal, hash]
 
-  val of_java_name : string -> t
+  val of_string : string -> t
+  (** we replace any dot in the string by '::' because dot is a reserved separator in Textual *)
 
   val pp : F.formatter -> t -> unit
 
@@ -56,8 +57,6 @@ end
 
 module FieldName : NAME (* field names, without their enclosing types *)
 
-val builtin_allocate : string
-
 module NodeName : NAME (* node names, also called labels *)
 
 module TypeName : sig
@@ -80,6 +79,8 @@ module QualifiedProcName : sig
   val name : t -> ProcName.t
 
   val contains_wildcard : t -> bool
+
+  val is_python_builtin : t -> bool
 
   module Hashtbl : Hashtbl.S with type key = t
 end
@@ -319,7 +320,7 @@ module Instr : sig
     | Store of {exp1: Exp.t; typ: Typ.t option; exp2: Exp.t; loc: Location.t}
         (** *exp1 <- exp2 with exp2:typ *)
     | Prune of {exp: Exp.t; loc: Location.t}  (** assume exp *)
-    | Let of {id: Ident.t; exp: Exp.t; loc: Location.t}  (** id = exp *)
+    | Let of {id: Ident.t option; exp: Exp.t; loc: Location.t}  (** id = exp or _ = exp *)
   (* Remark that because Sil operations (add, mult...) are calls, we let the Textual programmer put
      expression in local variables, while SIL forbid that. The to_sil transformation will have to
      inline these definitions. *)

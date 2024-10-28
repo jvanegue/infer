@@ -57,6 +57,8 @@ let mk_general_unsupported_block (env : (Procdesc.t Env.present, _) Env.t) =
 
 let ( |~~> ) = ErlangBlock.( |~~> )
 
+let ( |?~> ) = ErlangBlock.( |?~> )
+
 let update_location (loc : Ast.location) (env : (_, _) Env.t) =
   let location = {env.location with line= loc.line; col= loc.col} in
   {env with location}
@@ -77,7 +79,7 @@ let check_type env value typ : Block.t =
   let exit_success = Node.make_if env true (Var is_right_type_id) in
   let exit_failure = Node.make_if env false (Var is_right_type_id) in
   start |~~> [exit_success; exit_failure] ;
-  {start; exit_success; exit_failure}
+  {start; exit_success; exit_failure= Some exit_failure}
 
 
 (** into_id=value_id.field_name *)
@@ -116,7 +118,6 @@ let mk_integer_call (env : (_, _) Env.t) ret_var value_exp =
 (** Boxes a SIL integer expression (interpreted as a Boolean) into an Erlang atom (true/false). *)
 let box_bool env into_id expr : Block.t =
   let start = Node.make_nop env in
-  let exit_success = Node.make_nop env in
   let true_branch = Node.make_if env true expr in
   let false_branch = Node.make_if env false expr in
   let mk_true_atom = Node.make_stmt env [mk_atom_call env into_id ErlangTypeName.atom_true] in
@@ -124,9 +125,7 @@ let box_bool env into_id expr : Block.t =
   start |~~> [true_branch; false_branch] ;
   true_branch |~~> [mk_true_atom] ;
   false_branch |~~> [mk_false_atom] ;
-  mk_true_atom |~~> [exit_success] ;
-  mk_false_atom |~~> [exit_success] ;
-  {start; exit_success; exit_failure= Node.make_nop env}
+  {start; exit_success= Node.make_join env [mk_true_atom; mk_false_atom]; exit_failure= None}
 
 
 (** Unboxes an Erlang atom (true/false) into a SIL integer expression (1/0). Currently we do not
@@ -147,7 +146,7 @@ let unbox_bool env expr : Exp.t * Block.t =
   in
   start |~~> [prune_node] ;
   prune_node |~~> [load] ;
-  (check_hash_expr, {start; exit_success= load; exit_failure= Node.make_nop env})
+  (check_hash_expr, {start; exit_success= load; exit_failure= None})
 
 
 (** Box a SIL expression (interpreted as an Integer) into an Erlang integer (object with a value
@@ -165,7 +164,7 @@ let unsafe_unbox_integer env expr : Exp.t * Block.t =
     Node.make_stmt env
       [Env.load_field_from_expr env value_id expr ErlangTypeName.integer_value Integer]
   in
-  (Exp.Var value_id, {start= load_node; exit_success= load_node; exit_failure= Node.make_nop env})
+  (Exp.Var value_id, {start= load_node; exit_success= load_node; exit_failure= None})
 
 
 (** Assumes (through pruning) that an expression is integer-typed and unboxes it. *)
@@ -176,13 +175,13 @@ let unbox_integer env expr : Exp.t * Block.t =
   let unboxed_expr, unbox_block = unsafe_unbox_integer env expr in
   start |~~> [prune_node] ;
   prune_node |~~> [unbox_block.start] ;
-  (unboxed_expr, {start; exit_success= unbox_block.exit_success; exit_failure= Node.make_nop env})
+  (unboxed_expr, {start; exit_success= unbox_block.exit_success; exit_failure= None})
 
 
-let procname_exn scope =
+let scope_exn (scope : Ast.scope option) =
   match scope with
-  | Some name ->
-      name
+  | Some scope ->
+      scope
   | None ->
       (* Can happen e.g. if we have the _ variable in record field initializers (T134336886) *)
       L.die InternalError "Scope not found for variable, probably missing annotation."
@@ -210,7 +209,7 @@ let vars_of_pattern p =
     | UnaryOperator (_, e) ->
         f acc e
     | Variable {vname; scope} ->
-        let procname = procname_exn scope in
+        let procname = (scope_exn scope).procname in
         Pvar.Set.add (Pvar.mk (Mangled.from_string vname) procname) acc
     | Literal _ | Nil | RecordIndex _ ->
         acc
@@ -220,6 +219,16 @@ let vars_of_pattern p =
         acc
   in
   f Pvar.Set.empty p
+
+
+let add_crash_node env (block : Block.t) crash_func =
+  match block.exit_failure with
+  | Some _ ->
+      let crash_node = Node.make_fail env crash_func in
+      block.exit_failure |?~> [crash_node] ;
+      {block with exit_failure= Some crash_node}
+  | None ->
+      block
 
 
 (** Main entry point for patterns. Result is a block where if the pattern-match succeeds, the
@@ -279,15 +288,14 @@ and translate_pattern_unsupported (env : (_, _) Env.t) value expr : Block.t =
   (* Make a nondet. choice based on call to unknown. *)
   let id = mk_fresh_id () in
   let unsupported = call_unsupported "pattern_match" 1 in
-  let branch_call = Block.make_instruction env [builtin_call_1 env id unsupported (Var value)] in
-  let branch_block = Block.make_branch env (Var id) in
-  let blocks = Block.all env [branch_call; branch_block] in
+  let call_instr = builtin_call_1 env id unsupported (Var value) in
+  let branch_block = Block.make_branch env [call_instr] (Var id) in
   (* Bind variables on success (matched) branch. *)
   let vars = vars_of_pattern expr in
   let bind_instrs = List.concat_map ~f:bind_one_var (Pvar.Set.elements vars) in
   let bind_node = Node.make_stmt env bind_instrs in
-  blocks.exit_success |~~> [bind_node] ;
-  {Block.start= blocks.start; exit_success= bind_node; exit_failure= blocks.exit_failure}
+  branch_block.exit_success |~~> [bind_node] ;
+  {Block.start= branch_block.start; exit_success= bind_node; exit_failure= branch_block.exit_failure}
 
 
 and translate_pattern_cons env value head tail : Block.t =
@@ -299,12 +307,10 @@ and translate_pattern_cons env value head tail : Block.t =
   let head_matcher = translate_pattern env head_value head in
   let tail_matcher = translate_pattern env tail_value tail in
   let submatcher = Block.all env [head_matcher; tail_matcher] in
-  let exit_failure = Node.make_nop env in
   let type_checker = check_type env value Cons in
+  let exit_failure = Block.join_failures env [type_checker; submatcher] in
   type_checker.exit_success |~~> [unpack_node] ;
   unpack_node |~~> [submatcher.start] ;
-  type_checker.exit_failure |~~> [exit_failure] ;
-  submatcher.exit_failure |~~> [exit_failure] ;
   {start= type_checker.start; exit_success= submatcher.exit_success; exit_failure}
 
 
@@ -320,16 +326,14 @@ and translate_pattern_literal_atom (env : (_, _) Env.t) value atom : Block.t =
   let load_expected =
     load_field_from_id env expected_hash expected_id ErlangTypeName.atom_hash Atom
   in
-  let load_node = Node.make_stmt env [load_actual; load_expected] in
-  let hash_checker = Block.make_branch env (Exp.BinOp (Eq, Var actual_hash, Var expected_hash)) in
+  let hash_checker =
+    Block.make_branch env [load_actual; load_expected]
+      (Exp.BinOp (Eq, Var actual_hash, Var expected_hash))
+  in
   let type_checker = check_type env value Atom in
-  let exit_failure = Node.make_nop env in
+  let exit_failure = Block.join_failures env [expected_block; type_checker; hash_checker] in
   type_checker.exit_success |~~> [expected_block.start] ;
-  expected_block.exit_failure |~~> [exit_failure] ;
-  expected_block.exit_success |~~> [load_node] ;
-  load_node |~~> [hash_checker.start] ;
-  type_checker.exit_failure |~~> [exit_failure] ;
-  hash_checker.exit_failure |~~> [exit_failure] ;
+  expected_block.exit_success |~~> [hash_checker.start] ;
   {start= type_checker.start; exit_success= hash_checker.exit_success; exit_failure}
 
 
@@ -341,13 +345,10 @@ and translate_pattern_integer (env : (_, _) Env.t) value expected_int : Block.t 
   (* We already typecheck the value as part of the pattern matching
      translation, no need to have the unboxing do it a second time *)
   let actual_value, load = unsafe_unbox_integer env (Var value) in
-  let value_checker = Block.make_branch env (Exp.BinOp (Eq, actual_value, expected_int)) in
-  let exit_failure = Node.make_nop env in
-  type_checker.exit_failure |~~> [exit_failure] ;
+  let value_checker = Block.make_branch env [] (Exp.BinOp (Eq, actual_value, expected_int)) in
+  let exit_failure = Block.join_failures env [type_checker; load; value_checker] in
   type_checker.exit_success |~~> [load.start] ;
-  load.exit_failure |~~> [exit_failure] ;
   load.exit_success |~~> [value_checker.start] ;
-  value_checker.exit_failure |~~> [exit_failure] ;
   {start= type_checker.start; exit_success= value_checker.exit_success; exit_failure}
 
 
@@ -357,16 +358,12 @@ and translate_pattern_literal_integer (env : (_, _) Env.t) value i : Block.t =
 
 and translate_pattern_string (env : (_, _) Env.t) value expected_id expected_block : Block.t =
   let equals_id = mk_fresh_id () in
-  let call_block =
-    (* TODO: add Pulse model for this function T93361792 *)
-    let instr =
-      builtin_call_2 env equals_id BuiltinDecl.__erlang_str_equal (Exp.Var value)
-        (Exp.Var expected_id)
-    in
-    Block.make_instruction env [instr]
+  (* TODO: add Pulse model for this function T93361792 *)
+  let instr =
+    builtin_call_2 env equals_id BuiltinDecl.__erlang_str_equal (Exp.Var value) (Exp.Var expected_id)
   in
-  let checker_block = Block.make_branch env (Var equals_id) in
-  Block.all env [expected_block; call_block; checker_block]
+  let checker_block = Block.make_branch env [instr] (Var equals_id) in
+  Block.all env [expected_block; checker_block]
 
 
 and translate_pattern_literal_string (env : (_, _) Env.t) value s : Block.t =
@@ -416,7 +413,7 @@ and translate_pattern_map (env : (_, _) Env.t) value updates : Block.t =
         let exit_success = Node.make_if env true unboxed in
         let exit_failure = Node.make_if env false unboxed in
         start |~~> [exit_success; exit_failure] ;
-        {start; exit_success; exit_failure}
+        {start; exit_success; exit_failure= Some exit_failure}
       in
       Block.all env [call_block; unbox_block; check_block]
     in
@@ -431,11 +428,9 @@ and translate_pattern_map (env : (_, _) Env.t) value updates : Block.t =
   in
   let type_checker = check_type env value Map in
   let submatchers = Block.all env (List.map ~f:make_submatcher updates) in
+  let exit_failure = Block.join_failures env [type_checker; submatchers] in
   type_checker.exit_success |~~> [submatchers.start] ;
-  type_checker.exit_failure |~~> [submatchers.exit_failure] ;
-  { start= type_checker.start
-  ; exit_success= submatchers.exit_success
-  ; exit_failure= submatchers.exit_failure }
+  {start= type_checker.start; exit_success= submatchers.exit_success; exit_failure}
 
 
 and translate_pattern_record_index (env : (_, _) Env.t) value name field : Block.t =
@@ -453,11 +448,9 @@ and match_record_name env value name (record_info : Env.record_info) : Block.t =
   let name_load = load_field_from_id env name_id value (ErlangTypeName.tuple_elem 1) tuple_typ in
   let unpack_node = Node.make_stmt env [name_load] in
   let name_checker = translate_pattern_literal_atom env name_id name in
-  let exit_failure = Node.make_nop env in
+  let exit_failure = Block.join_failures env [type_checker; name_checker] in
   type_checker.exit_success |~~> [unpack_node] ;
   unpack_node |~~> [name_checker.start] ;
-  type_checker.exit_failure |~~> [exit_failure] ;
-  name_checker.exit_failure |~~> [exit_failure] ;
   {start= type_checker.start; exit_success= name_checker.exit_success; exit_failure}
 
 
@@ -506,11 +499,9 @@ and translate_pattern_tuple env value exprs : Block.t =
       (List.zip_exn exprs value_ids)
   in
   let submatcher = Block.all env matchers in
-  let exit_failure = Node.make_nop env in
+  let exit_failure = Block.join_failures env [type_checker; submatcher] in
   type_checker.exit_success |~~> [unpack_node] ;
   unpack_node |~~> [submatcher.start] ;
-  type_checker.exit_failure |~~> [exit_failure] ;
-  submatcher.exit_failure |~~> [exit_failure] ;
   {start= type_checker.start; exit_success= submatcher.exit_success; exit_failure}
 
 
@@ -525,17 +516,27 @@ and translate_pattern_number_expression (env : (_, _) Env.t) value location simp
 
 
 and translate_pattern_variable (env : (_, _) Env.t) value vname scope : Block.t =
-  (* We also assign to _ so that stuff like f()->_=1. works. But if we start checking for
-     re-binding, we should exclude _ from such checks. *)
-  let procname = procname_exn scope in
-  let store : Sil.instr =
-    let e1 : Exp.t = Lvar (Pvar.mk (Mangled.from_string vname) procname) in
-    let e2 : Exp.t = Var value in
-    Store {e1; typ= any_typ; e2; loc= env.location}
-  in
-  let exit_success = Node.make_stmt env [store] in
-  let exit_failure = Node.make_nop env in
-  {start= exit_success; exit_success; exit_failure}
+  let var_scope = scope_exn scope in
+  let var_exp = Exp.Lvar (Pvar.mk (Mangled.from_string vname) var_scope.procname) in
+  if var_scope.is_first_use then
+    let store : Sil.instr =
+      let e1 = var_exp in
+      let e2 = Exp.Var value in
+      Store {e1; typ= any_typ; e2; loc= env.location}
+    in
+    let exit_success = Node.make_stmt env [store] in
+    {start= exit_success; exit_success; exit_failure= None}
+  else
+    let var_id = mk_fresh_id () in
+    let load_instr = Sil.Load {id= var_id; e= var_exp; typ= any_typ; loc= env.location} in
+    let is_equal = mk_fresh_id () in
+    let eq_instr =
+      builtin_call env is_equal BuiltinDecl.__erlang_equal [Exp.Var var_id; Exp.Var value]
+    in
+    let eq_block = Block.make_instruction env [load_instr; eq_instr] in
+    let is_equal, unbox_block = unbox_bool env (Var is_equal) in
+    let check_eq_block = Block.make_branch env [] is_equal in
+    Block.all env [eq_block; unbox_block; check_eq_block]
 
 
 and translate_guard_expression (env : (_, _) Env.t) (expression : Ast.expression) : Exp.t * Block.t
@@ -556,7 +557,7 @@ and translate_guard env (expressions : Ast.expression list) : Block.t =
       let exprs, blocks = List.unzip exprs_blocks in
       let make_and e1 e2 = Exp.BinOp (LAnd, e1, e2) in
       let condition = List.reduce_exn exprs ~f:make_and in
-      let branch_block = Block.make_branch env condition in
+      let branch_block = Block.make_branch env [] condition in
       Block.all env (blocks @ [branch_block])
 
 
@@ -659,7 +660,7 @@ and translate_expression env {Ast.location; simple_expression} =
     | todo ->
         L.debug Capture Verbose "@[todo ErlangTranslator.translate_expression %s@."
           (Sexp.to_string (Ast.sexp_of_simple_expression todo)) ;
-        Block.all env [mk_general_unsupported_block env; Block.make_success env]
+        mk_general_unsupported_block env
   in
   (* Add extra nodes/instructions to store return value if needed *)
   match result with
@@ -702,16 +703,12 @@ and translate_expression_binary_operator (env : (_, _) Env.t) ret_var e1 (op : A
     let id2_cond = Node.make_if env (not short_circuit_when_lhs_is) unbox1 in
     let store_id1 = Node.make_load env ret_var (Var id1) any_typ in
     let store_id2 = Node.make_load env ret_var (Var id2) any_typ in
-    let exit_success = Node.make_nop env in
-    let exit_failure = Node.make_nop env in
+    let exit_success = Node.make_join env [store_id1; store_id2] in
     start |~~> [id1_cond; id2_cond] ;
     id1_cond |~~> [store_id1] ;
-    store_id1 |~~> [exit_success] ;
     id2_cond |~~> [block2.start] ;
     block2.exit_success |~~> [store_id2] ;
-    block2.exit_failure |~~> [exit_failure] ;
-    store_id2 |~~> [exit_success] ;
-    Block.all env [block1; unbox_block1; {start; exit_success; exit_failure}]
+    Block.all env [block1; unbox_block1; {start; exit_success; exit_failure= block2.exit_failure}]
   in
   let make_builtin_call fun_name =
     let args : Exp.t list = [Var id1; Var id2] in
@@ -874,9 +871,7 @@ and translate_expression_call_static (env : (_, _) Env.t) ret_var module_name_op
 and translate_expression_case (env : (_, _) Env.t) expression cases : Block.t =
   let id, expr_block = translate_expression_to_fresh_id env expression in
   let blocks = Block.any env (List.map ~f:(translate_case_clause env [id]) cases) in
-  let crash_node = Node.make_fail env BuiltinDecl.__erlang_error_case_clause in
-  blocks.exit_failure |~~> [crash_node] ;
-  let blocks = {blocks with exit_failure= crash_node} in
+  let blocks = add_crash_node env blocks BuiltinDecl.__erlang_error_case_clause in
   Block.all env [expr_block; blocks]
 
 
@@ -891,9 +886,7 @@ and translate_expression_cons (env : (_, _) Env.t) ret_var head tail : Block.t =
 
 and translate_expression_if env clauses : Block.t =
   let blocks = Block.any env (List.map ~f:(translate_case_clause env []) clauses) in
-  let crash_node = Node.make_fail env BuiltinDecl.__erlang_error_if_clause in
-  blocks.exit_failure |~~> [crash_node] ;
-  {blocks with exit_failure= crash_node}
+  add_crash_node env blocks BuiltinDecl.__erlang_error_if_clause
 
 
 and translate_expression_lambda (env : (_, _) Env.t) ret_var lambda_name cases procname_opt
@@ -928,7 +921,11 @@ and translate_expression_lambda (env : (_, _) Env.t) ret_var lambda_name cases p
     let access : ProcAttributes.access = Private in
     let formals = List.init ~f:(fun i -> (mangled_arg i, any_typ, Annot.Item.empty)) arity in
     let mk_capt_var (pvar : Pvar.t) =
-      {CapturedVar.pvar; typ= any_typ; capture_mode= ByValue; is_formal_of= None}
+      { CapturedVar.pvar
+      ; typ= any_typ
+      ; capture_mode= ByValue
+      ; captured_from= None
+      ; context_info= None }
     in
     let captured = List.map ~f:mk_capt_var captured_vars in
     {default with access; formals; is_defined= true; loc= env.location; ret_type= any_typ; captured}
@@ -956,7 +953,8 @@ and translate_expression_lambda (env : (_, _) Env.t) ret_var lambda_name cases p
         , { CapturedVar.pvar= var
           ; typ= any_typ
           ; capture_mode= CapturedVar.ByValue
-          ; is_formal_of= None } ) )
+          ; captured_from= None
+          ; context_info= None } ) )
     in
     let instrs, captured_vars = List.unzip (List.map ~f:mk_capt_var captured_vars) in
     (instrs, Exp.Closure {name; captured_vars})
@@ -987,32 +985,8 @@ and translate_expression_lambda (env : (_, _) Env.t) ret_var lambda_name cases p
 (* Helper function for the main loop of translating list/map comprehensions, taking care of
    generators and filters. *)
 and translate_comprehension_loop (env : (_, _) Env.t) loop_body qualifiers : Block.t =
-  (* Surround expression with filters *)
-  let apply_one_filter (qual : Ast.qualifier) (acc : Block.t) : Block.t =
-    match qual with
-    | Filter expr ->
-        (* Check expression, execute inner block (accumulator) only if true *)
-        let result_id, filter_expr_block = translate_expression_to_fresh_id env expr in
-        let unboxed, unbox_block = unbox_bool env (Exp.Var result_id) in
-        let true_node = Node.make_if env true unboxed in
-        let false_node = Node.make_if env false unboxed in
-        let fail_node = Node.make_nop env in
-        let succ_node = Node.make_nop env in
-        let filter_expr_block = Block.all env [filter_expr_block; unbox_block] in
-        filter_expr_block.exit_success |~~> [true_node; false_node] ;
-        filter_expr_block.exit_failure |~~> [fail_node] ;
-        true_node |~~> [acc.start] ;
-        false_node |~~> [succ_node] ;
-        acc.exit_success |~~> [succ_node] ;
-        acc.exit_failure |~~> [fail_node] ;
-        {start= filter_expr_block.start; exit_success= succ_node; exit_failure= fail_node}
-    | _ ->
-        (* Ignore generators *)
-        acc
-  in
-  let loop_body_with_filters = List.fold_right qualifiers ~f:apply_one_filter ~init:loop_body in
-  (* Wrap filtered expression with loops for generators*)
-  let apply_one_gen (qual : Ast.qualifier) (acc : Block.t) : Block.t =
+  (* Surround expression with filters and and loops for generators *)
+  let apply_one_qualifier (qual : Ast.qualifier) (acc : Block.t) : Block.t =
     (* Helper function for the common parts of list/map generators, namely taking elements from
        the list one-by-one in a loop (maps are also converted to lists). *)
     let make_gen gen_var (init_block : Block.t) mk_matcher : Block.t =
@@ -1030,19 +1004,15 @@ and translate_comprehension_loop (env : (_, _) Env.t) loop_body qualifiers : Blo
       let unpack_node = Node.make_stmt env [head_load; tail_load] in
       (* Match head and evaluate expression *)
       let head_matcher : Block.t = mk_matcher head_var in
-      let fail_node = Node.make_nop env in
-      let join_node = Node.make_join env in
-      init_block.exit_success |~~> [join_node] ;
-      init_block.exit_failure |~~> [fail_node] ;
+      let exit_failure = Block.join_failures env [init_block; acc] in
+      let join_node = Node.make_join env [init_block.exit_success; acc.exit_success] in
       join_node |~~> [check_cons_node] ;
       check_cons_node |~~> [is_cons_node; no_cons_node] ;
       is_cons_node |~~> [unpack_node] ;
       unpack_node |~~> [head_matcher.start] ;
       head_matcher.exit_success |~~> [acc.start] ;
-      head_matcher.exit_failure |~~> [join_node] ;
-      acc.exit_success |~~> [join_node] ;
-      acc.exit_failure |~~> [fail_node] ;
-      {start= init_block.start; exit_success= no_cons_node; exit_failure= fail_node}
+      head_matcher.exit_failure |?~> [join_node] ;
+      {start= init_block.start; exit_success= no_cons_node; exit_failure}
     in
     let make_gen_checker id types =
       let check_blocks = List.map ~f:(fun typ -> check_type env id typ) types in
@@ -1050,6 +1020,18 @@ and translate_comprehension_loop (env : (_, _) Env.t) loop_body qualifiers : Blo
       Block.any env (check_blocks @ [fail_block])
     in
     match qual with
+    | Filter expr ->
+        (* Check expression, execute inner block (accumulator) only if true *)
+        let result_id, filter_expr_block = translate_expression_to_fresh_id env expr in
+        let unboxed, unbox_block = unbox_bool env (Exp.Var result_id) in
+        let true_node = Node.make_if env true unboxed in
+        let false_node = Node.make_if env false unboxed in
+        let exit_failure = Block.join_failures env [filter_expr_block; acc] in
+        let exit_success = Node.make_join env [false_node; acc.exit_success] in
+        let filter_expr_block = Block.all env [filter_expr_block; unbox_block] in
+        filter_expr_block.exit_success |~~> [true_node; false_node] ;
+        true_node |~~> [acc.start] ;
+        {start= filter_expr_block.start; exit_success; exit_failure}
     | Generator {pattern; expression} ->
         let gen_var, init_block = translate_expression_to_fresh_id env expression in
         let check_block = make_gen_checker gen_var [Nil; Cons] in
@@ -1085,10 +1067,12 @@ and translate_comprehension_loop (env : (_, _) Env.t) loop_body qualifiers : Blo
           {matcher with start= key_val_load}
         in
         make_gen gen_var init_block mk_matcher
-    | _ ->
-        acc
+    | BitsGenerator _ ->
+        let unsupported = call_unsupported "bits_generator" 0 in
+        let call_instr = builtin_call env (mk_fresh_id ()) unsupported [] in
+        Block.all env [Block.make_instruction env [call_instr]; acc]
   in
-  List.fold_right qualifiers ~f:apply_one_gen ~init:loop_body_with_filters
+  List.fold_right qualifiers ~f:apply_one_qualifier ~init:loop_body
 
 
 and translate_expression_listcomprehension (env : (_, _) Env.t) ret_var expression qualifiers :
@@ -1157,8 +1141,10 @@ and translate_expression_map_update (env : (_, _) Env.t) ret_var map updates : B
   let check_map_type_block : Block.t =
     let type_checker = check_type env map_id Map in
     let crash_node = Node.make_fail env BuiltinDecl.__erlang_error_badmap in
-    type_checker.exit_failure |~~> [crash_node] ;
-    {start= type_checker.start; exit_success= type_checker.exit_success; exit_failure= crash_node}
+    type_checker.exit_failure |?~> [crash_node] ;
+    { start= type_checker.start
+    ; exit_success= type_checker.exit_success
+    ; exit_failure= Some crash_node }
   in
   (* Translate updates one-by-one, also check key if exact association *)
   let translate_update (one_update : Ast.association) =
@@ -1193,7 +1179,7 @@ and translate_expression_map_update (env : (_, _) Env.t) ret_var map updates : B
             let exit_failure = Node.make_fail env BuiltinDecl.__erlang_error_badkey in
             start |~~> [exit_success; no_key_node] ;
             no_key_node |~~> [exit_failure] ;
-            {start; exit_success; exit_failure}
+            {start; exit_success; exit_failure= Some exit_failure}
           in
           [Block.all env [call_block; unbox_block; check_block]]
     in
@@ -1235,9 +1221,7 @@ and translate_expression_mapcomprehension (env : (_, _) Env.t) ret_var
 and translate_expression_match (env : (_, _) Env.t) ret_var pattern body : Block.t =
   let body_id, body_block = translate_expression_to_fresh_id env body in
   let pattern_block = translate_pattern env body_id pattern in
-  let crash_node = Node.make_fail env BuiltinDecl.__erlang_error_badmatch in
-  pattern_block.exit_failure |~~> [crash_node] ;
-  let pattern_block = {pattern_block with exit_failure= crash_node} in
+  let pattern_block = add_crash_node env pattern_block BuiltinDecl.__erlang_error_badmatch in
   (* Note that for an expression X = Y, this causes X to be returned. This is because
      in lineage, for Z = (X = Y) we wanted flows to be Y -> X and X -> Y instead of
      Y -> X and Y -> Z. But if X is some data structure (e.g. a tuple) this causes
@@ -1258,8 +1242,8 @@ and translate_expression_maybe (env : (_, _) Env.t) body else_cases ret_var : Bl
           let body_id, body_block = translate_expression_to_fresh_id env body in
           let pattern_block = translate_pattern env body_id pattern in
           let store_result = Node.make_load env short_circuit_result (Var body_id) any_typ in
-          pattern_block.exit_failure |~~> [store_result] ;
-          let pattern_block = {pattern_block with exit_failure= store_result} in
+          pattern_block.exit_failure |?~> [store_result] ;
+          let pattern_block = {pattern_block with exit_failure= Some store_result} in
           (pattern_block :: body_block :: rev_blocks, body_id)
       | _ ->
           (* All other expressions are treated simply as if we were in a block. *)
@@ -1280,17 +1264,15 @@ and translate_expression_maybe (env : (_, _) Env.t) body else_cases ret_var : Bl
           Block.any env (List.map ~f:(translate_case_clause env [short_circuit_result]) else_cases)
         in
         let crash_node = Node.make_fail env BuiltinDecl.__erlang_error_else_clause in
-        cases.exit_failure |~~> [crash_node] ;
-        {cases with exit_failure= crash_node}
+        cases.exit_failure |?~> [crash_node] ;
+        {cases with exit_failure= Some crash_node}
   in
-  let exit_node = Node.make_nop env in
+  let exit_success = Node.make_join env [store_last_expr; else_blocks.exit_success] in
   (* In case of success, simply return last expression *)
   maybe_block.exit_success |~~> [store_last_expr] ;
   (* In case of short circuit, go to else clauses *)
-  maybe_block.exit_failure |~~> [else_blocks.start] ;
-  store_last_expr |~~> [exit_node] ;
-  else_blocks.exit_success |~~> [exit_node] ;
-  {maybe_block with exit_success= exit_node; exit_failure= Node.make_nop env}
+  maybe_block.exit_failure |?~> [else_blocks.start] ;
+  {maybe_block with exit_success; exit_failure= None}
 
 
 and translate_expression_nil (env : (_, _) Env.t) ret_var : Block.t =
@@ -1310,13 +1292,11 @@ and translate_expression_receive (env : (_, _) Env.t) cases timeout : Block.t =
         let cases_or_timeout_block =
           let timeout_block = translate_body env handler in
           let start = Node.make_nop env in
-          let exit_failure = Node.make_nop env in
-          let exit_success = Node.make_nop env in
+          let exit_failure = Block.join_failures env [cases_block; timeout_block] in
+          let exit_success =
+            Node.make_join env [cases_block.exit_success; timeout_block.exit_success]
+          in
           start |~~> [cases_block.start; timeout_block.start] ;
-          cases_block.exit_success |~~> [exit_success] ;
-          timeout_block.exit_success |~~> [exit_success] ;
-          cases_block.exit_failure |~~> [exit_failure] ;
-          timeout_block.exit_failure |~~> [exit_failure] ;
           {Block.start; exit_success; exit_failure}
         in
         let _, time_expr_block = translate_expression_to_fresh_id env time in
@@ -1336,8 +1316,8 @@ and translate_expression_record_access (env : (_, _) Env.t) ret_var record name 
     let value_block = translate_expression_to_id env record_id record in
     let matcher_block = match_record_name env record_id name record_info in
     let crash_node = Node.make_fail env BuiltinDecl.__erlang_error_badrecord in
-    matcher_block.exit_failure |~~> [crash_node] ;
-    let matcher_block = {matcher_block with exit_failure= crash_node} in
+    matcher_block.exit_failure |?~> [crash_node] ;
+    let matcher_block = {matcher_block with exit_failure= Some crash_node} in
     Block.all env [value_block; matcher_block]
   in
   let field_info = String.Map.find_exn record_info.field_info field in
@@ -1380,8 +1360,8 @@ and translate_expression_record_update (env : (_, _) Env.t) ret_var record name 
         let value_block = translate_expression_to_id env record_id expr in
         let matcher_block = match_record_name env record_id name record_info in
         let crash_node = Node.make_fail env BuiltinDecl.__erlang_error_badrecord in
-        matcher_block.exit_failure |~~> [crash_node] ;
-        let matcher_block = {matcher_block with exit_failure= crash_node} in
+        matcher_block.exit_failure |?~> [crash_node] ;
+        let matcher_block = {matcher_block with exit_failure= Some crash_node} in
         [Block.all env [value_block; matcher_block]]
     | None ->
         []
@@ -1451,8 +1431,8 @@ and translate_expression_trycatch (env : (_, _) Env.t) ret_var body ok_cases _ca
         (* Ok cases present: treat as case expression *)
         let cases = Block.any env (List.map ~f:(translate_case_clause env [body_id]) ok_cases) in
         let crash_node = Node.make_fail env BuiltinDecl.__erlang_error_try_clause in
-        cases.exit_failure |~~> [crash_node] ;
-        {cases with exit_failure= crash_node}
+        cases.exit_failure |?~> [crash_node] ;
+        {cases with exit_failure= Some crash_node}
   in
   let after_id = mk_fresh_id () in
   let after_block = translate_body {env with result= Env.Present (Exp.Var after_id)} after in
@@ -1496,7 +1476,7 @@ and translate_expression_unary_operator (env : (_, _) Env.t) ret_var (op : Ast.u
 
 
 and translate_expression_variable (env : (_, _) Env.t) ret_var vname scope : Block.t =
-  let procname = procname_exn scope in
+  let procname = (scope_exn scope).procname in
   let e = Exp.Lvar (Pvar.mk (Mangled.from_string vname) procname) in
   let load_instr = Sil.Load {id= ret_var; e; typ= any_typ; loc= env.location} in
   Block.make_instruction env [load_instr]
@@ -1522,19 +1502,30 @@ and translate_body (env : (_, _) Env.t) body : Block.t =
 and translate_case_clause (env : (_, _) Env.t) (values : Ident.t list)
     {Ast.location; patterns; guards; body} : Block.t =
   let env = update_location location env in
-  let f (one_value, one_pattern) = translate_pattern env one_value one_pattern in
-  let matchers = List.map ~f (List.zip_exn values patterns) in
-  let guard_block = translate_guard_sequence env guards in
-  let matchers_and_guards = Block.all env [Block.all env matchers; guard_block] in
+  let matcher_blocks =
+    match patterns with
+    | [] ->
+        []
+    | _ ->
+        let f (one_value, one_pattern) = translate_pattern env one_value one_pattern in
+        List.map ~f (List.zip_exn values patterns)
+  in
+  let guard_blocks = match guards with [] -> [] | _ -> [translate_guard_sequence env guards] in
+  let matchers_and_guards = matcher_blocks @ guard_blocks in
   let body_block = translate_body env body in
-  matchers_and_guards.exit_success |~~> [body_block.start] ;
+  (* Redirect body's exit failure to the end of the procedure, otherwise a failure in the body
+     would mean we go to the next clause. Plus if there is some failure in the body, there should
+     already be an explicit fail node on the path. *)
   let () =
     let (Env.Present procdesc) = env.procdesc in
-    body_block.exit_failure |~~> [Procdesc.get_exit_node procdesc]
+    body_block.exit_failure |?~> [Procdesc.get_exit_node procdesc]
   in
-  { start= matchers_and_guards.start
-  ; exit_failure= matchers_and_guards.exit_failure
-  ; exit_success= body_block.exit_success }
+  let body_block = {body_block with exit_failure= None} in
+  match matchers_and_guards with
+  | [] ->
+      body_block
+  | _ ->
+      Block.all env (matchers_and_guards @ [body_block])
 
 
 (** Translate all clauses of a function (top-level or lambda). *)
@@ -1549,20 +1540,22 @@ and translate_function_clauses (env : (_, _) Env.t) procdesc (attributes : ProcA
       (id, load)
     in
     let idents, load_instructions = List.unzip (List.map ~f:load attributes.formals) in
-    (idents, Block.make_instruction env ~kind:ErlangCaseClause load_instructions)
+    let load_blocks =
+      match load_instructions with [] -> [] | _ -> [Block.make_instruction env load_instructions]
+    in
+    (idents, load_blocks)
   in
   (* Translate each clause using the idents we load into. *)
   let clauses_blocks =
     let match_cases = List.map ~f:(translate_case_clause env idents) clauses in
-    let no_match_case = Block.make_fail env BuiltinDecl.__erlang_error_function_clause in
-    Block.any env (match_cases @ [no_match_case])
+    add_crash_node env (Block.any env match_cases) BuiltinDecl.__erlang_error_function_clause
   in
   let maybe_prune_args =
     match spec with
     | Some spec ->
-        Block.any env [ErlangTypes.prune_spec_args env idents spec; Block.make_stuck env]
+        [Block.any env [ErlangTypes.prune_spec_args env idents spec; Block.make_stuck env]]
     | None ->
-        Block.make_success env
+        []
   in
   let maybe_prune_ret =
     match spec with
@@ -1574,14 +1567,14 @@ and translate_function_clauses (env : (_, _) Env.t) procdesc (attributes : ProcA
         in
         let prune_ret = ErlangTypes.prune_spec_return env id spec in
         let bad_ret_type = Block.make_fail env BuiltinDecl.__erlang_error_badreturn in
-        Block.all env [load; Block.any env [prune_ret; bad_ret_type]]
+        [Block.all env [load; Block.any env [prune_ret; bad_ret_type]]]
     | _ ->
-        Block.make_success env
+        []
   in
-  let body = Block.all env [loads; maybe_prune_args; clauses_blocks; maybe_prune_ret] in
+  let body = Block.all env (loads @ maybe_prune_args @ [clauses_blocks] @ maybe_prune_ret) in
   Procdesc.get_start_node procdesc |~~> [body.start] ;
   body.exit_success |~~> [Procdesc.get_exit_node procdesc] ;
-  body.exit_failure |~~> [Procdesc.get_exit_node procdesc]
+  body.exit_failure |?~> [Procdesc.get_exit_node procdesc]
 
 
 let mk_procdesc (env : (_, _) Env.t) attributes =
@@ -1646,7 +1639,7 @@ let translate_one_type (env : (_, _) Env.t) name type_ =
   in
   Procdesc.get_start_node procdesc |~~> [body.start] ;
   body.exit_success |~~> [Procdesc.get_exit_node procdesc] ;
-  body.exit_failure |~~> [Procdesc.get_exit_node procdesc]
+  body.exit_failure |?~> [Procdesc.get_exit_node procdesc]
 
 
 (** Translate one spec without a function body defined, into a procedure that returns a fresh value,
@@ -1674,7 +1667,7 @@ let translate_one_spec (env : (_, _) Env.t) function_ spec =
     in
     Procdesc.get_start_node procdesc |~~> [body.start] ;
     body.exit_success |~~> [Procdesc.get_exit_node procdesc] ;
-    body.exit_failure |~~> [Procdesc.get_exit_node procdesc]
+    body.exit_failure |?~> [Procdesc.get_exit_node procdesc]
 
 
 let add_module_info_field (env : (_, _) Env.t) tenv =

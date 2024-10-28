@@ -30,7 +30,7 @@ let get_modeled_as_returning_copy_opt proc_name =
 
 let to_arg_payloads actuals =
   List.map actuals ~f:(fun (exp, typ) ->
-      ProcnameDispatcher.Call.FuncArg.{exp; typ; arg_payload= ()} )
+      {ProcnameDispatcher.Call.FuncArg.exp; typ; arg_payload= ()} )
 
 
 let is_thrift_field_copy_assignment =
@@ -40,8 +40,9 @@ let is_thrift_field_copy_assignment =
        assignment. Thus, here we check if the funtion is templated.
        https://github.com/facebook/fbthrift/blob/bf6f866e2f4ce7adb35b99c6c126720cd9e2b095/thrift/lib/cpp2/FieldRef.h#L293-L310 *)
     make_dispatcher
-      [ -"apache" &:: "thrift" &:: "field_ref" &:: "operator=" < any_typ >$ any_arg $+ any_arg
-        $--> () ]
+      [ -"apache" &:: "thrift"
+        &::+ (fun _ s -> Typ.is_thrift_field_ref_str s)
+        &:: "operator=" < any_typ >$ any_arg $+ any_arg $--> () ]
   in
   fun pname actuals ->
     let arg_payloads = to_arg_payloads actuals in
@@ -52,9 +53,10 @@ let get_copy_origin pname actuals =
   let open IOption.Let_syntax in
   let* attrs = IRAttributes.load pname in
   if attrs.ProcAttributes.is_cpp_copy_ctor then Some Attribute.CopyOrigin.CopyCtor
-  else if attrs.ProcAttributes.is_cpp_copy_assignment then Some Attribute.CopyOrigin.CopyAssignment
+  else if attrs.ProcAttributes.is_cpp_copy_assignment then
+    Some (Attribute.CopyOrigin.CopyAssignment Normal)
   else if is_thrift_field_copy_assignment pname actuals then
-    Some Attribute.CopyOrigin.CopyAssignment
+    Some (Attribute.CopyOrigin.CopyAssignment Thrift)
   else None
 
 
@@ -123,12 +125,12 @@ let try_eval path location e astate =
       None
 
 
-let get_copied_and_source ({PathContext.timestamp} as path) rest_args location from
+let get_copied_and_source ({PathContext.timestamp} as path) rest_args node location from
     (astate : AbductiveDomain.t) =
   let heap = (astate.post :> BaseDomain.t).heap in
   let get_copy_spec source_typ source_opt =
     NonDisjDomain.Copied
-      {heap; source_typ; source_opt; location; copied_location= None; from; timestamp}
+      {heap; source_typ; source_opt; node; location; copied_location= None; from; timestamp}
   in
   let astate, source_addr_typ_opt =
     match rest_args with
@@ -182,7 +184,7 @@ let rec get_fixed_size integer_widths tenv name =
                 Some (match fkind with FFloat -> 32 | FDouble -> 64 | FLongDouble -> 128)
             | Tstruct name ->
                 get_fixed_size integer_widths tenv name
-            | Tvoid | Tfun | Tptr _ | TVar _ | Tarray _ ->
+            | Tvoid | Tfun _ | Tptr _ | TVar _ | Tarray _ ->
                 None
           in
           acc + size )
@@ -287,8 +289,12 @@ let is_address_reachable_from_unowned source_addr ~astates_before proc_lvalue_re
 let is_copied_from_address_reachable_from_unowned ~is_captured_by_ref ~is_intermediate ~from
     source_addr_typ_opt proc_lvalue_ref_parameters ~astates_before =
   ( is_intermediate
-  || Attribute.CopyOrigin.equal from CopyAssignment
-  || Attribute.CopyOrigin.equal from CopyToOptional )
+  ||
+  match (from : Attribute.CopyOrigin.t) with
+  | CopyAssignment _ | CopyToOptional ->
+      true
+  | CopyCtor | CopyInGetDefault ->
+      false )
   && Option.exists source_addr_typ_opt ~f:(fun (source_addr, source_expr, _) ->
          ( match source_expr with
          | DecompilerExpr.SourceExpr ((PVar pvar, _), _) ->
@@ -304,7 +310,7 @@ let is_copied_from_address_reachable_from_unowned ~is_captured_by_ref ~is_interm
 
 
 let add_copies_to_pvar_or_field ~is_captured_by_ref proc_lvalue_ref_parameters integer_type_widths
-    tenv path location from args ~astates_before (astate_n, astate) =
+    tenv node path location from args ~astates_before (astate_n, astate) =
   let open IOption.Let_syntax in
   match (args : (Exp.t * Typ.t) list) with
   | ((Lvar copy_pvar | Lindex (Lvar copy_pvar, _)), copy_type) :: ((_, source_typ) :: _ as rest_args)
@@ -312,7 +318,7 @@ let add_copies_to_pvar_or_field ~is_captured_by_ref proc_lvalue_ref_parameters i
          && not (NonDisjDomain.is_locked astate_n) ->
       let copied_var = Var.of_pvar copy_pvar in
       let get_copy_spec, astate, source_addr_typ_opt =
-        get_copied_and_source path rest_args location from astate
+        get_copied_and_source path rest_args node location from astate
       in
       let* _, source_expr, _ = source_addr_typ_opt in
       let copy_into_source_opt : (Attribute.CopiedInto.t * DecompilerExpr.source_expr option) option
@@ -378,7 +384,7 @@ let add_copies_to_pvar_or_field ~is_captured_by_ref proc_lvalue_ref_parameters i
       try_eval path location exp astate
       |> Option.bind ~f:(fun (astate, copy_addr) ->
              let get_copy_spec, astate, source_addr_typ_opt =
-               get_copied_and_source path rest_args location from astate
+               get_copied_and_source path rest_args node location from astate
              in
              if
                is_copied_from_address_reachable_from_unowned ~is_captured_by_ref
@@ -453,7 +459,7 @@ let remove_optional_copies_to_return proc_desc path location pname args (astate_
       None
 
 
-let add_copies integer_type_widths tenv proc_desc path location pname actuals ~astates_before
+let add_copies integer_type_widths tenv proc_desc node path location pname actuals ~astates_before
     default =
   let is_captured_by_ref =
     let captured_by_ref =
@@ -471,7 +477,7 @@ let add_copies integer_type_widths tenv proc_desc path location pname actuals ~a
           |> List.filter ~f:(fun (_, typ) -> not (Typ.is_rvalue_reference typ))
         in
         add_copies_to_pvar_or_field ~is_captured_by_ref proc_lvalue_ref_parameters
-          integer_type_widths tenv path location from args ~astates_before default
+          integer_type_widths tenv node path location from args ~astates_before default
         |-> add_copies_to_return integer_type_widths tenv proc_desc path location from args
         (* Ignore optional copies to return value to avoid false positives w.r.t. RVO/NRVO *)
         |-> remove_optional_copies_to_return proc_desc path location pname args )
@@ -495,7 +501,7 @@ let get_copied_into copied_var : Attribute.CopiedInto.t =
   if is_copy_into_local copied_var then IntoVar {copied_var} else IntoIntermediate {copied_var}
 
 
-let add_copied_return path location pname actuals (astate_n, astate) =
+let add_copied_return node path location pname actuals (astate_n, astate) =
   let open IOption.Let_syntax in
   if is_lock pname then Some (NonDisjDomain.set_locked astate_n, astate)
   else if not (NonDisjDomain.is_locked astate_n) then
@@ -526,6 +532,7 @@ let add_copied_return path location pname actuals (astate_n, astate) =
                  { heap= (astate.post :> BaseDomain.t).heap
                  ; source_typ= Some (Typ.strip_ptr copy_type)
                  ; source_opt
+                 ; node
                  ; location
                  ; copied_location= Some (pname, copied_location)
                  ; from
@@ -539,16 +546,16 @@ let add_copied_return path location pname actuals (astate_n, astate) =
   else None
 
 
-let call integer_type_widths tenv proc_desc path loc ~call_exp ~actuals ~astates_before astates
+let call integer_type_widths tenv proc_desc node path loc ~call_exp ~actuals ~astates_before astates
     astate_n =
   match (call_exp : Exp.t) with
   | Const (Cfun pname) | Closure {name= pname} ->
       continue_fold_map astates ~init:astate_n ~f:(fun astate_n astate ->
           let default = (astate_n, astate) in
           let ( |-> ) = IOption.continue ~default in
-          add_copies integer_type_widths tenv proc_desc path loc pname actuals ~astates_before
+          add_copies integer_type_widths tenv proc_desc node path loc pname actuals ~astates_before
             default
-          |-> add_copied_return path loc pname actuals )
+          |-> add_copied_return node path loc pname actuals )
   | _ ->
       (astate_n, astates)
 

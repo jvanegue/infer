@@ -9,6 +9,7 @@ open! IStd
 open PulseBasicInterface
 open PulseDomainInterface
 open PulseOperationResult.Import
+open PulseModelsImport
 
 type 'a model_monad
 
@@ -19,9 +20,22 @@ type aval = AbstractValue.t * ValueHistory.t
 module Syntax : sig
   module ModeledField = PulseOperations.ModeledField
 
+  val to_aval : ValueOrigin.t -> aval
+
   (** {2 Polymorphic Operations} *)
 
   val ( let* ) : 'a model_monad -> ('a -> 'b model_monad) -> 'b model_monad
+
+  val ( >>= ) : 'a model_monad -> ('a -> 'b model_monad) -> 'b model_monad
+
+  val ( @= ) : ('a -> 'b model_monad) -> 'a model_monad -> 'b model_monad
+
+  val ( @@> ) : unit model_monad -> 'a model_monad -> 'a model_monad
+  (** sequential composition *)
+
+  val compose1 : ('a -> model) -> ('a -> model) -> 'a -> model
+
+  val compose2 : ('a -> 'b -> model) -> ('a -> 'b -> model) -> 'a -> 'b -> model
 
   val ret : 'a -> 'a model_monad
 
@@ -53,7 +67,6 @@ module Syntax : sig
   val ignore : 'a model_monad -> unit model_monad [@@warning "-unused-value-declaration"]
 
   val assign_ret : aval -> unit model_monad
-  (** assign the value to the return variable of the current function *)
 
   val dynamic_dispatch :
        cases:(Typ.name * (unit -> 'a model_monad)) list
@@ -69,23 +82,23 @@ module Syntax : sig
 
   val apply_hack_closure : aval -> aval list -> aval model_monad
 
-  val get_data : PulseModelsImport.model_data model_monad
+  val get_data : model_data model_monad
 
   val add_model_call : ValueHistory.t -> ValueHistory.t model_monad
 
   (** {2 Disjunctive reasoning} *)
 
-  val disjuncts : 'a model_monad list -> 'a model_monad
+  val disj : 'a model_monad list -> 'a model_monad
 
-  val start_model : unit model_monad -> PulseModelsImport.model
+  val start_model : (unit -> unit model_monad) -> model
   (** get a model from a disjunctive model_monad *)
 
-  val start_named_model : string -> unit model_monad -> PulseModelsImport.model
+  val start_named_model : string -> (unit -> unit model_monad) -> model
 
-  val lift_to_monad : PulseModelsImport.model -> unit model_monad
-  (** beware that the model may modify the [PulseModelsImport.model_data.ret] field *)
+  val lift_to_monad : model -> unit model_monad
+  (** beware that the model may modify the [model_data.ret] field *)
 
-  val lift_to_monad_and_get_result : PulseModelsImport.model -> aval model_monad
+  val lift_to_monad_and_get_result : model -> aval model_monad
   (** apply the model and return its result. fails if the model did not assign the reserved
       [model_data.ret] variable. *)
 
@@ -95,35 +108,47 @@ module Syntax : sig
 
   val allocation : Attribute.allocator -> aval -> unit model_monad
 
+  val data_dependency : ValueOrigin.t -> ValueOrigin.t list -> unit model_monad
+
+  val data_dependency_to_ret : ValueOrigin.t list -> unit model_monad
+
   val add_dict_contain_const_keys : aval -> unit model_monad
 
   val add_dict_read_const_key : aval -> Fieldname.t -> unit model_monad
 
   val remove_dict_contain_const_keys : aval -> unit model_monad
 
-  val is_hack_sinit_called : aval -> bool model_monad
+  val is_hack_constinit_called : aval -> bool model_monad
 
-  val set_hack_sinit_called : aval -> unit model_monad
+  val set_hack_constinit_called : aval -> unit model_monad
 
   val add_static_type : Typ.name -> aval -> unit model_monad
 
   val deep_copy : ?depth_max:int -> aval -> aval model_monad
 
-  val eval_binop : Binop.t -> aval -> aval -> aval model_monad
+  val check_valid :
+    ?must_be_valid_reason:Invalidation.must_be_valid_reason -> ValueOrigin.t -> unit model_monad
 
-  val eval_binop_int : Binop.t -> aval -> IntLit.t -> aval model_monad
+  val binop : Binop.t -> aval -> aval -> aval model_monad
 
-  val eval_read : Exp.t -> aval model_monad [@@warning "-unused-value-declaration"]
+  val binop_int : Binop.t -> aval -> IntLit.t -> aval model_monad
 
-  val eval_const_int : int -> aval model_monad
+  val unop : Unop.t -> aval -> aval model_monad
 
-  val eval_const_string : string -> aval model_monad
+  val read : Exp.t -> aval model_monad [@@warning "-unused-value-declaration"]
 
-  val eval_string_concat : aval -> aval -> aval model_monad
+  val int : ?hist:ValueHistory.t -> int -> aval model_monad
 
-  val eval_access : access_mode -> aval -> Access.t -> aval model_monad
+  val string : string -> aval model_monad
 
-  val eval_deref_access : access_mode -> aval -> Access.t -> aval model_monad
+  val string_concat : aval -> aval -> aval model_monad
+
+  val access : access_mode -> aval -> Access.t -> aval model_monad
+
+  val load_access : ?no_access:bool -> aval -> Access.t -> aval model_monad
+
+  val load : aval -> aval model_monad
+  (** read the Dereference access from the value *)
 
   val get_dynamic_type :
     ask_specialization:bool -> aval -> Formula.dynamic_type_data option model_monad
@@ -137,13 +162,15 @@ module Syntax : sig
   val remove_hack_builder_attributes : aval -> unit model_monad
   [@@warning "-unused-value-declaration"]
 
-  val get_const_string : aval -> string option model_monad
+  val fresh : ?more:string -> unit -> aval model_monad
 
-  val mk_fresh : ?more:string -> unit -> aval model_monad
+  val fresh_nonneg : ?more:string -> unit -> aval model_monad
 
-  val write_field : ref:aval -> obj:aval -> Fieldname.t -> unit model_monad
+  val write_field : ref:aval -> Fieldname.t -> aval -> unit model_monad
 
-  val write_deref_field : ref:aval -> obj:aval -> Fieldname.t -> unit model_monad
+  val store_field : ref:aval -> Fieldname.t -> aval -> unit model_monad
+
+  val store : ref:aval -> aval -> unit model_monad
 
   val get_known_fields : aval -> Access.t list model_monad
   (** Return the fields we know about. There may be more, so use with caution *)
@@ -198,15 +225,14 @@ module Syntax : sig
 
   val as_constant_string : aval -> string option model_monad
 
-  val mk_int : ?hist:ValueHistory.t -> int -> aval model_monad
+  val null : aval model_monad
 
   (** {2 Tenv operations} *)
 
   val tenv_resolve_field_info : Typ.name -> Fieldname.t -> Struct.field_info option model_monad
 
-  val tenv_resolve_fieldname : Typ.name -> string -> Fieldname.t option model_monad
-
-  val write_deref : ref:aval -> obj:aval -> unit model_monad
+  val tenv_resolve_fieldname :
+    Typ.name -> string -> (Fieldname.t option * Tenv.unresolved_reason option) model_monad
 
   (** {2 Invalidation operations} *)
 
@@ -230,15 +256,17 @@ module Syntax : sig
   (** This is used to make hack_get_static_class behave like a pure function *)
 
   module Basic : sig
-    val alloc_not_null : Attribute.allocator -> Exp.t option -> initialize:bool -> unit model_monad
+    val return_alloc_not_null :
+      Attribute.allocator -> Exp.t option -> initialize:bool -> unit model_monad
+
+    val free : Invalidation.t -> ValueOrigin.t ProcnameDispatcher.Call.FuncArg.t -> unit model_monad
+
+    val early_exit : model
   end
 end
 
 val unsafe_to_astate_transformer :
-     'a model_monad
-  -> CallEvent.t * PulseModelsImport.model_data
-  -> astate
-  -> ('a * astate) sat_unsat_t
+  'a model_monad -> CallEvent.t * model_data -> astate -> ('a * astate) sat_unsat_t
 (** warning: the transformation will fail if the result of the computation is not a single abstract
     state with no error and it ignores the non-disjunctive state. You should think twice before
     using it... *)

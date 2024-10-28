@@ -2989,6 +2989,24 @@ module Formula = struct
               LinSubst l' )
 
 
+    let get_var_as_const phi v =
+      Var.Map.find_opt v phi.linear_eqs |> Option.bind ~f:LinArith.get_as_const
+
+
+    let subst_target_of_term phi t =
+      match Term.to_subst_target t with
+      | (QSubst _ | ConstantSubst _ | LinSubst _) as subst ->
+          subst
+      | VarSubst v as subst -> (
+        match get_var_as_const phi v with Some q -> QSubst q | None -> subst )
+      | NonLinearTermSubst t' as subst -> (
+        match get_term_eq phi t' |> Option.bind ~f:(get_var_as_const phi) with
+        | Some q ->
+            QSubst q
+        | None ->
+            subst )
+
+
     (** substitute vars in [l] *once* with their linear form to discover more simplification
         opportunities *)
     let normalize_linear phi l = normalize_linear_ phi phi.linear_eqs l
@@ -3097,7 +3115,7 @@ module Formula = struct
 
 
     and add_linear_eq_and_solve_new_eq_opt ~fuel new_eqs v l phi =
-      Debug.p "add_linear_eq_and_merge_new_eq_opt %a->%a@\n" Var.pp v (LinArith.pp Var.pp) l ;
+      Debug.p "add_linear_eq_and_solve_new_eq_opt %a->%a@\n" Var.pp v (LinArith.pp Var.pp) l ;
       let phi, new_eq_opt = add_linear_eq v l phi in
       discharge_new_eq_opt ~fuel new_eqs v new_eq_opt phi
 
@@ -3437,9 +3455,9 @@ module Formula = struct
 
 
     and propagate_in_term_eqs ~fuel (tx : Term.t) x ((phi, new_eqs) as phi_new_eqs) =
-      match Term.to_subst_target tx with
+      match subst_target_of_term phi tx with
       | LinSubst _ | NonLinearTermSubst _ ->
-          Debug.p "prop in term eqs tx=%a, x=%a being ignored" (Term.pp Var.pp) tx Var.pp x ;
+          Debug.p "prop in term eqs tx=%a, x=%a being ignored@\n" (Term.pp Var.pp) tx Var.pp x ;
           Sat phi_new_eqs
       | (VarSubst _ | QSubst _ | ConstantSubst _) as subst_target_x -> (
         match Var.Map.find_opt x phi.term_eqs_occurrences with
@@ -3617,7 +3635,7 @@ module Formula = struct
              substitute them with [tx] to get maximally-expanded atoms *)
           Debug.p "propagating %a = %a in atoms@\n" (Term.pp Var.pp) tx Var.pp x ;
           let phi = remove_from_atoms_occurrences x phi in
-          let subst_target_x = Term.to_subst_target tx in
+          let subst_target_x = subst_target_of_term phi tx in
           (* TODO: could be more efficient to Atom.Set.map + linearly follow along in in_atoms,
              raising Unsat as needed and accumulating in a ref (no fold_map...) *)
           Atom.Set.fold
@@ -3753,7 +3771,7 @@ module Formula = struct
        or is [normalize_atom] already just as strong? *)
     and normalize_atom (phi : t) (atom : Atom.t) =
       let atom' = Atom.map_terms atom ~f:(fun t -> normalize_var_const phi t) in
-      Debug.p "Normalizer.mormalize_atom atom'=%a" (Atom.pp_with_pp_var Var.pp) atom' ;
+      Debug.p "Normalizer.normalize_atom atom'=%a@\n" (Atom.pp_with_pp_var Var.pp) atom' ;
       Atom.eval ~is_neq_zero:(is_neq_zero phi) atom'
 
 
@@ -4195,7 +4213,7 @@ let and_equal_string_concat v x y formula =
 
 let prune_atom ~depth atom (formula, new_eqs) ifk =
   (* Use [phi] to normalize [atom] here to take previous [prune]s into account. *)
-  Debug.p "prune atom %a" (Atom.pp_with_pp_var Var.pp) atom ;
+  Debug.p "prune atom %a in %a@\n" (Atom.pp_with_pp_var Var.pp) atom pp formula ;
   let* normalized_atoms = Formula.Normalizer.normalize_atom formula.phi atom in
   let* phi, new_eqs =
     (* L.debug Analysis Quiet "JV: Calling and_normalized_atoms from prune_atom \n"; *)
@@ -4273,7 +4291,7 @@ module DynamicTypes = struct
     if is_known_zero formula v then Some (Term.of_bool nullable)
     else
       let known_non_zero = Formula.is_neq_zero formula.phi (Var v) in
-      Debug.p "known non zero of %a is %b\n" Var.pp v known_non_zero ;
+      Debug.p "known non zero of %a is %b@\n" Var.pp v known_non_zero ;
       match Var.Map.find_opt v formula.phi.type_constraints with
       | None ->
           None

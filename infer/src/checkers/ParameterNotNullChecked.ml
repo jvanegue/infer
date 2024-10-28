@@ -5,36 +5,25 @@
  * LICENSE file in the root directory of this source tree.
  *)
 open! IStd
+module IRAttributes = Attributes
 module F = Format
 
-let is_block_param formals name =
-  List.exists
-    ~f:(fun (formal, typ, _) -> Mangled.equal formal name && Typ.is_pointer_to_function typ)
-    formals
-
-
-let is_block_param_in_captured captured name =
-  List.exists
-    ~f:(fun {CapturedVar.pvar; is_formal_of; typ} ->
-      Mangled.equal (Pvar.get_name pvar) name
-      && Typ.is_pointer_to_function typ && Option.is_some is_formal_of )
-    captured
-
-
 module DomainData = struct
-  type t = {arg: Mangled.t} [@@deriving compare]
+  type t = {checked: bool; typ: Typ.t} [@@deriving compare]
 
-  let pp fmt {arg} = F.fprintf fmt "%a" Mangled.pp arg
+  let pp fmt {checked} = F.fprintf fmt "checked=%b" checked
 end
 
 module BlockParams = struct
-  include AbstractDomain.FiniteSet (Mangled)
+  include PrettyPrintable.MakePPMonoMap (Mangled) (DomainData)
+
+  let compare = compare DomainData.compare
 end
 
 module Vars = struct
-  include PrettyPrintable.MakePPMonoMap (Ident) (DomainData)
+  include PrettyPrintable.MakePPMonoMap (Ident) (Mangled)
 
-  let compare = compare DomainData.compare
+  let compare = compare Mangled.compare
 end
 
 module TraceData = struct
@@ -75,25 +64,26 @@ module Mem = struct
 
   let find_block_param id (astate : t) = Vars.find_opt id astate.vars
 
+  let set_checked name ~checked blockParams =
+    BlockParams.update name
+      (fun data -> Option.bind ~f:(fun data -> Some {data with DomainData.checked}) data)
+      blockParams
+
+
   let exec_null_check_id id loc ({vars; blockParams; traceInfo} as astate : t) =
     match find_block_param id astate with
-    | Some {arg} ->
-        let traceInfo = {TraceData.arg; loc; usage= CheckNil} :: traceInfo in
-        let blockParams = BlockParams.add arg blockParams in
-        let vars = Vars.add id {arg} vars in
+    | Some name ->
+        let traceInfo = {TraceData.arg= name; loc; usage= CheckNil} :: traceInfo in
+        let blockParams = set_checked name ~checked:true blockParams in
         {vars; blockParams; traceInfo}
     | None ->
         astate
 
 
-  let load (attributes : ProcAttributes.t) id pvar _ astate =
+  let load id pvar _ astate =
     let name = Pvar.get_name pvar in
     let vars =
-      if
-        is_block_param attributes.formals name
-        || is_block_param_in_captured attributes.captured name
-      then Vars.add id {arg= name} astate.vars
-      else astate.vars
+      if BlockParams.mem name astate.blockParams then Vars.add id name astate.vars else astate.vars
     in
     {astate with vars}
 
@@ -101,18 +91,24 @@ module Mem = struct
   let store pvar e loc ({vars; blockParams; traceInfo} as astate) =
     let name = Pvar.get_name pvar in
     let traceInfo = {TraceData.arg= name; loc; usage= Assign} :: traceInfo in
-    let blockParams = BlockParams.remove name blockParams in
     let blockParams =
       match e with
       | Exp.Var id -> (
         match find_block_param id astate with
-        | Some {DomainData.arg} ->
-            if BlockParams.mem arg blockParams then BlockParams.add name blockParams
-            else blockParams
+        | Some param_name -> (
+          match BlockParams.find_opt param_name blockParams with
+          | Some param_checked ->
+              BlockParams.add name param_checked blockParams
+          | None ->
+              blockParams )
         | None ->
-            blockParams )
+            (* we assigned something else to this formal so we shouldn't report anymore. *)
+            set_checked name ~checked:true blockParams )
+      | _ when Exp.is_null_literal e ->
+          set_checked name ~checked:false blockParams
       | _ ->
-          blockParams
+          (* we assigned something else to this formal so we shouldn't report anymore. *)
+          set_checked name ~checked:true blockParams
     in
     {vars; blockParams; traceInfo}
 
@@ -129,22 +125,51 @@ module Mem = struct
       ~init:[] traceInfo
 
 
-  let report_unchecked_block_param_issues proc_desc err_log var loc
-      ({blockParams; traceInfo} as astate : t) =
+  let get_block_return_type typ =
+    match typ.Typ.desc with
+    | Typ.Tptr ({desc= Tfun (Some {return_type})}, _) ->
+        Some return_type
+    | _ ->
+        None
+
+
+  let report_unchecked_block_param_issues proc_desc err_log var args loc
+      ({traceInfo; blockParams} as astate : t) =
     match find_block_param var astate with
-    | Some {DomainData.arg} ->
-        let traceInfo = call_trace arg loc traceInfo in
-        if BlockParams.mem arg blockParams then ()
-        else
-          let ltr = make_trace arg traceInfo in
+    | Some name -> (
+      match BlockParams.find_opt name blockParams with
+      | Some {checked; typ} when not checked ->
+          let traceInfo = call_trace name loc traceInfo in
+          let ltr = make_trace name traceInfo in
           let message =
             F.asprintf
               "The block `%a` is executed without a check for nil at %a. This could cause a crash."
-              Mangled.pp arg Location.pp loc
+              Mangled.pp name Location.pp loc
           in
-          Reporting.log_issue proc_desc err_log ~ltr ~loc ParameterNotNullChecked
+          let is_void_return_type =
+            Option.value_map ~default:false
+              ~f:(fun return_type -> Typ.is_void return_type)
+              (get_block_return_type typ)
+          in
+          let autofix =
+            match Config.objc_block_execution_macro with
+            | Some objc_block_execution_macro
+              when Option.is_none (Location.get_macro_file_line_opt loc) && is_void_return_type ->
+                let original = Some (F.asprintf "%s(" (Mangled.to_string name)) in
+                let comma = if List.is_empty args then "" else ", " in
+                let replacement =
+                  Some
+                    (F.asprintf "%s(%s%s" objc_block_execution_macro (Mangled.to_string name) comma)
+                in
+                Some {Jsonbug_j.original; replacement; additional= None}
+            | _ ->
+                None
+          in
+          Reporting.log_issue proc_desc err_log ~ltr ~loc ?autofix ParameterNotNullChecked
             IssueType.block_parameter_not_null_checked message ;
           ()
+      | _ ->
+          () )
     | None ->
         ()
 end
@@ -154,12 +179,12 @@ module Domain = struct
 
   let exec_null_check_id id loc astate = map (Mem.exec_null_check_id id loc) astate
 
-  let load attributes id pvar loc astate = map (Mem.load attributes id pvar loc) astate
+  let load id pvar loc astate = map (Mem.load id pvar loc) astate
 
   let store pvar e loc astate = map (Mem.store pvar e loc) astate
 
-  let report_unchecked_block_param_issues proc_desc err_log var loc astate =
-    iter (Mem.report_unchecked_block_param_issues proc_desc err_log var loc) astate
+  let report_unchecked_block_param_issues proc_desc err_log var args loc astate =
+    iter (Mem.report_unchecked_block_param_issues proc_desc err_log var args loc) astate
 end
 
 module TransferFunctions = struct
@@ -172,10 +197,9 @@ module TransferFunctions = struct
 
   let exec_instr (astate : Domain.t) {IntraproceduralAnalysis.proc_desc; err_log} _cfg_node _
       (instr : Sil.instr) =
-    let attributes = Procdesc.get_attributes proc_desc in
     match instr with
     | Load {id; e= Lvar pvar; loc} ->
-        Domain.load attributes id pvar loc astate
+        Domain.load id pvar loc astate
     | Store {e1= Lvar pvar; e2; loc} ->
         Domain.store pvar e2 loc astate
     | Prune (Var id, loc, _, _) ->
@@ -191,10 +215,10 @@ module TransferFunctions = struct
           Domain.exec_null_check_id id loc astate
       | _ ->
           astate )
-    | Call (_, Exp.Const (Const.Cfun procname), (Exp.Var var, _) :: _, loc, call_flags)
+    | Call (_, Exp.Const (Const.Cfun procname), (Exp.Var var, _) :: args, loc, call_flags)
       when Procname.equal procname BuiltinDecl.__call_objc_block
            && call_flags.CallFlags.cf_is_objc_block ->
-        Domain.report_unchecked_block_param_issues proc_desc err_log var loc astate ;
+        Domain.report_unchecked_block_param_issues proc_desc err_log var args loc astate ;
         astate
     | _ ->
         astate
@@ -202,29 +226,68 @@ end
 
 module Analyzer = AbstractInterpreter.MakeWTO (TransferFunctions)
 
-let init_block_params formals =
-  let add_non_nullable_block blockParams (formal, _, annotation) =
-    if is_block_param formals formal && Annotations.ia_is_nonnull annotation then
-      BlockParams.add formal blockParams
-    else blockParams
-  in
-  List.fold formals ~init:BlockParams.empty ~f:add_non_nullable_block
+let find_block_param formals name =
+  List.find
+    ~f:(fun (formal, typ, _) -> Mangled.equal formal name && Typ.is_pointer_to_function typ)
+    formals
 
 
-let init_block_param_trace_info attributes =
-  let add_trace_info_block traceInfo (formal, _, _) =
-    if is_block_param attributes.ProcAttributes.formals formal then
-      let usage = TraceData.Parameter attributes.ProcAttributes.proc_name in
-      {TraceData.arg= formal; loc= attributes.ProcAttributes.loc; usage} :: traceInfo
-    else traceInfo
+let is_block_param formals name =
+  List.exists
+    ~f:(fun ((formal, typ, _), _, _) -> Mangled.equal formal name && Typ.is_pointer_to_function typ)
+    formals
+
+
+let get_captured_formals attributes =
+  let captured = attributes.ProcAttributes.captured in
+  let formal_of_captured (captured : CapturedVar.t) =
+    match (captured.captured_from, captured.context_info) with
+    | Some {is_formal= Some proc}, Some {CapturedVar.is_checked_for_null} -> (
+      match IRAttributes.load proc with
+      | Some proc_attributes ->
+          let formals =
+            find_block_param proc_attributes.ProcAttributes.formals (Pvar.get_name captured.pvar)
+          in
+          Option.map formals ~f:(fun formals -> (formals, proc_attributes, is_checked_for_null))
+      | None ->
+          None )
+    | _ ->
+        None
   in
-  List.fold attributes.ProcAttributes.formals ~init:[] ~f:add_trace_info_block
+  List.filter_map ~f:formal_of_captured captured
+
+
+let init_block_params
+    (formals_attributes : ((Mangled.t * Typ.t * Annot.Item.t) * ProcAttributes.t * bool) list) =
+  let add_nullable_block (blockParams, traceInfo)
+      ((formal, typ, annotation), attributes, is_checked_for_null) =
+    if
+      is_block_param formals_attributes formal
+      && (not (Annotations.ia_is_nonnull annotation))
+      && (not is_checked_for_null)
+      && not (Typ.is_block_nonnull_pointer typ)
+    then
+      let procname = attributes.ProcAttributes.proc_name in
+      let blockParams = BlockParams.add formal {checked= false; typ} blockParams in
+      let usage = TraceData.Parameter procname in
+      let traceInfo =
+        {TraceData.arg= formal; loc= attributes.ProcAttributes.loc; usage} :: traceInfo
+      in
+      (blockParams, traceInfo)
+    else (blockParams, traceInfo)
+  in
+  List.fold formals_attributes ~init:(BlockParams.empty, []) ~f:add_nullable_block
 
 
 let checker ({IntraproceduralAnalysis.proc_desc} as analysis_data) =
   let attributes = Procdesc.get_attributes proc_desc in
-  let initial_blockParams = init_block_params attributes.ProcAttributes.formals in
-  let initTraceInfo = init_block_param_trace_info attributes in
+  let captured_formals_attributes = get_captured_formals attributes in
+  let formals_attributes =
+    List.map ~f:(fun formal -> (formal, attributes, false)) attributes.ProcAttributes.formals
+  in
+  let initial_blockParams, initTraceInfo =
+    init_block_params (List.append formals_attributes captured_formals_attributes)
+  in
   let initial =
     Domain.singleton
       {Mem.vars= Vars.empty; blockParams= initial_blockParams; traceInfo= initTraceInfo}

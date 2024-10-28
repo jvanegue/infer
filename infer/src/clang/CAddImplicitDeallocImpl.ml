@@ -18,7 +18,7 @@ let get_dealloc_call_field (self_var, self_typ) location instrs
       in
       let id_field = Ident.create_fresh Ident.knormal in
       let class_typ = match self_typ.Typ.desc with Typ.Tptr (t, _) -> t | _ -> self_typ in
-      let e = Exp.Lfield (Var id_pvar, fieldname, class_typ) in
+      let e = Exp.Lfield ({exp= Var id_pvar; is_implicit= false}, fieldname, class_typ) in
       let load_field_instr = Sil.Load {id= id_field; e; typ= field_typ; loc= location} in
       let ret_id = Ident.create_fresh Ident.knormal in
       let call_instr =
@@ -122,7 +122,7 @@ let dealloc_if_no_ref proc_desc (self_var, self_typ) =
     let node_kind = Procdesc.Node.Stmt_node node_name in
     Procdesc.create_node proc_desc location node_kind ref_count_instrs
   in
-  let if_kind = Sil.Ik_if {terminated= true} in
+  let if_kind = Sil.Ik_if in
   let dealloc_prune_node =
     let cond_exp = Exp.BinOp (Eq, Var count_id, Const (Cint IntLit.zero)) in
     let instr = Sil.Prune (cond_exp, location, true, if_kind) in

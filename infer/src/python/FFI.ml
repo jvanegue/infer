@@ -66,6 +66,7 @@ type pyConstant =
 
 and pyCode =
   { co_name: string
+  ; co_firstlineno: int
   ; co_filename: string
   ; (* TODO Not in use at the moment, just keeping it around not to forget about it *)
     co_flags: int
@@ -75,7 +76,6 @@ and pyCode =
   ; co_varnames: string array
   ; co_nlocals: int
   ; co_argcount: int
-  ; co_firstlineno: int
   ; co_posonlyargcount: int
   ; co_stacksize: int
   ; co_kwonlyargcount: int
@@ -83,18 +83,88 @@ and pyCode =
   ; co_consts: pyConstant array
   ; (* Instead of keeping [co_code], they are translated into Python's [Instruction] *)
     instructions: pyInstruction list }
+[@@deriving equal]
 
 and pyInstruction =
-  { (* TODO: make opname static ? list all names somewhere *)
-    opname: string
+  { opname: string
   ; opcode: int
   ; arg: int
   ; argval: pyConstant
-  ; (* TODO: python provides argval, not sure t is needed ? *)
+  ; (* TODO: python provides argval, not sure it is needed ? *)
     offset: int
   ; starts_line: int option
   ; is_jump_target: bool }
-[@@deriving show, compare]
+[@@deriving compare]
+
+let rec pp_pyConstant fmt = function
+  | PYCBool b ->
+      F.pp_print_bool fmt b
+  | PYCInt i ->
+      Z.pp fmt i
+  | PYCFloat f ->
+      F.pp_print_float fmt f
+  | PYCComplex {real; imag} ->
+      F.fprintf fmt "Complex[real:%f; imag:%f ]" real imag
+  | PYCString s ->
+      F.fprintf fmt "\"%s\"" s
+  | PYCInvalidUnicode _ ->
+      F.pp_print_string fmt "InvalidUnicode"
+  | PYCBytes bytes ->
+      Bytes.pp fmt bytes
+  | PYCTuple array ->
+      F.fprintf fmt "(%a)" (Pp.comma_seq pp_pyConstant) (Array.to_list array)
+  | PYCFrozenSet list ->
+      F.fprintf fmt "{%a}" (Pp.comma_seq pp_pyConstant) list
+  | PYCCode {co_name} ->
+      F.fprintf fmt "<code object %s>" co_name
+  | PYCNone ->
+      F.pp_print_string fmt "None"
+
+
+let pp_hint ~code:{co_consts; co_names; co_varnames; co_cellvars; co_freevars} fmt opname arg =
+  let get_cell_name arg =
+    let sz = Array.length co_cellvars in
+    if arg < sz then co_cellvars.(arg) else co_freevars.(arg - sz)
+  in
+  match opname with
+  | "LOAD_CONST" ->
+      F.fprintf fmt "(%a)" pp_pyConstant co_consts.(arg)
+  | "LOAD_NAME"
+  | "LOAD_GLOBAL"
+  | "LOAD_ATTR"
+  | "STORE_NAME"
+  | "STORE_GLOBAL"
+  | "STORE_ATTR"
+  | "LOAD_METHOD"
+  | "IMPORT_NAME"
+  | "IMPORT_FROM"
+  | "DELETE_NAME"
+  | "DELETE_GLOBAL"
+  | "DELETE_ATTR" ->
+      F.fprintf fmt "(%s)" co_names.(arg)
+  | "LOAD_FAST" | "DELETE_FAST" | "STORE_FAST" ->
+      F.fprintf fmt "(%s)" co_varnames.(arg)
+  | "LOAD_DEREF" | "LOAD_CLASSDEREF" | "STORE_DEREF" | "LOAD_CLOSURE" | "DELETE_DEREF" ->
+      F.fprintf fmt "(%s)" (get_cell_name arg)
+  | "POP_JUMP_IF_TRUE"
+  | "POP_JUMP_IF_FALSE"
+  | "JUMP_ABSOLUTE"
+  | "JUMP_IF_TRUE_OR_POP"
+  | "JUMP_IF_FALSE_OR_POP" ->
+      F.fprintf fmt "(to %d)" arg
+  | "JUMP_FORWARD" | "FOR_ITER" ->
+      F.fprintf fmt "(to +%d)" arg
+  | _ ->
+      F.fprintf fmt ""
+
+
+let pp_pyInstruction ?code fmt {opname; arg; offset; starts_line; is_jump_target} =
+  let pp_hint fmt = Option.iter code ~f:(fun code -> pp_hint ~code fmt opname arg) in
+  F.fprintf fmt "%s %s %4d %-30s %4d %t"
+    (match starts_line with None -> "    " | Some line -> F.asprintf "%4d" line)
+    (if is_jump_target then ">>>" else "   ")
+    offset opname arg pp_hint
+
 
 let die_invalid_field ~kind f obj = Error (L.ExternalError, Error.InvalidField (f, obj, kind))
 
@@ -311,43 +381,25 @@ and new_py_instruction obj =
 module Code = struct
   type t = pyCode =
     { co_name: string
+    ; co_firstlineno: int
     ; co_filename: string
-    ; co_flags: int [@compare.ignore]
-    ; co_cellvars: string array [@compare.ignore]
-    ; co_freevars: string array [@compare.ignore]
-    ; co_names: string array [@compare.ignore]
-    ; co_varnames: string array [@compare.ignore]
-    ; co_nlocals: int [@compare.ignore]
-    ; co_argcount: int [@compare.ignore]
-    ; co_firstlineno: int [@compare.ignore]
-    ; co_posonlyargcount: int [@compare.ignore]
-    ; co_stacksize: int [@compare.ignore]
-    ; co_kwonlyargcount: int [@compare.ignore]
-    ; co_lnotab: char array [@compare.ignore]
-    ; co_consts: pyConstant array [@compare.ignore]
-    ; instructions: pyInstruction list [@compare.ignore] }
-  [@@deriving show, compare]
-
-  let full_show = show
-
-  let show code = code.co_name
-
-  let pp fmt code = F.pp_print_string fmt code.co_name
-
-  let is_closure {co_freevars; co_cellvars} =
-    Array.length co_freevars + Array.length co_cellvars <> 0
-
-
-  let get_arguments {co_varnames; co_argcount} = Array.sub co_varnames ~pos:0 ~len:co_argcount
-
-  let get_locals {co_varnames; co_argcount} =
-    let nr_varnames = Array.length co_varnames in
-    Array.sub co_varnames ~pos:co_argcount ~len:(nr_varnames - co_argcount)
+    ; co_flags: int [@compare.ignore] [@equal.ignore]
+    ; co_cellvars: string array [@compare.ignore] [@equal.ignore]
+    ; co_freevars: string array [@compare.ignore] [@equal.ignore]
+    ; co_names: string array [@compare.ignore] [@equal.ignore]
+    ; co_varnames: string array [@compare.ignore] [@equal.ignore]
+    ; co_nlocals: int [@compare.ignore] [@equal.ignore]
+    ; co_argcount: int [@compare.ignore] [@equal.ignore]
+    ; co_posonlyargcount: int [@compare.ignore] [@equal.ignore]
+    ; co_stacksize: int [@compare.ignore] [@equal.ignore]
+    ; co_kwonlyargcount: int [@compare.ignore] [@equal.ignore]
+    ; co_lnotab: char array [@compare.ignore] [@equal.ignore]
+    ; co_consts: pyConstant array [@compare.ignore] [@equal.ignore]
+    ; instructions: pyInstruction list [@compare.ignore] [@equal.ignore] }
+  [@@deriving show, compare, equal]
 end
 
 module Constant = struct
-  let full_show = show_pyConstant
-
   type t = pyConstant =
     | PYCBool of bool
     | PYCInt of Z.t
@@ -360,55 +412,21 @@ module Constant = struct
     | PYCFrozenSet of t list
     | PYCCode of Code.t
     | PYCNone
-  [@@deriving show, compare]
-
-  let show ?(full = false) c = if full then full_show c else show c
-
-  let as_code = function
-    | PYCCode c ->
-        Some c
-    | PYCBool _
-    | PYCInt _
-    | PYCString _
-    | PYCInvalidUnicode _
-    | PYCTuple _
-    | PYCFrozenSet _
-    | PYCNone
-    | PYCFloat _
-    | PYCComplex _
-    | PYCBytes _ ->
-        None
-
-
-  let as_name = function
-    | PYCString name ->
-        Some name
-    (* TODO: not sure if we should do that. Experience will tell *)
-    | PYCBytes bs ->
-        Some (Bytes.to_string bs)
-    | PYCInvalidUnicode _
-    | PYCBool _
-    | PYCInt _
-    | PYCCode _
-    | PYCTuple _
-    | PYCFrozenSet _
-    | PYCNone
-    | PYCFloat _
-    | PYCComplex _ ->
-        None
+  [@@deriving compare, equal]
 end
 
 module Instruction = struct
   type t = pyInstruction =
-    { (* TODO: make opname static ? list all names somewhere ? *)
-      opname: string
+    { opname: string
     ; opcode: int
     ; arg: int
     ; argval: pyConstant
     ; offset: int
     ; starts_line: int option
     ; is_jump_target: bool }
-  [@@deriving show, compare]
+  [@@deriving compare]
+
+  let pp = pp_pyInstruction
 end
 
 let from_python_object obj =

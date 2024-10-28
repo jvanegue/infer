@@ -8,9 +8,12 @@
 open! IStd
 module Env = ErlangEnvironment
 
-type t = {start: Procdesc.Node.t; exit_success: Procdesc.Node.t; exit_failure: Procdesc.Node.t}
+type t =
+  {start: Procdesc.Node.t; exit_success: Procdesc.Node.t; exit_failure: Procdesc.Node.t option}
 
 val ( |~~> ) : Procdesc.Node.t -> Procdesc.Node.t list -> unit
+
+val ( |?~> ) : Procdesc.Node.t option -> Procdesc.Node.t list -> unit
 
 val make_success : (Procdesc.t Env.present, _) Env.t -> t
 (** Two nodes: start=exit_success, and exit_failure is distinct. *)
@@ -30,10 +33,11 @@ val any : (Procdesc.t Env.present, _) Env.t -> t list -> t
 (** Chain a list of blocks together in a disjunctive style: a success in any block leads to a global
     success, and failures lead to the next block. *)
 
-val make_instruction :
-  (Procdesc.t Env.present, _) Env.t -> ?kind:Procdesc.Node.stmt_nodekind -> Sil.instr list -> t
+val make_instruction : (Procdesc.t Env.present, _) Env.t -> Sil.instr list -> t
 
 val make_load : (Procdesc.t Env.present, _) Env.t -> Ident.t -> Exp.t -> Typ.t -> t
 
-val make_branch : (Procdesc.t Env.present, _) Env.t -> Exp.t -> t
+val make_branch : (Procdesc.t Env.present, _) Env.t -> Sil.instr list -> Exp.t -> t
 (** Make a branch based on the condition: go to success if true, go to failure if false *)
+
+val join_failures : (Procdesc.t Env.present, _) Env.t -> t list -> Procdesc.Node.t option

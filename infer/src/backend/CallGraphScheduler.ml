@@ -8,6 +8,20 @@
 open! IStd
 module L = Logging
 
+let log =
+  (* In call-graph scheduling, log progress every [per_procedure_logging_granularity] procedures.
+     The default roughly reflects the average number of procedures in a C++ file. *)
+  let per_procedure_logging_granularity = 200 in
+  (* [procs_left] is set to 1 so that we log the first procedure sent to us. *)
+  let procs_left = ref 1 in
+  fun proc_name ->
+    decr procs_left ;
+    if !procs_left <= 0 then (
+      L.log_task "Analyzing %a, next logging in %d procedures@." Procname.pp proc_name
+        per_procedure_logging_granularity ;
+      procs_left := per_procedure_logging_granularity )
+
+
 (* How it works:
 
    - the queue [pending] contains the currently-known items of work, which are all the nodes at the
@@ -55,24 +69,25 @@ let bottom_up call_graph =
         totally_empty := true ) ) ;
     !totally_empty
   in
-  let rec next () =
+  let rec next for_child =
     match Queue.dequeue pending with
     | None ->
         fill_queue () ;
-        if Queue.is_empty pending then None else next ()
+        if Queue.is_empty pending then None else next for_child
     | Some n when n.flag || not (CallGraph.mem call_graph n.id) ->
-        next ()
+        next for_child
     | Some n ->
         incr scheduled ;
+        log n.pname ;
         CallGraph.Node.set_flag n ;
-        Some (Procname n.pname)
+        Some (Procname {proc_name= n.pname; specialization= None}, Fn.id)
   in
   let finished ~result:_ = function
-    | Procname pname ->
+    | Procname {proc_name} ->
         decr remaining ;
         decr scheduled ;
-        CallGraph.remove call_graph pname
-    | File _ | ProcUID _ ->
-        L.die InternalError "Only Procnames are scheduled but File/ProcUID target was received"
+        CallGraph.remove call_graph proc_name
+    | File _ ->
+        L.die InternalError "Only Procnames are scheduled but File target was received"
   in
   {ProcessPool.TaskGenerator.remaining_tasks; is_empty; finished; next}

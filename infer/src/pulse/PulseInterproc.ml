@@ -835,7 +835,7 @@ let delete_edges_in_callee_pre_from_caller ~edges_pre_opt addr_caller call_state
         (subst, post_edges) )
 
 
-let record_post_cell ({PathContext.timestamp} as path) callee_proc_name call_loc ~edges_pre_opt
+let record_post_cell {PathContext.timestamp} callee_proc_name call_loc ~edges_pre_opt
     ~edges_callee_post (addr_caller, hist_caller) call_state =
   let subst, translated_post_edges =
     UnsafeMemory.Edges.fold ~init:(call_state.subst, BaseMemory.Edges.empty) edges_callee_post
@@ -853,7 +853,7 @@ let record_post_cell ({PathContext.timestamp} as path) callee_proc_name call_loc
         let translated_edges =
           UnsafeMemory.Edges.add access
             ( addr_curr
-            , ValueHistory.sequence ~context:path.conditions
+            , ValueHistory.sequence
                 (Call {f= Call callee_proc_name; location= call_loc; in_call= hist_post; timestamp})
                 hist_caller )
             translated_edges
@@ -963,24 +963,22 @@ let report_mutual_recursion_cycle
           if is_foreign_procedure then add_errlog inner_call err_log )
 
 
-let report_recursive_calls ({InterproceduralAnalysis.proc_desc} as analysis_data) cycles =
-  PulseMutualRecursion.Set.iter
-    (fun cycle ->
-      if
-        Procname.equal
-          (PulseMutualRecursion.get_inner_call cycle)
-          (Procdesc.get_proc_name proc_desc)
-      then report_mutual_recursion_cycle analysis_data cycle )
-    cycles
-
-
-let record_recursive_calls analysis_data callee_proc_name call_loc callee_summary call_state =
+let record_recursive_calls ({InterproceduralAnalysis.proc_desc} as analysis_data) callee_proc_name
+    call_loc callee_summary call_state =
   let callee_recursive_calls =
-    PulseMutualRecursion.Set.map
-      (PulseMutualRecursion.add_call callee_proc_name call_loc)
+    PulseMutualRecursion.Set.filter_map
+      (fun cycle ->
+        let cycle = PulseMutualRecursion.add_call callee_proc_name call_loc cycle in
+        if
+          Procname.equal
+            (PulseMutualRecursion.get_inner_call cycle)
+            (Procdesc.get_proc_name proc_desc)
+        then (
+          report_mutual_recursion_cycle analysis_data cycle ;
+          None )
+        else Some cycle )
       (AbductiveDomain.Summary.get_recursive_calls callee_summary)
   in
-  report_recursive_calls analysis_data callee_recursive_calls ;
   let astate = AbductiveDomain.add_recursive_calls callee_recursive_calls call_state.astate in
   {call_state with astate}
 
@@ -1053,7 +1051,7 @@ let apply_unknown_effects callee_summary call_state =
   {call_state with astate}
 
 
-let read_return_value {PathContext.conditions; timestamp} callee_proc_name call_loc
+let read_return_value {PathContext.timestamp} callee_proc_name call_loc
     (callee_summary : AbductiveDomain.Summary.t) call_state =
   let return_var = Var.of_pvar (Pvar.get_ret_pvar callee_proc_name) in
   match Stack.find_opt return_var (callee_summary :> AbductiveDomain.t) with
@@ -1077,7 +1075,7 @@ let read_return_value {PathContext.conditions; timestamp} callee_proc_name call_
         L.d_printfln_escaped "Found [return] <-> %a" AbstractValue.pp return_caller ;
         (* need to add the call to the returned history too *)
         let return_caller_hist =
-          ValueHistory.sequence ~context:conditions
+          ValueHistory.sequence
             (Call
                {f= Call callee_proc_name; location= call_loc; in_call= return_callee_hist; timestamp}
             )
@@ -1275,7 +1273,7 @@ let apply_summary analysis_data path ~callee_proc_name call_location ~callee_sum
           | None ->
               ()
           | Some v ->
-              L.internal_error
+              L.d_printfln
                 "huho, we found an error on accessing invalid address %a when applying the \
                  precondition but did not actually report an error. Abort!"
                 AbstractValue.pp v ;

@@ -339,7 +339,13 @@ module BooleanAnd : S with type t = bool
 
 (** Boolean domain ordered by ~p || q. Useful when you want a boolean that's true only when it's
     true in one conditional branch. *)
-module BooleanOr : WithBottom with type t = bool
+module BooleanOr : sig
+  include WithBottom with type t = bool
+
+  val equal : t -> t -> bool
+
+  val compare : t -> t -> int
+end
 
 module type MaxCount = sig
   val max : int
@@ -379,3 +385,7 @@ module DownwardIntDomain (MaxCount : MaxCount) : sig
   val decrement : t -> t
   (** decrease the count by one if it is greater than 0 *)
 end
+
+module type NodeSetS = FiniteSetS with type elt = Procdesc.Node.t and type t = Procdesc.NodeSet.t
+
+module NodeSet : NodeSetS

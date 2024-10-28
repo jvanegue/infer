@@ -61,14 +61,12 @@ module Hist = struct
     ValueHistory.Call {f= Model desc; location; in_call; timestamp}
 
 
-  let add_event path event hist =
-    ValueHistory.sequence ~context:path.PathContext.conditions event hist
+  let add_event event hist = ValueHistory.sequence event hist
 
-
-  let single_event path event = add_event path event ValueHistory.epoch
+  let single_event event = add_event event ValueHistory.epoch
 
   let add_call path ?(in_call = ValueHistory.epoch) location model_desc ?more hist =
-    add_event path (call_event path ~in_call location ?more model_desc) hist
+    add_event (call_event path ~in_call location ?more model_desc) hist
 
 
   let single_call path ?(in_call = ValueHistory.epoch) location ?more model_desc =
@@ -76,11 +74,10 @@ module Hist = struct
 
 
   let single_alloc path location ?more model_desc =
-    alloc_event path location ?more model_desc |> single_event path
+    alloc_event path location ?more model_desc |> single_event
 
 
-  let binop path bop hist1 hist2 =
-    ValueHistory.in_context path.PathContext.conditions (ValueHistory.binary_op bop hist1 hist2)
+  let binop bop hist1 hist2 = ValueHistory.binary_op bop hist1 hist2
 end
 
 module Basic = struct
@@ -98,10 +95,10 @@ module Basic = struct
     let<*> astate, obj_copy = PulseOperations.shallow_copy path location src_value_hist astate in
     let<+> astate =
       PulseOperations.write_deref path location ~ref:dest_pointer_hist
-        ~obj:(fst obj_copy, Hist.add_event path event (snd obj_copy))
+        ~obj:(fst obj_copy, Hist.add_event event (snd obj_copy))
         astate
     in
-    PulseOperations.havoc_id ret_id (Hist.single_event path event) astate
+    PulseOperations.havoc_id ret_id (Hist.single_event event) astate
 
 
   let shallow_copy path location event ret_id dest_pointer_hist src_pointer_hist astate =
@@ -164,6 +161,8 @@ module Basic = struct
     | Sat (FatalError _ as err) ->
         [err]
 
+
+  let unreachable : model_no_non_disj = fun _ _astate -> []
 
   let return_int ~desc : Int64.t -> model_no_non_disj =
    fun i64 {path; location; ret= ret_id, _} astate ->
@@ -398,7 +397,7 @@ module Basic = struct
     in
     let astate =
       if initialize then astate
-      else set_uninitialized tenv path size_exp_opt location ret_addr astate
+      else set_uninitialized tenv path size_exp_opt location (ret_addr, ret_alloc_hist) astate
     in
     PulseArithmetic.and_positive ret_addr astate
 
@@ -429,6 +428,9 @@ module Basic = struct
           let s = Procname.to_string proc_name in
           Str.string_match r s 0 )
     in
+    let match_list config (_tenv, proc_name) _ =
+      List.mem ~equal:String.equal config (Procname.to_string proc_name)
+    in
     let match_taint_source flag (tenv, proc_name) _ =
       if flag then PulseTaintOperations.procedure_matches_source tenv proc_name else false
     in
@@ -447,6 +449,7 @@ module Basic = struct
     ; +match_regexp_opt Config.pulse_model_return_this
       &::.*++> return_this
                  ~desc:"modelled as returning `this` or `self` due to configuration option"
+    ; +match_list Config.pulse_model_unreachable <>--> unreachable
     ; +match_regexp_opt Config.pulse_model_return_first_arg
       &::.*++> id_first_arg_from_list
                  ~desc:"modelled as returning the first argument due to configuration option"

@@ -120,11 +120,15 @@ val analysis_schedule_file : string option
 
 val annotation_reachability_apply_superclass_annotations : bool
 
+val annotation_reachability_check_loops : bool
+
 val annotation_reachability_custom_models : Yojson.Safe.t
 
 val annotation_reachability_custom_pairs : Yojson.Safe.t
 
 val annotation_reachability_expensive : bool
+
+val annotation_reachability_minimize_sinks : bool
 
 val annotation_reachability_minimize_sources : bool
 
@@ -337,6 +341,8 @@ val debug_mode : bool
 
 val deduplicate : bool
 
+val default_hack_builtin_models_rel : string
+
 val dependency_mode : bool
 
 val detach_analysis_dependency : bool
@@ -548,17 +554,23 @@ val modeled_expensive : string * Yojson.Safe.t
 
 val never_returning_null : string * Yojson.Safe.t
 
+val noescaping_function_list : string list
+
 val no_censor_report : Str.regexp list
 
 val no_translate_libs : bool
 
 val nullable_annotation : string option
 
+val objc_block_execution_macro : string option
+
+val objc_synthesize_dealloc : bool
+
+val ondemand_recursion_restart_limit : int
+
 val only_cheap_debug : bool
 
 val oom_threshold : int option
-
-val objc_synthesize_dealloc : bool
 
 val pmd_xml : bool
 
@@ -602,9 +614,13 @@ val procedures_summary_skip_empty : bool
 
 val process_clang_ast : bool
 
+val procs_to_analyze_index : string option
+
 val progress_bar : [`MultiLine | `Plain | `Quiet]
 
 val project_root : string
+
+val pulse_balanced_disjuncts_strategy : bool
 
 val pulse_cut_to_one_path_procedures_pattern : Str.regexp option
 
@@ -619,6 +635,8 @@ val pulse_intraprocedural_only : bool
 val pulse_log_summary_count : bool
 
 val pulse_log_unknown_calls : bool
+
+val pulse_log_unknown_calls_sampled : int option
 
 val pulse_max_cfg_size : int
 
@@ -654,6 +672,8 @@ val pulse_model_transfer_ownership : string list
 
 val pulse_model_transfer_ownership_namespace : (string * string) list
 
+val pulse_model_unreachable : string list
+
 val pulse_models_for_erlang : string list
 
 val pulse_monitor_transitive_callees : bool
@@ -686,8 +706,6 @@ val pulse_specialization_limit : int
 
 val pulse_specialization_partial : bool
 
-val pulse_taint_check_history : bool
-
 type pulse_taint_config =
   { sources: Pulse_config_t.matchers
   ; sanitizers: Pulse_config_t.matchers
@@ -697,6 +715,8 @@ type pulse_taint_config =
   ; data_flow_kinds: string list }
 
 val pulse_taint_config : pulse_taint_config
+
+val pulse_taint_follow_field_accesses : bool
 
 val pulse_taint_opaque_files : string list
 
@@ -718,7 +738,7 @@ val pure_by_default : bool
 
 val pyc_file : string list
 
-val python_builtin_models : string
+val python_files_index : string option
 
 val qualified_cpp_name_block_list : string list
 
@@ -773,6 +793,8 @@ val rest : string list
 val results_dir : string
 
 val run_as_child : int option
+
+val run_python_interpreter : bool
 
 val sarif : bool
 

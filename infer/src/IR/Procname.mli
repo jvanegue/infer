@@ -353,6 +353,9 @@ val is_objc_block : t -> bool
 val is_cpp_lambda : t -> bool
 (** Return whether the procname is a cpp lambda procname. *)
 
+val is_cpp_method : t -> bool
+(** Return whether the procname is a cpp method. *)
+
 val is_objc_dealloc : t -> bool
 (** Return whether the dealloc method of an Objective-C class. *)
 
@@ -453,9 +456,6 @@ val decr_hack_arity : t -> t option
 val get_hack_arity : t -> int option
 (** get the arity of a Hack procname *)
 
-val get_hack_static_init : is_trait:bool -> HackClassName.t -> t
-(** get the sinit procname in Hack *)
-
 val get_hack_static_constinit : is_trait:bool -> HackClassName.t -> t
 (** get the constinit procname in Hack *)
 
@@ -501,8 +501,6 @@ val is_erlang_call_qualified : t -> bool
 
 val is_hack_builtins : t -> bool
 
-val is_hack_sinit : t -> bool
-
 val is_hack_constinit : t -> bool
 
 val has_hack_classname : t -> bool
@@ -511,3 +509,5 @@ val is_hack_async_name : t -> bool
 (* Checks if the function name starts with "gen", which is a (lint-checked) convention for it being async at Meta *)
 
 val is_hack_construct : t -> bool
+
+val is_hack_xinit : t -> bool

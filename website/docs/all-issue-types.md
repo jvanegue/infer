@@ -167,7 +167,7 @@ See [MEMORY_LEAK_C](#memory_leak_c).
 See [RETAIN_CYCLE](#retain_cycle).
 ## BLOCK_PARAMETER_NOT_NULL_CHECKED
 
-*Reported as "Block Parameter Not Null Checked" by [parameter-not-null-checked](/docs/next/checker-parameter-not-null-checked).*
+*Category: [Null pointer dereference](/docs/next/all-categories#null-pointer-dereference). Reported as "Block Parameter Not Null Checked" by [parameter-not-null-checked](/docs/next/checker-parameter-not-null-checked).*
 
 This error type is reported only in Objective-C/Objective-C++. It happens when a method has a block as a parameter,
 and the block is executed in the method's body without checking it for `nil` first. If a `nil` block is passed to
@@ -416,20 +416,11 @@ retain a useless reference to that `View` that will not be cleaned up until the
 
 Action: Nullify the `View` in question in `onDestroyView`.
 
-## CHECKERS_PRINTF_ARGS
+## COMPARED_TO_NULL_AND_DEREFERENCED
 
-*Reported as "Printf Args" by [printf-args](/docs/next/checker-printf-args).*
+*Category: [Null pointer dereference](/docs/next/all-categories#null-pointer-dereference). Reported as "Compared To Null And Dereferenced" by [pulse](/docs/next/checker-pulse).*
 
-This error is reported when the argument types to a `printf` method do not match the format string.
-
-```java
-  void stringInsteadOfInteger(PrintStream out) {
-    out.printf("Hello %d", "world");
-  }
-```
-
-Action: fix the mismatch between format string and argument types.
-
+A pointer that has both been compared to null, whcich suggests that it could be null, but has also been dereferenced without a null check.
 ## CONFIG_IMPACT
 
 *Category: [Perf regression](/docs/next/all-categories#perf-regression). Reported as "Config Impact" by [config-impact-analysis](/docs/next/checker-config-impact-analysis).*
@@ -558,6 +549,30 @@ Example:
 This could cause crashes because C++ references are not managed pointers
 (like ARC pointers) and so the referent is likely to be gone if the block
 dereferences it later.
+
+## CXX_STRING_CAPTURED_IN_BLOCK
+
+*Category: [Memory error](/docs/next/all-categories#memory-error). Reported as "C++ String Captured in Block" by [self-in-block](/docs/next/checker-self-in-block).*
+
+This check flags when a local variable of type `std::string` is captured in an escaping block.
+This means that the block will be leaving the current scope, i.e. it is
+not annotated with `__attribute__((noescape))`.
+
+Example:
+
+```
+- (void)string_captured_in_escaping_block_bad {
+  std::string fullName;
+  dispatch_async(dispatch_get_main_queue(), ^{
+    const char* c = fullName.c_str();
+    ...
+  });
+  ...;
+}
+```
+
+This could cause crashes because the variable is likely to be freed if the block
+uses it later.
 
 ## DANGLING_POINTER_DEREFERENCE
 
@@ -995,6 +1010,12 @@ A blocking `Binder` IPC call occurs on the UI thread.
 *Reported as "Lab Resource Leak" by [resource-leak-lab](/docs/next/checker-resource-leak-lab).*
 
 Toy issue.
+## LINEAGE_FLOW
+
+*Category: [Sensitive data flow](/docs/next/all-categories#sensitive-data-flow). Reported as "Lineage Flow" by [lineage](/docs/next/checker-lineage).*
+
+A Lineage taint flow has been detected from a source to a sink.
+
 ## LOCKLESS_VIOLATION
 
 *Reported as "Lockless Violation" by [starvation](/docs/next/checker-starvation).*
@@ -2026,6 +2047,36 @@ function call_get_field_ok(): string {
 }
 ```
 
+## PULSE_UNINITIALIZED_METHOD
+
+*Category: [Runtime exception](/docs/next/all-categories#runtime-exception). Reported as "Uninitialized Method" by [pulse](/docs/next/checker-pulse).*
+
+This issue is similar to [`PULSE_UNINITIALIZED_CONST`](#pulse_uninitialized_const), but it is to detect the uninitialized method call in Hack.
+
+For example, in the following code, the static method `foo` is declared only in the interface and the abstract class.  Thus, calling the static method can introduce an unexpected exception or a fatal error, while the type checker does miss the issue.
+
+```hack
+interface MyInterface {
+  public static function foo(): string;
+}
+
+abstract class MyAbstractClass {
+  public abstract static function foo(): string;
+}
+
+function interface_method_static_method_bad(): string {
+  // Uncaught exception 'TypehintViolationException'
+  $c = MyInterface::class;
+  return $c::foo();
+}
+
+function abstract_class_static_method_bad(): string {
+  // Fatal error: Cannot call abstract method
+  $c = MyAbstractClass::class;
+  return $c::foo();
+}
+```
+
 ## PULSE_UNINITIALIZED_VALUE
 
 *Category: [Memory error](/docs/next/all-categories#memory-error). Reported as "Uninitialized Value" by [pulse](/docs/next/checker-pulse).*
@@ -2206,6 +2257,13 @@ void caller(MyClass obj) {
   std::cout << x; // x is not modified.
 }
 ```
+
+## PULSE_UNNECESSARY_COPY_THRIFT_ASSIGNMENT
+
+*Category: [Perf regression](/docs/next/all-categories#perf-regression). Reported as "Unnecessary Copy Assignment into Thrift" by [pulse](/docs/next/checker-pulse).*
+
+This is similar to [PULSE_UNNECESSARY_COPY_ASSIGNMENT](#pulse_unnecessary_copy_assignment), but is
+reported when copied into thrift fields.
 
 ## PURE_FUNCTION
 

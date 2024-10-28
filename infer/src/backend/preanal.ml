@@ -188,23 +188,38 @@ module InlineJavaSyntheticMethods = struct
     in
     let do_instr instr =
       match (instr, etl) with
-      | Sil.Load {e= Exp.Lfield (Exp.Var _, fn, ft); typ}, [(* getter for fields *) (e1, _)] ->
-          let instr' = Sil.Load {id= ret_id; e= Exp.Lfield (e1, fn, ft); typ; loc= loc_call} in
+      | Sil.Load {e= Exp.Lfield ({exp= Exp.Var _}, fn, ft); typ}, [(* getter for fields *) (e1, _)]
+        ->
+          let instr' =
+            Sil.Load
+              {id= ret_id; e= Exp.Lfield ({exp= e1; is_implicit= false}, fn, ft); typ; loc= loc_call}
+          in
           found instr instr'
-      | Sil.Load {e= Exp.Lfield (Exp.Lvar pvar, fn, ft); typ}, [] when Pvar.is_global pvar ->
+      | Sil.Load {e= Exp.Lfield ({exp= Exp.Lvar pvar}, fn, ft); typ}, [] when Pvar.is_global pvar ->
           (* getter for static fields *)
           let instr' =
-            Sil.Load {id= ret_id; e= Exp.Lfield (Exp.Lvar pvar, fn, ft); typ; loc= loc_call}
+            Sil.Load
+              { id= ret_id
+              ; e= Exp.Lfield ({exp= Exp.Lvar pvar; is_implicit= false}, fn, ft)
+              ; typ
+              ; loc= loc_call }
           in
           found instr instr'
       | Sil.Store {e1= Exp.Lfield (_, fn, ft); typ}, [(* setter for fields *) (e1, _); (e2, _)] ->
-          let instr' = Sil.Store {e1= Exp.Lfield (e1, fn, ft); typ; e2; loc= loc_call} in
+          let instr' =
+            Sil.Store
+              {e1= Exp.Lfield ({exp= e1; is_implicit= false}, fn, ft); typ; e2; loc= loc_call}
+          in
           found instr instr'
-      | Sil.Store {e1= Exp.Lfield (Exp.Lvar pvar, fn, ft); typ}, [(e1, _)] when Pvar.is_global pvar
-        ->
+      | Sil.Store {e1= Exp.Lfield ({exp= Exp.Lvar pvar; is_implicit= false}, fn, ft); typ}, [(e1, _)]
+        when Pvar.is_global pvar ->
           (* setter for static fields *)
           let instr' =
-            Sil.Store {e1= Exp.Lfield (Exp.Lvar pvar, fn, ft); typ; e2= e1; loc= loc_call}
+            Sil.Store
+              { e1= Exp.Lfield ({exp= Exp.Lvar pvar; is_implicit= false}, fn, ft)
+              ; typ
+              ; e2= e1
+              ; loc= loc_call }
           in
           found instr instr'
       | Sil.Call (_, Exp.Const (Const.Cfun pn), etl', _, cf), _
@@ -345,9 +360,7 @@ module Liveness = struct
             (VarDomain.add (Var.of_pvar pvar) active_defs, to_nullify)
         | Store _
         | Prune _
-        | Metadata
-            (Abstract _ | CatchEntry _ | EndBranches | ExitScope _ | Skip | TryEntry _ | TryExit _)
-          ->
+        | Metadata (Abstract _ | CatchEntry _ | ExitScope _ | Skip | TryEntry _ | TryExit _) ->
             astate
         | Metadata (Nullify _) ->
             L.die InternalError
@@ -461,7 +474,7 @@ module NoReturn = struct
       proc_desc
 end
 
-module InjectTraitSinit = struct
+module InjectTraitInterfaceConstinit = struct
   let update_ident_generator pdesc =
     let idents =
       Procdesc.fold_instrs pdesc ~init:Ident.Set.empty ~f:(fun acc _ instr ->
@@ -472,13 +485,13 @@ module InjectTraitSinit = struct
     Ident.update_name_generator (Ident.Set.elements idents)
 
 
-  let inject_trait_sinit tenv pdesc =
-    let traits =
+  let inject_trait_interface_constinit tenv pdesc =
+    let extra_supers =
       let pname = Procdesc.get_proc_name pdesc in
       Option.value_map (Procname.get_class_type_name pname) ~default:[] ~f:(fun name ->
-          Tenv.get_hack_direct_used_traits tenv name )
+          Tenv.get_hack_direct_used_traits_interfaces tenv name )
     in
-    if not (List.is_empty traits) then
+    if not (List.is_empty extra_supers) then
       match Procdesc.get_pvar_formals pdesc with
       | (this_pvar, this_typ) :: _ ->
           update_ident_generator pdesc ;
@@ -487,26 +500,58 @@ module InjectTraitSinit = struct
             let loc = Procdesc.Node.get_loc entry_node in
             let this_id = Ident.create_fresh Ident.knormal in
             let this_load = Sil.Load {id= this_id; e= Lvar this_pvar; typ= this_typ; loc} in
-            let sinit_calls =
+            let constinit_calls =
               let ret_typ = Procdesc.get_ret_type pdesc in
               let arg = [(Exp.Var this_id, this_typ)] in
-              List.map traits ~f:(fun trait ->
+              List.map extra_supers ~f:(fun (trait_or_interface, super) ->
+                  let is_trait =
+                    match trait_or_interface with `Trait -> true | `Interface -> false
+                  in
                   let ret_id = Ident.create_none () in
-                  let sinit = Procname.get_hack_static_init ~is_trait:true trait in
-                  Sil.Call ((ret_id, ret_typ), Const (Cfun sinit), arg, loc, CallFlags.default) )
+                  let constinit = Procname.get_hack_static_constinit ~is_trait super in
+                  Sil.Call ((ret_id, ret_typ), Const (Cfun constinit), arg, loc, CallFlags.default) )
             in
-            this_load :: sinit_calls
+            this_load :: constinit_calls
           in
           let succs = Procdesc.Node.get_succs entry_node in
           List.iter succs ~f:(fun succ -> Procdesc.Node.prepend_instrs succ instrs)
       | [] ->
-          L.internal_error "Error loading the `$this` formal from sinit"
+          L.internal_error "Error loading the `$this` formal from constinit@\n"
 
 
   let process tenv pdesc =
     NodePrinter.with_session (Procdesc.get_start_node pdesc) ~kind:`ComputePre
-      ~pp_name:(fun fmt -> Format.pp_print_string fmt "Inject trait sinit")
-      ~f:(fun () -> inject_trait_sinit tenv pdesc)
+      ~pp_name:(fun fmt -> Format.pp_print_string fmt "Inject trait/interface constinit")
+      ~f:(fun () -> inject_trait_interface_constinit tenv pdesc)
+end
+
+(** pre-analysis to remove nodes unreachable from start node *)
+module RemoveDeadNodes = struct
+  let process proc_desc =
+    let visited = Procdesc.NodeHashSet.create 11 in
+    let queue = Queue.create ~capacity:(Procdesc.size proc_desc) () in
+    let visit n = Procdesc.NodeHashSet.add n visited in
+    let enqueue n = Queue.enqueue queue n in
+    enqueue (Procdesc.get_start_node proc_desc) ;
+    let rec bfs () =
+      match Queue.dequeue queue with
+      | None ->
+          ()
+      | Some n when Procdesc.NodeHashSet.mem visited n ->
+          bfs ()
+      | Some n ->
+          visit n ;
+          Procdesc.Node.get_succs n @ Procdesc.Node.get_exn n |> List.iter ~f:enqueue ;
+          bfs ()
+    in
+    bfs () ;
+    (* do not remove the exit/exn nodes *)
+    Procdesc.get_exit_node proc_desc |> visit ;
+    Procdesc.get_exn_sink proc_desc |> Option.iter ~f:visit ;
+    (* remove unvisited nodes *)
+    Procdesc.get_nodes proc_desc
+    |> List.filter ~f:(fun n -> not (Procdesc.NodeHashSet.mem visited n))
+    |> List.iter ~f:(Procdesc.remove_node proc_desc)
 end
 
 let do_preanalysis tenv pdesc =
@@ -518,10 +563,11 @@ let do_preanalysis tenv pdesc =
   if not (Procname.is_java proc_name || Procname.is_csharp proc_name) then
     (* Apply dynamic selection of copy and overriden methods *)
     ReplaceObjCMethodCall.process tenv pdesc proc_name ;
-  if Procname.is_hack_sinit proc_name then InjectTraitSinit.process tenv pdesc ;
+  if Procname.is_hack_constinit proc_name then InjectTraitInterfaceConstinit.process tenv pdesc ;
   Liveness.process pdesc ;
   AddAbstractionInstructions.process pdesc ;
   if Procname.is_java proc_name then Devirtualizer.process pdesc tenv ;
   NoReturn.process tenv pdesc ;
+  RemoveDeadNodes.process pdesc ;
   NodePrinter.print_html := true ;
   ()

@@ -28,6 +28,16 @@ module type PrintableOrderedType = sig
   include PrintableType with type t := t
 end
 
+module type HashableSexpablePrintableOrderedType = sig
+  include Caml.Set.OrderedType
+
+  include PrintableType with type t := t
+
+  include Sexpable with type t := t
+
+  val hash_fold_t : Base_internalhash_types.state -> t -> Base_internalhash_types.state
+end
+
 module type PrintableEquatableOrderedType = sig
   include Caml.Set.OrderedType
 
@@ -44,6 +54,14 @@ module type PPSet = sig
   val pp_hov : F.formatter -> t -> unit
 
   val pp_element : F.formatter -> elt -> unit
+end
+
+module type HashSexpPPSet = sig
+  include PPSet
+
+  include Sexpable with type t := t
+
+  val hash_fold_t : Base_internalhash_types.state -> t -> Base_internalhash_types.state
 end
 
 module type MonoMap = sig
@@ -148,6 +166,20 @@ module type PPMap = sig
   val pp : pp_value:(F.formatter -> 'a -> unit) -> F.formatter -> 'a t -> unit
 end
 
+module type HashSexpPPMap = sig
+  include PPMap
+
+  val sexp_of_t : ('a -> Sexplib.Sexp.t) -> 'a t -> Sexplib.Sexp.t
+
+  val t_of_sexp : (Sexplib.Sexp.t -> 'a) -> Sexplib.Sexp.t -> 'a t
+
+  val hash_fold_t :
+       (Base_internalhash_types.state -> 'a -> Base_internalhash_types.state)
+    -> Base_internalhash_types.state
+    -> 'a t
+    -> Base_internalhash_types.state
+end
+
 let pp_collection_common ?hov ~pp_item fmt c =
   IContainer.pp_collection ?hov ~fold:List.fold ~pp_item fmt c
 
@@ -170,6 +202,24 @@ module MakePPSet (Ord : PrintableOrderedType) = struct
   let pp fmt s = pp_collection ~pp_item:pp_element fmt (elements s)
 
   let pp_hov fmt s = pp_collection_common ~hov:true ~pp_item:pp_element fmt (elements s)
+end
+
+module MakeHashSexpPPSet (Ord : HashableSexpablePrintableOrderedType) = struct
+  module Set = MakePPSet (Ord)
+
+  let sexp_of_t t = Sexp.List (Set.elements t |> List.rev_map ~f:Ord.sexp_of_t)
+
+  let t_of_sexp sexp =
+    match sexp with
+    | Sexp.Atom _ ->
+        of_sexp_error "MakeSexpPPSet(...).t_of_sexp: list needed" sexp
+    | Sexp.List l ->
+        List.rev_map l ~f:Ord.t_of_sexp |> Set.of_list
+
+
+  let hash_fold_t hash t = Set.to_seq t |> ISeq.hash_fold_t Ord.hash_fold_t hash
+
+  include Set
 end
 
 module MakePPMap (Ord : PrintableOrderedType) = struct
@@ -214,6 +264,41 @@ module MakePPMap (Ord : PrintableOrderedType) = struct
   let pp ~pp_value fmt m =
     let pp_item fmt (k, v) = F.fprintf fmt "%a -> %a" Ord.pp k pp_value v in
     pp_collection ~pp_item fmt (bindings m)
+end
+
+module MakeHashSexpPPMap (Ord : HashableSexpablePrintableOrderedType) = struct
+  module Map = MakePPMap (Ord)
+
+  let sexp_of_t sexp_of_data t =
+    let f key data acc = Sexp.List [Ord.sexp_of_t key; sexp_of_data data] :: acc in
+    Sexp.List (Map.fold f t [])
+
+
+  let t_of_sexp data_of_sexp sexp =
+    match sexp with
+    | Sexp.Atom _ ->
+        of_sexp_error "MakeSexpPPMap(...).t_of_sexp: list needed" sexp
+    | Sexp.List l ->
+        let f acc = function
+          | Sexp.List [key_sexp; data_sexp] ->
+              let key = Ord.t_of_sexp key_sexp in
+              let data = data_of_sexp data_sexp in
+              Map.add key data acc
+          | Sexp.List _ | Sexp.Atom _ ->
+              of_sexp_error "MakeSexpPPMap(...).t_of_sexp: 2-element list needed" sexp
+        in
+        List.fold_left ~f ~init:Map.empty l
+
+
+  let hash_fold_t hash_fold_value hash t =
+    let hash_fold_binding hash (o, v) =
+      let hash = Ord.hash_fold_t hash o in
+      hash_fold_value hash v
+    in
+    Map.to_seq t |> ISeq.hash_fold_t hash_fold_binding hash
+
+
+  include Map
 end
 
 module type PPMonoMap = sig

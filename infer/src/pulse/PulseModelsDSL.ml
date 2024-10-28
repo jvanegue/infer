@@ -20,16 +20,18 @@ type 'a result = 'a AccessResult.t
 
 type aval = AbstractValue.t * ValueHistory.t
 
+type 'a execution =
+  | ContinueProgram of 'a * astate
+  | Other of ExecutionDomain.t (* should never contain a ExecutionDomain.ContinueProgram *)
+
 (* we work on a disjunction of executions *)
 type 'a model_monad =
   CallEvent.t * model_data -> astate -> non_disj -> 'a execution result list * non_disj
 
-and 'a execution =
-  | ContinueProgram of 'a * astate
-  | Other of ExecutionDomain.t (* should never contain a ExecutionDomain.ContinueProgram *)
-
 module Syntax = struct
   module ModeledField = PulseOperations.ModeledField
+
+  let to_aval = ValueOrigin.addr_hist
 
   let ret (a : 'a) : 'a model_monad =
    fun _data astate non_disj -> ([Ok (ContinueProgram (a, astate))], non_disj)
@@ -68,6 +70,15 @@ module Syntax = struct
 
 
   let ( let* ) a f = bind a f
+
+  let ( >>= ) a f = bind a f
+
+  let ( @= ) f a = bind a f
+
+  let ( @@> ) f g =
+    let* () = f in
+    g
+
 
   let list_fold (list : 'a list) ~(init : 'accum) ~(f : 'accum -> 'a -> 'accum model_monad) :
       'accum model_monad =
@@ -121,13 +132,14 @@ module Syntax = struct
 
   let get_desc : CallEvent.t model_monad = fun (desc, data) astate -> ret desc (desc, data) astate
 
-  let mk_event ?more (desc, data) =
+  let event ?more (desc, data) =
     let desc =
       match more with
       | None ->
           desc
       | Some more ->
-          CallEvent.Model (Format.asprintf "%a %s" CallEvent.pp_name_only desc more)
+          CallEvent.Model
+            (Format.asprintf "%a %s" (CallEvent.pp_name_only ~with_class:true) desc more)
     in
     ValueHistory.Call
       {f= desc; location= data.location; in_call= ValueHistory.epoch; timestamp= data.path.timestamp}
@@ -136,7 +148,7 @@ module Syntax = struct
   let get_event ?more () : ValueHistory.event model_monad =
     let* data = get_data in
     let* desc = get_desc in
-    ret (mk_event ?more (desc, data))
+    ret (event ?more (desc, data))
 
 
   let ok x = Ok x
@@ -158,9 +170,9 @@ module Syntax = struct
     , non_disj )
 
 
-  let start_model_ desc (monad : unit model_monad) : model =
+  let start_model_ desc (monad : unit -> unit model_monad) : model =
    fun data astate non_disj ->
-    let execs, non_disj = monad (desc, data) astate non_disj in
+    let execs, non_disj = monad () (desc, data) astate non_disj in
     ( List.map execs
         ~f:
           (PulseResult.map ~f:(function
@@ -179,7 +191,15 @@ module Syntax = struct
     start_model_ (ModelName data.callee_procname) monad data astate non_disj
 
 
-  let disjuncts (list : 'a model_monad list) : 'a model_monad =
+  let compose1 model1 model2 arg =
+    start_model @@ fun () -> lift_to_monad (model1 arg) @@> lift_to_monad (model2 arg)
+
+
+  let compose2 model1 model2 arg1 arg2 =
+    start_model @@ fun () -> lift_to_monad (model1 arg1 arg2) @@> lift_to_monad (model2 arg1 arg2)
+
+
+  let disj (list : 'a model_monad list) : 'a model_monad =
    fun data astate non_disj ->
     NonDisjDomain.bind (list, non_disj) ~f:(fun monad non_disj -> monad data astate non_disj)
 
@@ -219,9 +239,8 @@ module Syntax = struct
 
 
   let add_model_call hist =
-    let* {path} = get_data in
     let* event = get_event () in
-    ret (Hist.add_event path event hist)
+    ret (Hist.add_event event hist)
 
 
   let as_constant_q (v, _) : Q.t option model_monad =
@@ -248,7 +267,7 @@ module Syntax = struct
     ret (Formula.as_constant_string phi v) data astate
 
 
-  let mk_int ?hist i : aval model_monad =
+  let int ?hist i : aval model_monad =
    fun (desc, data) astate ->
     let astate, v = PulseArithmetic.absval_of_int astate (IntLit.of_int i) in
     let hist =
@@ -256,10 +275,23 @@ module Syntax = struct
       | Some hist ->
           hist
       | None ->
-          let event = mk_event (desc, data) in
-          Hist.single_event data.path event
+          let event = event (desc, data) in
+          Hist.single_event event
     in
     ret (v, hist) (desc, data) astate
+
+
+  let null : aval model_monad =
+    let* {path; location} = get_data in
+    let* v, hist = int 0 in
+    let null_deref = Invalidation.ConstantDereference IntLit.zero in
+    let aval =
+      (v, ValueHistory.sequence (Invalidated (null_deref, location, path.timestamp)) hist)
+    in
+    let* () =
+      PulseOperations.invalidate path UntraceableAccess location null_deref aval |> exec_command
+    in
+    ret aval
 
 
   let get_known_fields (v, _) =
@@ -280,6 +312,12 @@ module Syntax = struct
     PulseOperations.read_id ret_id |> exec_pure_operation
 
 
+  let read_ret_origin : ValueOrigin.t model_monad =
+    let* {path; location; ret= ret_id, _} = get_data in
+    PulseOperations.eval_to_value_origin path NoAccess location (Var ret_id)
+    |> exec_partial_operation
+
+
   let remove_ret_binding : unit model_monad =
     let* {ret= ret_id, _} = get_data in
     AbductiveDomain.Stack.remove_vars [Var.of_id ret_id] |> exec_command
@@ -296,27 +334,39 @@ module Syntax = struct
         ret aval
 
 
-  let eval_access access_mode aval access : aval model_monad =
+  let check_valid ?must_be_valid_reason vo : unit model_monad =
+    let* {path; location} = get_data in
+    PulseOperations.check_addr_access path ?must_be_valid_reason NoAccess location
+      (ValueOrigin.addr_hist vo)
+    >> sat |> exec_partial_command
+
+
+  let access access_mode aval access : aval model_monad =
     let* {path; location} = get_data in
     let* addr, hist =
       PulseOperations.eval_access path access_mode location aval access
       >> sat |> exec_partial_operation
     in
     let* event = get_event () in
-    let hist = Hist.add_event path event hist in
+    let hist = Hist.add_event event hist in
     ret (addr, hist)
 
 
-  let eval_deref exp : aval model_monad =
+  let load_exp exp : aval model_monad =
     let* {path; location} = get_data in
     PulseOperations.eval_deref path location exp |> exec_partial_operation
 
 
-  let eval_deref_access access_mode aval access : aval model_monad =
+  let load_access ?(no_access = false) aval access : aval model_monad =
     let* {path; location} = get_data in
-    PulseOperations.eval_deref_access path access_mode location aval access
+    let mode = if no_access then NoAccess else Read in
+    PulseOperations.eval_deref_access path mode location aval access
     >> sat |> exec_partial_operation
 
+
+  let load x = access Read x Dereference
+
+  let _field x f = access Read x (FieldAccess f)
 
   let add_dict_contain_const_keys (addr, _) : unit model_monad =
     PulseOperations.add_dict_contain_const_keys addr |> exec_command
@@ -338,7 +388,7 @@ module Syntax = struct
       | Some typ ->
           ret (Typ.name (Typ.strip_ptr typ))
       | None ->
-          let* addr, _ = eval_deref (Lvar pvar) in
+          let* addr, _ = load_exp (Lvar pvar) in
           AddressAttributes.get_static_type addr |> exec_pure_operation
 
 
@@ -396,12 +446,12 @@ module Syntax = struct
     PulseOperations.remove_dict_contain_const_keys addr |> exec_command
 
 
-  let is_hack_sinit_called (addr, _) : bool model_monad =
-    AddressAttributes.is_hack_sinit_called addr |> exec_pure_operation
+  let is_hack_constinit_called (addr, _) : bool model_monad =
+    AddressAttributes.is_hack_constinit_called addr |> exec_pure_operation
 
 
-  let set_hack_sinit_called (addr, _) : unit model_monad =
-    AddressAttributes.add_one addr HackSinitCalled |> exec_command
+  let set_hack_constinit_called (addr, _) : unit model_monad =
+    AddressAttributes.add_one addr HackConstinitCalled |> exec_command
 
 
   let and_dynamic_type_is (v, _) t : unit model_monad =
@@ -446,20 +496,22 @@ module Syntax = struct
     ret () data astate
 
 
-  let get_const_string (v, _) : string option model_monad =
-   fun data astate -> ret (PulseArithmetic.as_constant_string astate v) data astate
-
-
   let tenv_resolve_field_info typ_name field_name : Struct.field_info option model_monad =
    fun ((_desc, {analysis_data= {tenv}}) as data) astate ->
     let info = Tenv.resolve_field_info tenv typ_name field_name in
     ret info data astate
 
 
-  let tenv_resolve_fieldname typ_name name : Fieldname.t option model_monad =
+  let tenv_resolve_fieldname typ_name name :
+      (Fieldname.t option * Tenv.unresolved_reason option) model_monad =
    fun ((_desc, {analysis_data= {tenv}}) as data) astate ->
-    let field_name = Tenv.resolve_fieldname tenv typ_name name in
-    ret field_name data astate
+    (* warning: we skipped missed capture informations here *)
+    let field_name, missed_capture_types = Tenv.resolve_fieldname tenv typ_name name in
+    let unresolved_reason =
+      if Typ.Name.Set.is_empty missed_capture_types then None
+      else Some Tenv.MaybeMissingDueToMissedCapture
+    in
+    ret (field_name, unresolved_reason) data astate
 
 
   let tenv_resolve_method typ_name proc_name : Procname.t option model_monad =
@@ -467,22 +519,20 @@ module Syntax = struct
     (* Remark: this is a simplified resolution that will work well for closure resolution,
        but does not implement all the steps proposed for regular virtual calls in Pulse.ml *)
     let method_exists proc_name methods = List.mem ~equal:Procname.equal methods proc_name in
-    let opt_info, _ = Tenv.resolve_method ~method_exists tenv typ_name proc_name in
+    let opt_info = Tenv.resolve_method ~method_exists tenv typ_name proc_name |> Result.ok in
     (* warning: we skipped missed capture informations here *)
     let opt_resolved_proc_name = Option.map opt_info ~f:Tenv.MethodInfo.get_procname in
     ret opt_resolved_proc_name data astate
 
 
-  let eval_read exp : aval model_monad =
+  let read exp : aval model_monad =
     let* {path; location} = get_data in
     PulseOperations.eval path Read location exp |> exec_partial_operation
 
 
-  let eval_const_int i : aval model_monad = eval_read (Const (Cint (IntLit.of_int i)))
+  let string str : aval model_monad = read (Const (Cstr str))
 
-  let eval_const_string str : aval model_monad = eval_read (Const (Cstr str))
-
-  let eval_string_concat (v1, hist1) (v2, hist2) : aval model_monad =
+  let string_concat (v1, hist1) (v2, hist2) : aval model_monad =
     let v = AbstractValue.mk_fresh () in
     let hist = ValueHistory.binary_op (PlusA None) hist1 hist2 in
     let* () =
@@ -498,25 +548,34 @@ module Syntax = struct
     PulseOperations.allocate attr location addr |> exec_command
 
 
-  let mk_fresh ?more () : aval model_monad =
-    let* {path} = get_data in
-    let addr = AbstractValue.mk_fresh () in
+  let fresh_ var_type ?more () : aval model_monad =
+    let addr =
+      match var_type with
+      | `Unrestricted ->
+          AbstractValue.mk_fresh ()
+      | `NonNegative ->
+          AbstractValue.mk_fresh_restricted ()
+    in
     let* event = get_event ?more () in
-    let hist = Hist.single_event path event in
+    let hist = Hist.single_event event in
     ret (addr, hist)
 
 
-  let write_field ~ref ~obj field : unit model_monad =
+  let fresh ?more () = fresh_ `Unrestricted ?more ()
+
+  let fresh_nonneg ?more () = fresh_ `NonNegative ?more ()
+
+  let write_field ~ref field obj : unit model_monad =
     let* {path; location} = get_data in
     PulseOperations.write_field path location ~ref ~obj field >> sat |> exec_partial_command
 
 
-  let write_deref_field ~ref ~obj field : unit model_monad =
+  let store_field ~ref field obj : unit model_monad =
     let* {path; location} = get_data in
     PulseOperations.write_deref_field path location ~ref ~obj field >> sat |> exec_partial_command
 
 
-  let write_deref ~ref ~obj : unit model_monad =
+  let store ~ref obj : unit model_monad =
     let* {path; location} = get_data in
     PulseOperations.write_deref path location ~ref ~obj >> sat |> exec_partial_command
 
@@ -586,7 +645,7 @@ module Syntax = struct
     let* () =
       list_iter fields ~f:(fun (fieldname, obj) ->
           let field = Fieldname.make type_name fieldname in
-          write_deref_field ~ref:new_obj field ~obj )
+          store_field ~ref:new_obj field obj )
     in
     ret new_obj
 
@@ -602,10 +661,9 @@ module Syntax = struct
 
   let aval_operand (addr, _) = PulseArithmetic.AbstractValueOperand addr
 
-  let eval_binop binop (addr1, hist1) (addr2, hist2) : aval model_monad =
-    let* {path} = get_data in
+  let binop binop (addr1, hist1) (addr2, hist2) : aval model_monad =
     let addr_res = AbstractValue.mk_fresh () in
-    let hist_res = Hist.binop path binop hist1 hist2 in
+    let hist_res = Hist.binop binop hist1 hist2 in
     let* addr_res =
       PulseArithmetic.eval_binop addr_res binop (AbstractValueOperand addr1)
         (AbstractValueOperand addr2)
@@ -614,7 +672,7 @@ module Syntax = struct
     ret (addr_res, hist_res)
 
 
-  let eval_binop_int binop (arg, hist) i : aval model_monad =
+  let binop_int binop (arg, hist) i : aval model_monad =
     let addr_res = AbstractValue.mk_fresh () in
     let* addr_res =
       PulseArithmetic.eval_binop addr_res binop (AbstractValueOperand arg)
@@ -622,6 +680,23 @@ module Syntax = struct
       |> exec_partial_operation
     in
     ret (addr_res, hist)
+
+
+  let unop unop (addr, hist) : aval model_monad =
+    let addr_res = AbstractValue.mk_fresh () in
+    let* addr_res = PulseArithmetic.eval_unop addr_res unop addr |> exec_partial_operation in
+    ret (addr_res, hist)
+
+
+  let data_dependency dest sources =
+    let* {path; location} = get_data in
+    let* desc = get_desc in
+    PulseTaintOperations.propagate_to path location InternalModel dest sources desc |> exec_command
+
+
+  let data_dependency_to_ret sources =
+    let* ret = read_ret_origin in
+    data_dependency ret sources
 
 
   let prune_binop binop operand1 operand2 =
@@ -739,7 +814,7 @@ module Syntax = struct
         | None ->
             L.d_printfln "[ocaml model] Closure dynamic type is %a but no implementation was found!"
               Typ.Name.pp type_name ;
-            let* unknown_res = mk_fresh () in
+            let* unknown_res = fresh () in
             ret unknown_res
         | Some resolved_pname ->
             L.d_printfln "[ocaml model] Closure resolved to a call to %a" Procname.pp resolved_pname ;
@@ -754,18 +829,18 @@ module Syntax = struct
                   {exp; typ; arg_payload} )
             in
             let* () = dispatch_call (ret_id, typ) resolved_pname call_args in
-            let* res = eval_read (Exp.Var ret_id) in
+            let* res = read (Exp.Var ret_id) in
             L.d_printfln "[ocaml model] Closure return value is %a." AbstractValue.pp (fst res) ;
             ret res )
     | _ ->
         L.d_printfln "[ocaml model] Closure dynamic type is unknown." ;
-        let* unknown_res = mk_fresh () in
+        let* unknown_res = fresh () in
         ret unknown_res
 
 
   module Basic = struct
     (* See internal_new_. We do some crafty unboxing to make the external API nicer *)
-    let alloc_not_null allocator size ~initialize : unit model_monad =
+    let return_alloc_not_null allocator size ~initialize : unit model_monad =
       let* desc = get_desc in
       let model_ model_data astate =
         let<++> astate =
@@ -775,6 +850,13 @@ module Syntax = struct
         astate
       in
       lift_to_monad (lift_model model_)
+
+
+    let free invalidation func_arg : unit model_monad =
+      Basic.free_or_delete `Free invalidation func_arg |> lift_to_monad
+
+
+    let early_exit = Basic.early_exit |> lift_model
   end
 end
 

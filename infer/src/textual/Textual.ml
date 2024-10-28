@@ -78,7 +78,7 @@ exception TextualTransformError of transform_error list
 module type NAME = sig
   type t = {value: string; loc: Location.t [@compare.ignore]} [@@deriving compare, equal, hash]
 
-  val of_java_name : string -> t
+  val of_string : string -> t
 
   val pp : F.formatter -> t -> unit
 
@@ -103,11 +103,11 @@ module Name : NAME = struct
 
   let replace_dot_with_2colons str = String.substr_replace_all str ~pattern:"." ~with_:"::"
 
-  let of_java_name str = {value= replace_dot_with_2colons str; loc= Location.Unknown}
+  let of_string str = {value= replace_dot_with_2colons str; loc= Location.Unknown}
 
   let pp fmt name = F.pp_print_string fmt name.value
 
-  let is_hack_init {value} = String.equal value "_86pinit" || String.equal value "_86sinit"
+  let is_hack_init {value} = String.equal value "_86pinit" || String.equal value "_86constinit"
 
   module Hashtbl = Hashtbl.Make (T)
   module HashSet = HashSet.Make (T)
@@ -138,6 +138,8 @@ module TypeName : sig
 
   val hack_builtin : t
 
+  val python_builtin : t
+
   val hack_generics : t
 
   val wildcard : t
@@ -147,6 +149,8 @@ end = struct
   let wildcard = {value= "?"; loc= Location.Unknown}
 
   let hack_builtin = {value= "$builtins"; loc= Location.Unknown}
+
+  let python_builtin = {value= "$builtins"; loc= Location.Unknown}
 
   let hack_generics = {value= "HackGenerics"; loc= Location.Unknown}
 end
@@ -172,6 +176,14 @@ module QualifiedProcName = struct
     match enclosing_class with
     | Enclosing class_name ->
         TypeName.equal class_name TypeName.wildcard
+    | TopLevel ->
+        false
+
+
+  let is_python_builtin {enclosing_class} =
+    match enclosing_class with
+    | Enclosing class_name ->
+        TypeName.equal class_name TypeName.python_builtin
     | TopLevel ->
         false
 
@@ -319,7 +331,7 @@ module Ident : sig
 end = struct
   type t = int [@@deriving equal]
 
-  let to_ssa_var id = Printf.sprintf "__SSA%d" id |> VarName.of_java_name
+  let to_ssa_var id = Printf.sprintf "__SSA%d" id |> VarName.of_string
 
   let of_int id = id
 
@@ -327,8 +339,8 @@ end = struct
 
   let pp fmt id = F.fprintf fmt "n%d" id
 
-  module Map = Caml.Map.Make (Int)
-  module Set = Caml.Set.Make (Int)
+  module Map = IInt.Map
+  module Set = IInt.Set
 
   let fresh set = 1 + (Set.max_elt_opt set |> Option.value ~default:(-1))
 
@@ -718,8 +730,8 @@ module Exp = struct
         let captured_and_params =
           captured @ List.map params ~f:(fun varname -> Load {exp= Lvar varname; typ= None})
         in
-        F.fprintf fmt "(%a) -> %a(%a)" (pp_list_with_comma VarName.pp) params QualifiedProcName.pp
-          proc (pp_list_with_comma pp) captured_and_params
+        F.fprintf fmt "fun (%a) -> %a(%a)" (pp_list_with_comma VarName.pp) params
+          QualifiedProcName.pp proc (pp_list_with_comma pp) captured_and_params
     | Typ typ ->
         F.fprintf fmt "<%a>" Typ.pp typ
 
@@ -793,7 +805,7 @@ module Instr = struct
     | Load of {id: Ident.t; exp: Exp.t; typ: Typ.t option; loc: Location.t}
     | Store of {exp1: Exp.t; typ: Typ.t option; exp2: Exp.t; loc: Location.t}
     | Prune of {exp: Exp.t; loc: Location.t}
-    | Let of {id: Ident.t; exp: Exp.t; loc: Location.t}
+    | Let of {id: Ident.t option; exp: Exp.t; loc: Location.t}
 
   let loc = function Load {loc} | Store {loc} | Prune {loc} | Let {loc} -> loc
 
@@ -808,7 +820,9 @@ module Instr = struct
         F.fprintf fmt "store %a <- %a:%a" Exp.pp exp1 Exp.pp exp2 Typ.pp typ
     | Prune {exp} ->
         F.fprintf fmt "prune %a" Exp.pp exp
-    | Let {id; exp} ->
+    | Let {id= None; exp} ->
+        F.fprintf fmt "_ = %a" Exp.pp exp
+    | Let {id= Some id; exp} ->
         F.fprintf fmt "%a = %a" Ident.pp id Exp.pp exp
 
 
@@ -992,9 +1006,9 @@ module SsaVerification = struct
     in
     let collect_defs_in_instr seen (instr : Instr.t) =
       match instr with
-      | Load {id; loc} | Let {id; loc} ->
+      | Load {id; loc} | Let {id= Some id; loc} ->
           collect seen id loc
-      | Store _ | Prune _ ->
+      | Let _ | Store _ | Prune _ ->
           seen
     in
     let collect_defs_in_node seen (node : Node.t) =

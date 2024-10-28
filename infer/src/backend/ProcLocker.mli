@@ -10,11 +10,12 @@ open! IStd
 val setup : unit -> unit
 (** This should be called once before trying to lock Anything. *)
 
-val try_lock : Procname.t -> bool
-(** true = the lock belongs to the calling process. false = the lock belongs to a different worker *)
+val try_lock : Procname.t -> [`AlreadyLockedByUs | `LockedByAnotherProcess | `LockAcquired]
 
 val unlock : Procname.t -> unit
 (** This will work as a cleanup function because after calling unlock all the workers that need an
     unlocked Proc should find it's summary already Cached. Throws if the lock had not been taken. *)
 
-val is_locked : proc_filename:string -> bool
+val lock_all : Pid.t -> string list -> [> `FailedToLockAll | `LocksAcquired of string list]
+
+val unlock_all : string list -> unit

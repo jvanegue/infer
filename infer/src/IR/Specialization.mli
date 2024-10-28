@@ -41,9 +41,9 @@ module Pulse : sig
 
   val bottom : t
 
-  val is_empty : t -> bool
+  val is_bottom : t -> bool
 
-  val pp : F.formatter -> t -> unit [@@warning "-unused-value-declaration"]
+  val pp : F.formatter -> t -> unit
 
   module Map : PrettyPrintable.PPMap with type key = t
 
@@ -59,4 +59,6 @@ end
     interprocedural engine will reanalyze a procedure if it needs specialization and it will add the
     obtained specialized summary to the summaries stored for this procedure. This techique avoids
     cloning procedures. *)
-type t = Pulse of Pulse.t
+type t = Pulse of Pulse.t [@@deriving equal, compare, hash, sexp]
+
+val pp : F.formatter -> t -> unit

@@ -6,7 +6,6 @@
  *)
 
 open! IStd
-module IRAttributes = Attributes
 open PulseBasicInterface
 open PulseDomainInterface
 open PulseOperationResult.Import
@@ -21,33 +20,6 @@ module CoreFoundation = struct
     PulseOperations.remove_allocation_attr (fst access) astate |> Basic.ok_continue
 end
 
-let call args : model =
- (* [call \[args...; Closure _\]] models a call to the closure. It is similar to a
-    dispatch function. *)
- fun {path; analysis_data; location; ret} astate non_disj ->
-  match List.last args with
-  | Some {ProcnameDispatcher.Call.FuncArg.exp= Closure c} when Procname.is_objc_block c.name ->
-      (* TODO(T101946461): This code is very similar to [Pulse.dispatch_call] after the special
-         case for objc dispatch models with a bit of [Pulse.interprocedural_call]. Maybe refactor
-         it? *)
-      PerfEvent.(log (fun logger -> log_begin_event logger ~name:"pulse interproc call" ())) ;
-      let actuals = [] in
-      let get_pvar_formals pname =
-        IRAttributes.load pname |> Option.map ~f:ProcAttributes.get_pvar_formals
-      in
-      let formals_opt = get_pvar_formals c.name in
-      let call_kind = `Closure c.captured_vars in
-      let r, non_disj, _contradiction, _ =
-        PulseCallOperations.call analysis_data path location c.name ~ret ~actuals ~formals_opt
-          ~call_kind astate non_disj
-      in
-      PerfEvent.(log (fun logger -> log_end_event logger ())) ;
-      (r, non_disj)
-  | _ ->
-      (* Nothing to call *)
-      (Basic.ok_continue astate, non_disj)
-
-
 let insertion_into_collection_key_and_value (value, value_hist) (key, key_hist) ~desc :
     model_no_non_disj =
  fun {path; location} astate ->
@@ -55,12 +27,12 @@ let insertion_into_collection_key_and_value (value, value_hist) (key, key_hist) 
   let<*> astate, _ =
     PulseOperations.eval_access path ~must_be_valid_reason:InsertionIntoCollectionValue Read
       location
-      (value, Hist.add_event path event value_hist)
+      (value, Hist.add_event event value_hist)
       Dereference astate
   in
   let<+> astate, _ =
     PulseOperations.eval_access path ~must_be_valid_reason:InsertionIntoCollectionKey Read location
-      (key, Hist.add_event path event key_hist)
+      (key, Hist.add_event event key_hist)
       Dereference astate
   in
   astate
@@ -172,11 +144,11 @@ let read_from_collection (key, _key_hist) ~desc : model_no_non_disj =
   let astate_nil =
     let<**> astate = PulseArithmetic.prune_eq_zero key astate in
     let<++> astate = PulseArithmetic.and_eq_int ret_val IntLit.zero astate in
-    PulseOperations.write_id ret_id (ret_val, Hist.single_event path event) astate
+    PulseOperations.write_id ret_id (ret_val, Hist.single_event event) astate
   in
   let astate_not_nil =
     let<++> astate = PulseArithmetic.prune_positive key astate in
-    PulseOperations.write_id ret_id (ret_val, Hist.single_event path event) astate
+    PulseOperations.write_id ret_id (ret_val, Hist.single_event event) astate
   in
   List.rev_append astate_nil astate_not_nil
 
@@ -225,7 +197,7 @@ let construct_string ((value, value_hist) as char_array) : model_no_non_disj =
   let event = Hist.call_event path location desc in
   let<*> astate, _ =
     PulseOperations.eval_access path Read location
-      (value, Hist.add_event path event value_hist)
+      (value, Hist.add_event event value_hist)
       Dereference astate
   in
   let string = AbstractValue.mk_fresh () in
@@ -244,7 +216,7 @@ let check_arg_not_nil (value, value_hist) ~desc : model_no_non_disj =
     PulseOperations.eval_access path
       ~must_be_valid_reason:(NullArgumentWhereNonNullExpected (CallEvent.Model desc, None))
       Read location
-      (value, Hist.add_event path event value_hist)
+      (value, Hist.add_event event value_hist)
       Dereference astate
   in
   let ret_val = AbstractValue.mk_fresh () in
@@ -284,7 +256,7 @@ let call_objc_block FuncArg.{arg_payload= block_ptr_hist; typ} actuals : model =
             block_ptr_hist Dereference astate
         in
         let desc = Procname.to_string BuiltinDecl.__call_objc_block in
-        let hist = Hist.single_event path (Hist.call_event path location desc) in
+        let hist = Hist.single_event (Hist.call_event path location desc) in
         let astate = PulseOperations.havoc_id ret_id hist astate in
         let astate = AbductiveDomain.add_need_dynamic_type_specialization block astate in
         let astate =
@@ -333,9 +305,11 @@ let matchers : matcher list =
     Procname.get_objc_class_name proc_name |> Option.exists ~f:(String.is_prefix ~prefix)
   in
   let map_context_tenv f (x, _) = f x in
-  ( [ -"dispatch_sync" <>$ any_arg $++$--> call
+  ( [ -"dispatch_sync" <>$ any_arg $+ capt_arg $++$--> call_objc_block
+    ; -"dispatch_async" <>$ any_arg $+ capt_arg $++$--> call_objc_block
+    ; -"dispatch_once" <>$ any_arg $+ capt_arg $++$--> call_objc_block
     ; +map_context_tenv (PatternMatch.ObjectiveC.implements "UITraitCollection")
-      &:: "performAsCurrentTraitCollection:" <>$ any_arg $++$--> call
+      &:: "performAsCurrentTraitCollection:" $ capt_arg $++$--> call_objc_block
     ; +BuiltinDecl.(match_builtin __call_objc_block) $ capt_arg $++$--> call_objc_block ]
   |> List.map ~f:(ProcnameDispatcher.Call.contramap_arg_payload ~f:ValueOrigin.addr_hist) )
   @ ( [ +map_context_tenv PatternMatch.ObjectiveC.is_core_graphics_release

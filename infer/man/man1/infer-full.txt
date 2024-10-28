@@ -77,6 +77,11 @@ OPTIONS
            --annotation-reachability-apply-superclass-annotations)
            See also infer-analyze(1).
 
+       --annotation-reachability-check-loops
+           Activates: Highlights callsites in the trace that are nested in
+           some loop. (Conversely: --no-annotation-reachability-check-loops)
+           See also infer-analyze(1).
+
        --annotation-reachability-custom-models json
            Specify a map from annotations to lists of regexps to treat
            matching methods as if they had the annotation.
@@ -97,6 +102,13 @@ OPTIONS
            can call expensive methods (annotated @Expensive or modeled, with
            annotation reachability checker) (Conversely:
            --no-annotation-reachability-expensive)
+           See also infer-analyze(1).
+
+       --no-annotation-reachability-minimize-sinks
+           Deactivates: do not report paths where a prefix is also a source
+           to sink path. For example if there is a source() -> sink1() ->
+           sink2() path then only source() -> sink1() will be reported.
+           (Conversely: --annotation-reachability-minimize-sinks)
            See also infer-analyze(1).
 
        --annotation-reachability-minimize-sources
@@ -612,6 +624,7 @@ OPTIONS
              CONSTANT_ADDRESS_DEREFERENCE (disabled by default),
              CONSTANT_ADDRESS_DEREFERENCE_LATENT (disabled by default),
              CXX_REF_CAPTURED_IN_BLOCK (enabled by default),
+             CXX_STRING_CAPTURED_IN_BLOCK (disabled by default),
              Cannot_star (enabled by default),
              DANGLING_POINTER_DEREFERENCE (disabled by default),
              DANGLING_POINTER_DEREFERENCE_MAYBE (disabled by default),
@@ -704,6 +717,7 @@ OPTIONS
              PULSE_UNAWAITED_AWAITABLE (enabled by default),
              PULSE_UNFINISHED_BUILDER (disabled by default),
              PULSE_UNINITIALIZED_CONST (disabled by default),
+             PULSE_UNINITIALIZED_METHOD (disabled by default),
              PULSE_UNINITIALIZED_VALUE (enabled by default),
              PULSE_UNNECESSARY_COPY (enabled by default),
              PULSE_UNNECESSARY_COPY_ASSIGNMENT (enabled by default),
@@ -716,6 +730,7 @@ OPTIONS
              PULSE_UNNECESSARY_COPY_OPTIONAL (enabled by default),
              PULSE_UNNECESSARY_COPY_OPTIONAL_CONST (disabled by default),
              PULSE_UNNECESSARY_COPY_RETURN (disabled by default),
+             PULSE_UNNECESSARY_COPY_THRIFT_ASSIGNMENT (enabled by default),
              PURE_FUNCTION (enabled by default),
              REGEX_OP_ON_UI_THREAD (enabled by default),
              RESOURCE_LEAK (enabled by default),
@@ -994,7 +1009,7 @@ OPTIONS
        qualifier | suggestion | severity | line | column | procedure |
        procedure_start_line | file | bug_trace | key | hash | line_offset |
        qualifier_contains_potential_exception_note | taint_extra |
-       transitive_callees_extra | suppressed }
+       transitive_callees_extra | suppressed | autofix }
            Fields to emit with --issues-tests
            See also infer-report(1).
 
@@ -1282,11 +1297,32 @@ OPTIONS
            functions that never return null.
            See also infer-analyze(1), infer-capture(1), and infer-run(1).
 
+       --noescaping-function-list +string
+           Useful for the check CXX_REF_CAPTURED_IN_BLOCK. It declares a list
+           of functions that take blocks as arguments that are no escaping
+           but we cannot annotate them accordingly.
+           See also infer-analyze(1).
+
+       --objc-block-execution-macro string
+           Macro for executing Objective-C blocks safely.
+           See also infer-analyze(1).
+
        --objc-synthesize-dealloc
            Activates: If enabled, the capture tries to synthesize code in the
            dealloc methods of Objective-C classes corresponding to what the
            compiler does. (Conversely: --no-objc-synthesize-dealloc)
            See also infer-capture(1).
+
+       --ondemand-recursion-restart-limit int
+           In order to make the analysis of mutual recursion cycles
+           deterministic in their output, the analysis of a cycle of mutually
+           recursive functions may restart the analysis of the entire cycle
+           from a deterministic place. If the graph of mutual recursion is
+           more complex than a simple cycle this could potentially result in
+           many restarts before finding the "right" procedure from which to
+           start. This limits the number of restarts before we give up and
+           analyze the cycle as-is instead.
+           See also infer-analyze(1).
 
        --no-parameter-not-null-checked
            Deactivates: parameter-not-null-checked checker: An
@@ -1397,6 +1433,12 @@ OPTIONS
            --procedures-summary-json. See also --changed-files-index.)
            (Conversely: --no-procedures-summary-skip-empty)
            See also infer-debug(1).
+
+       --procs-to-analyze-index file
+           Specify the file containing an Sexp representing a list of pairs
+           of procedures and specializations to analyze. Only works with the
+           restart scheduler.
+           See also infer-analyze(1).
 
        --no-progress-bar,-P
            Deactivates: Show a progress bar (Conversely: --progress-bar | -p)
@@ -1531,6 +1573,10 @@ OPTIONS
            Pulse. Accepted formats are method or namespace::method
            See also infer-analyze(1).
 
+       --pulse-model-unreachable +string
+           Methods to be modeled as unreachable.
+           See also infer-analyze(1).
+
        --pulse-models-for-erlang +path
            Provide custom models for Erlang in JSON files or SQLite3. Files
            must end with `.json` or `.db` respectively. If a path to a
@@ -1617,13 +1663,6 @@ OPTIONS
            Maximum number of summary specialization by procedure.
            See also infer-analyze(1).
 
-       --no-pulse-taint-check-history
-           Deactivates: Check values histories for taint events before
-           reporting a taint issue. This is a temporary flag while the taint
-           analysis transitions from being mainly attribute-based to being
-           history-based. (Conversely: --pulse-taint-check-history)
-           See also infer-analyze(1).
-
        --pulse-taint-config +path
            Path to a taint analysis configuration file or a directory
            containing such files. This file can define --pulse-taint-sources,
@@ -1641,6 +1680,12 @@ OPTIONS
            only. If a source has such a kind, only data flows to sinks which
            originate at the source will be reported. If a sink has such a
            kind, only sensitive data flows to the sink will be reported.
+           See also infer-analyze(1).
+
+       --no-pulse-taint-follow-field-accesses
+           Deactivates: Specify if taint analysis should follow field
+           accesses when propagating taints. (Conversely:
+           --pulse-taint-follow-field-accesses)
            See also infer-analyze(1).
 
        --pulse-taint-opaque-files +path
@@ -1810,6 +1855,12 @@ OPTIONS
            (Conversely: --no-purity-only)
            See also infer-analyze(1).
 
+       --python-files-index path
+           A file containing a list of newline-separated Python files to
+           capture. Compatible with infer capture -- python3 file1.py
+           file2.py but not with --pyc-file.
+           See also infer-capture(1).
+
        --qualified-cpp-name-block-list +string
            Skip analyzing the procedures under the qualified cpp type name.
            See also infer-analyze(1).
@@ -1951,6 +2002,12 @@ OPTIONS
            Write results and internal files in the specified directory
            See also infer-analyze(1), infer-capture(1), infer-explore(1),
            infer-report(1), and infer-run(1).
+
+       --run-python-interpreter
+           Activates: Capture all .py files, transform them into internal
+           PyIR form and run the PyIR interpreter on them. (Conversely:
+           --no-run-python-interpreter)
+           See also infer-capture(1).
 
        --sarif
            Activates: Output issues in SARIF (Static Analysis Results
@@ -2915,11 +2972,17 @@ INTERNAL OPTIONS
        --merge-summaries-reset
            Set --merge-summaries to the empty list.
 
+       --noescaping-function-list-reset
+           Set --noescaping-function-list to the empty list.
+
        --nullable-annotation-name string
            Specify a custom nullable annotation name.
 
        --nullable-annotation-name-reset
            Cancel the effect of --nullable-annotation-name.
+
+       --objc-block-execution-macro-reset
+           Cancel the effect of --objc-block-execution-macro.
 
        --no-only-cheap-debug
            Deactivates: Disable expensive debugging output (Conversely:
@@ -2961,6 +3024,14 @@ INTERNAL OPTIONS
            --test-determinator or --export-changed-functions (Not available
            for Java) (Conversely: --no-process-clang-ast)
 
+       --procs-to-analyze-index-reset
+           Cancel the effect of --procs-to-analyze-index.
+
+       --pulse-balanced-disjuncts-strategy
+           Activates: Enable a disjunct selection strategy where each caller
+           disjunct is given near the same budget of post disjuncts.
+           (Conversely: --no-pulse-balanced-disjuncts-strategy)
+
        --pulse-cut-to-one-path-procedures-pattern-reset
            Cancel the effect of --pulse-cut-to-one-path-procedures-pattern.
 
@@ -2986,6 +3057,13 @@ INTERNAL OPTIONS
        --pulse-log-unknown-calls
            Activates: log calls to unknown functions in pulse in stats
            (Conversely: --no-pulse-log-unknown-calls)
+
+       --pulse-log-unknown-calls-sampled int
+           log calls to unknown functions in pulse in stats with specified
+           sample rate bound to avoid excessive logging
+
+       --pulse-log-unknown-calls-sampled-reset
+           Cancel the effect of --pulse-log-unknown-calls-sampled.
 
        --pulse-max-heap-reset
            Cancel the effect of --pulse-max-heap.
@@ -3037,6 +3115,9 @@ INTERNAL OPTIONS
 
        --pulse-model-transfer-ownership-reset
            Set --pulse-model-transfer-ownership to the empty list.
+
+       --pulse-model-unreachable-reset
+           Set --pulse-model-unreachable to the empty list.
 
        --pulse-models-for-erlang-reset
            Set --pulse-models-for-erlang to the empty list.
@@ -3140,9 +3221,8 @@ INTERNAL OPTIONS
        --pyc-file-reset
            Set --pyc-file to the empty list.
 
-       --python-builtin-models string
-           Specify .sil file to use as Python builtin models (uses bundled
-           models by default)
+       --python-files-index-reset
+           Cancel the effect of --python-files-index.
 
        --qualified-cpp-name-block-list-reset
            Set --qualified-cpp-name-block-list to the empty list.

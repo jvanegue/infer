@@ -11,8 +11,6 @@ module F = Format
 module Hashtbl = Caml.Hashtbl
 module VarMap = Hashtbl.Make (Var)
 
-let pp_comma_sep fmt () = F.pp_print_string fmt ", "
-
 let pp_loc_opt fmt loc_opt =
   match loc_opt with
   | Some loc ->
@@ -39,12 +37,17 @@ let rec var_of_ptr_exp (exp_var : Exp.t) =
 
 (* A module for parsing a JSON configuration into a custom data type. *)
 module AnalysisConfig : sig
-  (** A class name and the method names of that class that are known to "generate" a scope. That is,
-      return objects of a known scope. *)
-  type classname_methods = {classname: string; methods: string list}
+  (** Methods that are known to "generate" a scope. That is, return objects of a known scope. Could
+      be specified by either classname/methods pair or by a return type of a method *)
+  type generator =
+    { classname: string option
+    ; methods: string list option
+    ; return_types: string list option
+    ; classname_suffix: string option
+    ; scoped_parameter_types: string list option }
 
   (** Lists of generators for the different types of scopes. *)
-  type generators = classname_methods list
+  type generators = generator list
 
   (** Information defining each scope. *)
   type scope_def = {classname: string; generators: generators}
@@ -63,36 +66,56 @@ module AnalysisConfig : sig
 
   val pp : F.formatter -> t -> unit
 end = struct
-  type classname_methods = {classname: string; methods: string list}
+  type generator =
+    { classname: string option [@yojson.option]
+    ; methods: string list option [@yojson.option]
+    ; return_types: string list option [@yojson.option]
+    ; classname_suffix: string option [@yojson.option]
+    ; scoped_parameter_types: string list option [@yojson.option] }
+  [@@deriving of_yojson]
 
-  type generators = classname_methods list
+  type generators = generator list [@@deriving of_yojson]
 
-  type scope_def = {classname: string; generators: generators}
+  type scope_def = {classname: string; generators: generators} [@@deriving of_yojson]
 
-  type must_not_hold_pair = {holder: string; held: string}
+  type must_not_hold_pair = {holder: string [@yojson.key "holds"]; held: string}
+  [@@deriving of_yojson]
 
   type t =
-    { annotation_classname: string
-    ; scope_defs: scope_def list
-    ; must_not_hold_pairs: must_not_hold_pair list }
+    { annotation_classname: string [@yojson.key "annot-classname"]
+    ; scope_defs: scope_def list [@yojson.key "scopes"]
+    ; must_not_hold_pairs: must_not_hold_pair list [@yojson.key "must-not-hold"] }
+  [@@deriving of_yojson]
 
   let empty = {annotation_classname= ""; scope_defs= []; must_not_hold_pairs= []}
 
   let pp fmt config =
-    let pp_list pp_elt = F.pp_print_list ~pp_sep:pp_comma_sep pp_elt in
-    let pp_methods fmt methods =
-      let pp_method fmt methodname = F.fprintf fmt {|"%s"|} methodname in
-      (pp_list pp_method) fmt methods
-    in
-    let pp_generator fmt {classname; methods} =
-      F.fprintf fmt {| { "classname": "%s", "methods": [%a] } |} classname pp_methods methods
+    let pp_generator fmt {classname; methods; return_types; classname_suffix; scoped_parameter_types}
+        =
+      F.fprintf fmt
+        {|
+          {
+            "classname": "%a",
+            "methods": [%a],
+            "return_types": [%a],
+            "classname_suffix": %a,
+            "scoped_parameter_types": [%a]
+          }
+        |}
+        (Pp.option String.pp) classname
+        (Pp.option (Pp.comma_seq String.pp))
+        methods
+        (Pp.option (Pp.comma_seq String.pp))
+        return_types (Pp.option String.pp) classname_suffix
+        (Pp.option (Pp.comma_seq String.pp))
+        scoped_parameter_types
     in
     let pp_scope fmt {classname; generators} =
-      F.fprintf fmt {| { "classname": "%s", "generators": [%a] } |} classname (pp_list pp_generator)
-        generators
+      F.fprintf fmt {| { "classname": "%s", "generators": [%a] } |} classname
+        (Pp.comma_seq pp_generator) generators
     in
     let pp_must_not_hold_pair fmt {holder; held} =
-      F.fprintf fmt {| { "holder": "%s", "held": "%s" } |} holder held
+      F.fprintf fmt {| { "holds": "%s", "held": "%s" } |} holder held
     in
     F.fprintf fmt
       {|"scope-leakage-config" : {
@@ -103,91 +126,9 @@ end = struct
   "must-not-hold": {%a}
 }
       |}
-      config.annotation_classname (pp_list pp_scope) config.scope_defs
-      (pp_list pp_must_not_hold_pair) config.must_not_hold_pairs
-
-
-  (** Finds a named JSON node in a map and aborts with an informative message otherwise. *)
-  let find_node map key node =
-    try Hashtbl.find map key
-    with _ ->
-      L.die UserError "Missing key \"%s\" in association node %a!@\n" key Yojson.Safe.pp node
-
-
-  (* Converts a JSON `Assoc into a Hashtbl. *)
-  let json_assoc_list_to_map assoc_list =
-    let result = Hashtbl.create 10 in
-    List.iter assoc_list ~f:(fun (key, node) -> Hashtbl.add result key node) ;
-    result
-
-
-  (* Converts a JSON string list node into a list of strings. *)
-  let json_list_to_string_list node =
-    match node with
-    | `List nodes ->
-        List.map nodes ~f:Yojson.Safe.Util.to_string
-    | _ ->
-        L.die UserError "Failed parsing a list of strings from %a!@\n" Yojson.Safe.pp node
-
-
-  (** node is a JSON entry of the form "classname" : string, "methods": [list of strings]. *)
-  let parse_classname_methods node =
-    match node with
-    | `Assoc assoc_list ->
-        let node_as_map = json_assoc_list_to_map assoc_list in
-        let classname = Yojson.Safe.Util.to_string (find_node node_as_map "classname" node) in
-        let methods = json_list_to_string_list (find_node node_as_map "methods" node) in
-        {classname; methods}
-    | _ ->
-        L.die UserError "Failed parsing a classname+methods node from %a!@\n" Yojson.Safe.pp node
-
-
-  let parse_generators node =
-    match node with
-    | `List list_node ->
-        List.map list_node ~f:parse_classname_methods
-    | _ ->
-        L.die UserError "Failed parsing a list of classname+methods list from %a!@\n" Yojson.Safe.pp
-          node
-
-
-  let parse_scope node =
-    match node with
-    | `Assoc generators_list ->
-        let node_as_map = json_assoc_list_to_map generators_list in
-        let classname_node = find_node node_as_map "classname" node in
-        let generators_node = find_node node_as_map "generators" node in
-        { classname= Yojson.Safe.Util.to_string classname_node
-        ; generators= parse_generators generators_node }
-    | _ ->
-        L.die UserError "Failed parsing scope node from %a!@\n" Yojson.Safe.pp node
-
-
-  let parse_scope_list node =
-    match node with
-    | `List node_list ->
-        List.map node_list ~f:parse_scope
-    | _ ->
-        L.die UserError "Failed parsing a list of scopes from %a" Yojson.Safe.pp node
-
-
-  let parse_must_not_hold_pair node =
-    match node with
-    | `Assoc node_assoc_list ->
-        let node_as_map = json_assoc_list_to_map node_assoc_list in
-        let left_node = find_node node_as_map "holds" node in
-        let right_node = find_node node_as_map "held" node in
-        {holder= Yojson.Safe.Util.to_string left_node; held= Yojson.Safe.Util.to_string right_node}
-    | _ ->
-        L.die UserError "Failed parsing a must-not-hold pair from %a!@\n" Yojson.Safe.pp node
-
-
-  let parse_must_not_hold node =
-    match node with
-    | `List node_list ->
-        List.map node_list ~f:parse_must_not_hold_pair
-    | _ ->
-        L.die UserError "Failed parsing a must-not-hold pair from %a!@\n" Yojson.Safe.pp node
+      config.annotation_classname (Pp.comma_seq pp_scope) config.scope_defs
+      (Pp.comma_seq pp_must_not_hold_pair)
+      config.must_not_hold_pairs
 
 
   (** Basic semantic checks. *)
@@ -203,28 +144,41 @@ end = struct
           L.die UserError
             "Failed validating scope-leakage-config: scope name %s appearing in 'must-not-hold' is \
              not listed in as a scope!@\n"
-            held )
+            held ) ;
+    let generators = List.map scope_defs ~f:(fun {generators} -> generators) in
+    List.iter generators ~f:(fun generators ->
+        List.iter generators
+          ~f:(fun {classname; methods; return_types; classname_suffix; scoped_parameter_types} ->
+            match (classname, methods, return_types, classname_suffix, scoped_parameter_types) with
+            (* classname and methods is a valid generator combination *)
+            | Some _classname, Some _methods, None, None, None ->
+                ()
+            (* return_types is a valid generator *)
+            | None, None, Some _return_types, None, None ->
+                ()
+            (* methods, classname_suffix and scoped_parameter_types is a valid generator combination *)
+            | None, Some _methods, None, Some _classname_suffix, Some _scoped_parameter_types ->
+                ()
+            | _, _, _, _, _ ->
+                L.die UserError
+                  "Either combination of `classname` and `methods` or `return_types` or \
+                   combination of `classname_suffix`, `methods` and `scoped_parameter_types` \
+                   should be specified as a generator@\n" ) )
 
 
-  let parse node =
-    match node with
-    | `Assoc node_assoc_list ->
-        let node_as_map = json_assoc_list_to_map node_assoc_list in
-        let annot_classname_node = find_node node_as_map "annot-classname" node in
-        let scopes_node = find_node node_as_map "scopes" node in
-        let must_not_hold_node = find_node node_as_map "must-not-hold" node in
-        let result =
-          { annotation_classname= Yojson.Safe.Util.to_string annot_classname_node
-          ; scope_defs= parse_scope_list scopes_node
-          ; must_not_hold_pairs= parse_must_not_hold must_not_hold_node }
-        in
-        validate result ;
-        result
-    | `List [] ->
-        L.debug Analysis Verbose "scope-leakage-config is empty!@\n" ;
-        empty
-    | _ ->
-        L.die UserError "Failed parsing a scope-leakage-config node from %a!@\n" Yojson.Safe.pp node
+  let parse json =
+    let config =
+      match json with
+      | `List [] ->
+          L.debug Analysis Verbose "scope-leakage-config is empty!@\n" ;
+          empty
+      | json -> (
+        try t_of_yojson json
+        with _ ->
+          L.die UserError "Failed parsing scope-leakage-config from %a!@\n" Yojson.Safe.pp json )
+    in
+    validate config ;
+    config
 end
 
 (** Parse the configuration into a global. *)
@@ -386,7 +340,7 @@ module Scope : sig
 
   val must_not_hold_violations : t -> t -> (explained_scope * explained_scope) list
 
-  val of_generator_procname : Procname.t -> Typ.Name.t option
+  val of_generator_procname : Tenv.t -> Procname.t -> Typ.Name.t option
   (** Matches a procedure name with the scope of the returned object (or None if the scope of the
       returned object is unknown) by matching it against the set of known generators. *)
 
@@ -433,10 +387,8 @@ end = struct
 
 
   let pp_explained_scope fmt {typname; path; dst} =
-    let pp_access_path fmt access_path =
-      F.pp_print_list ~pp_sep:pp_comma_sep ScopeAccess.pp fmt access_path
-    in
-    F.fprintf fmt "%a:[%a.%a]" Typ.Name.pp typname pp_access_path path ScopeDeclaration.pp dst
+    F.fprintf fmt "%a:[%a.%a]" Typ.Name.pp typname (Pp.comma_seq ScopeAccess.pp) path
+      ScopeDeclaration.pp dst
 
 
   let pp_explained_scope_debug fmt {typname; path; dst} =
@@ -457,11 +409,7 @@ end = struct
   let pp_explained_type fmt {typname} = F.fprintf fmt "%s" (Typ.Name.name typname)
 
   let pp fmt scopes =
-    let pp_list pp_single fmt l =
-      if List.is_empty l then F.fprintf fmt "[]"
-      else F.pp_print_list ~pp_sep:pp_comma_sep pp_single fmt l
-    in
-    let pp_explained_list fmt accessed_list = pp_list pp_explained_scope fmt accessed_list in
+    let pp_explained_list fmt accessed_list = Pp.comma_seq pp_explained_scope fmt accessed_list in
     F.fprintf fmt "%a" pp_explained_list scopes
 
 
@@ -641,16 +589,64 @@ end = struct
 
   (** Returns the scope for which there exists a generator that matches the given Java procedure
       name, if one exists, and bottom otherwise. *)
-  let match_javaname scopes (jname : Procname.Java.t) =
+  let match_procname scopes tenv procname =
     let open AnalysisConfig in
-    let curr_classname = Procname.Java.get_class_name jname in
-    let curr_method = Procname.Java.get_method jname in
-    (* Checks whether curr_classname+curr_method exist in the list of generators. *)
+    let curr_classname = Procname.get_class_name procname in
+    let curr_method = Procname.get_method procname in
+    let proc_attributes = Attributes.load procname in
     let match_generators generators =
-      let matches_classname_methods {classname; methods} =
-        String.equal classname curr_classname && List.exists methods ~f:(String.equal curr_method)
+      let type_matches tenv actual_typ types =
+        match actual_typ with
+        | {Typ.desc= Tptr ({desc= Tstruct actual_name}, _)} ->
+            PatternMatch.supertype_exists tenv
+              (fun type_name _ ->
+                let type_name_str = Typ.Name.name type_name in
+                List.exists types ~f:(fun typ -> String.is_substring ~substring:typ type_name_str)
+                )
+              actual_name
+        | _ ->
+            false
       in
-      List.exists generators ~f:matches_classname_methods
+      let matches_generator = function
+        (* Checks whether curr_classname+curr_method exist in the list of generators. *)
+        | { classname= Some classname
+          ; methods= Some methods
+          ; return_types= None
+          ; classname_suffix= None
+          ; scoped_parameter_types= None } ->
+            Option.exists curr_classname ~f:(fun curr_classname ->
+                String.equal classname curr_classname
+                && List.exists methods ~f:(String.equal curr_method) )
+        (* Checks whether curr_method's return type or its supertype exist in the list of generators. *)
+        | { classname= None
+          ; methods= None
+          ; return_types= Some return_types
+          ; classname_suffix= None
+          ; scoped_parameter_types= None } ->
+            Option.exists proc_attributes ~f:(fun attrs ->
+                let return_type = attrs.ProcAttributes.ret_type in
+                type_matches tenv return_type return_types )
+        | { classname= None
+          ; methods= Some methods
+          ; return_types= None
+          ; classname_suffix= Some classname_suffix
+          ; scoped_parameter_types= Some scoped_parameter_types } ->
+            let matches_classname_suffix =
+              Option.exists curr_classname ~f:(fun curr_classname ->
+                  String.is_suffix curr_classname ~suffix:classname_suffix )
+            in
+            let matches_curr_method = List.exists methods ~f:(String.equal curr_method) in
+            let matches_parameter_types =
+              Option.exists proc_attributes ~f:(fun attrs ->
+                  let formals = attrs.ProcAttributes.formals in
+                  let types = List.map formals ~f:(fun (_, typ, _) -> typ) in
+                  List.exists types ~f:(fun typ -> type_matches tenv typ scoped_parameter_types) )
+            in
+            matches_classname_suffix && matches_curr_method && matches_parameter_types
+        | _ ->
+            false
+      in
+      List.exists generators ~f:matches_generator
     in
     List.find scopes ~f:(fun scope -> match_generators scope.generators)
     |> Option.bind ~f:(fun scope -> of_scope_class_name scope.classname)
@@ -658,8 +654,8 @@ end = struct
 
   (** Given a config, generates a function that matches a procedure name with the scope of the
       returned object (or None if the scope of the returned object is unknown). *)
-  let of_generator_procname_with_config {AnalysisConfig.scope_defs} procname =
-    match procname with Procname.Java jname -> match_javaname scope_defs jname | _ -> None
+  let of_generator_procname_with_config {AnalysisConfig.scope_defs} tenv procname =
+    match_procname scope_defs tenv procname
 
 
   let of_generator_procname = of_generator_procname_with_config config
@@ -779,7 +775,7 @@ let rec scope_target_var_of_ptr_expr (e : Exp.t) =
       Some (Var.of_id id)
   | Lvar pvar ->
       Some (Var.of_pvar pvar)
-  | Lfield (e, _, _) | Cast (_, e) | Exn e | Lindex (e, _) ->
+  | Lfield ({exp= e}, _, _) | Cast (_, e) | Exn e | Lindex (e, _) ->
       scope_target_var_of_ptr_expr e
   | Const _ | Closure _ | Sizeof _ | UnOp _ | BinOp _ ->
       None
@@ -869,7 +865,7 @@ let exec_instr scope_env tenv analyze_dependency instr =
   | Store {e1= Lvar pvar; typ} when Typ.is_pointer typ ->
       let lhs_var = Var.of_pvar pvar in
       [(lhs_var, Scope.of_type tenv typ)]
-  | Store {e1= Lfield (var_exp, fldname, _); typ; e2; loc} when Typ.is_pointer typ ->
+  | Store {e1= Lfield ({exp= var_exp}, fldname, _); typ; e2; loc} when Typ.is_pointer typ ->
       let lhs_var = Option.value_exn (var_of_ptr_exp var_exp) in
       let rhs_typ_scope = Scope.of_type tenv typ in
       let extended_typ_scope = Scope.extend_with_field_access rhs_typ_scope fldname (Some loc) in
@@ -889,7 +885,7 @@ let exec_instr scope_env tenv analyze_dependency instr =
       procname_of_exp call_exp
       |> Option.value_map ~default:[] ~f:(fun callee_pname ->
              (* Check for a scope-generator procname and only if this fails use the summary. *)
-             let opt_typename = Scope.of_generator_procname callee_pname in
+             let opt_typename = Scope.of_generator_procname tenv callee_pname in
              match opt_typename with
              | Some gen_typename ->
                  let generator_scope = Scope.make_for_generator gen_typename callee_pname loc in
@@ -928,7 +924,8 @@ let report_bad_field_assignments err_log proc_desc scoping =
   Procdesc.iter_instrs
     (fun _ instr ->
       match instr with
-      | Store {e1= Lfield (lvar_exp, fldname, lvar_type); e2; loc; typ} when Typ.is_pointer typ -> (
+      | Store {e1= Lfield ({exp= lvar_exp}, fldname, lvar_type); e2; loc; typ}
+        when Typ.is_pointer typ -> (
           let lvar = Option.value_exn (var_of_ptr_exp lvar_exp) in
           match var_of_ptr_exp e2 with
           | Some rvar ->
@@ -970,7 +967,7 @@ let report_bad_field_assignments err_log proc_desc scoping =
     proc_desc
 
 
-let _pp_vars fmt vars = F.pp_print_list ~pp_sep:pp_comma_sep (Pvar.pp Pp.text) fmt vars
+let _pp_vars fmt vars = Pp.comma_seq (Pvar.pp Pp.text) fmt vars
 
 (** Retain only entries for the (pointer-typed) procedure's parameter variables and the return
     variable. *)

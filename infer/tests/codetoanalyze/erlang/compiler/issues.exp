@@ -70,6 +70,10 @@ features_arithmetic:test_uminus1_Ok/0: ok
 features_arithmetic:test_uminus2_Bad/0: expected_crash
 features_arithmetic:test_uminus2_Ok/0: ok
 
+----- features_binary_attr -----
+features_binary_attr:test_bad_Bad/0: expected_crash
+features_binary_attr:test_ok_Ok/0: ok
+
 ----- features_bitwise -----
 features_bitwise:test_band1_Bad/0: expected_crash
 features_bitwise:test_band1_Ok/0: ok
@@ -116,7 +120,9 @@ features_catch_expr:test_catch_throw_Bad/0: function_clause
 
 ----- features_comparison -----
 features_comparison:fp_test_equal2_Ok/0: ok
+features_comparison:fp_test_equal_tuple_Ok/0: ok
 features_comparison:fp_test_exactly_not_equal2_Ok/0: ok
+features_comparison:fp_test_not_equal_tuple_Ok/0: ok
 features_comparison:test_atleast2_Ok/0: ok
 features_comparison:test_atleast_Bad/0: expected_crash
 features_comparison:test_atleast_Ok/0: ok
@@ -133,6 +139,8 @@ features_comparison:test_equal_atom_Bad/0: expected_crash
 features_comparison:test_equal_atom_Ok/0: ok
 features_comparison:test_equal_in_fun_call_Ok/0: ok
 features_comparison:test_equal_int_atom_Bad/0: expected_crash
+features_comparison:test_equal_tuple_Bad/0: expected_crash
+features_comparison:test_equal_tuple_different_size_Bad/0: expected_crash
 features_comparison:test_exactly_equal2_Bad/0: expected_crash
 features_comparison:test_exactly_equal_Bad/0: expected_crash
 features_comparison:test_exactly_equal_Ok/0: ok
@@ -163,6 +171,8 @@ features_comparison:test_not_equal_Ok/0: ok
 features_comparison:test_not_equal_atom_Bad/0: expected_crash
 features_comparison:test_not_equal_atom_Ok/0: ok
 features_comparison:test_not_equal_int_atom_Ok/0: ok
+features_comparison:test_not_equal_tuple_Bad/0: expected_crash
+features_comparison:test_not_equal_tuple_different_size_Ok/0: ok
 
 ----- features_fun -----
 features_fun:fn_test_fun_notexists_Bad/0: undef
@@ -259,27 +269,31 @@ features_lambdas:test_scopes3_Bad/0: badmatch
 features_lambdas:test_scopes4_Ok/0: ok
 
 ----- features_lc -----
-features_lc:fn_test_simple4_Bad/0: function_clause
+features_lc:fn_test_simple4_Bad/0: expected_crash
 features_lc:test_bad_gen_Bad/0: bad_generator
-features_lc:test_empty_Bad/0: function_clause
+features_lc:test_empty_Bad/0: expected_crash
 features_lc:test_empty_Ok/0: ok
-features_lc:test_filtered1_Bad/0: function_clause
+features_lc:test_filtered1_Bad/0: expected_crash
 features_lc:test_filtered1_Ok/0: ok
-features_lc:test_filtered2_Bad/0: function_clause
+features_lc:test_filtered2_Bad/0: expected_crash
 features_lc:test_filtered2_Ok/0: ok
-features_lc:test_simple1_Bad/0: function_clause
+features_lc:test_gen_after_filter_Bad/0: expected_crash
+features_lc:test_gen_after_filter_Ok/0: ok
+features_lc:test_scoping1_Ok/0: ok
+features_lc:test_scoping2_Ok/0: ok
+features_lc:test_simple1_Bad/0: expected_crash
 features_lc:test_simple1_Ok/0: ok
 features_lc:test_simple1a_Bad/0: case_clause
-features_lc:test_simple2_Bad/0: function_clause
+features_lc:test_simple2_Bad/0: expected_crash
 features_lc:test_simple2_Ok/0: ok
-features_lc:test_simple3_Bad/0: function_clause
+features_lc:test_simple3_Bad/0: expected_crash
 features_lc:test_simple3_Ok/0: ok
 features_lc:test_simple4_Ok/0: ok
-features_lc:test_two_filters_Bad/0: function_clause
+features_lc:test_two_filters_Bad/0: expected_crash
 features_lc:test_two_filters_Ok/0: ok
-features_lc:test_two_gen1_Bad/0: function_clause
+features_lc:test_two_gen1_Bad/0: expected_crash
 features_lc:test_two_gen1_Ok/0: ok
-features_lc:test_two_gen2_Bad/0: function_clause
+features_lc:test_two_gen2_Bad/0: expected_crash
 features_lc:test_two_gen2_Ok/0: ok
 
 ----- features_lists -----
@@ -561,12 +575,18 @@ nonmatch_atoms:test_match6_Bad/0: function_clause
 nonmatch_atoms:test_match7_Bad/0: function_clause
 
 ----- nonmatch_case_expr -----
+nonmatch_case_expr:fp_test_arg_Ok/0: ok
+nonmatch_case_expr:test_arg_Bad/0: case_clause
 nonmatch_case_expr:test_case_simple1_Ok/0: ok
 nonmatch_case_expr:test_case_simple2_Ok/0: ok
 nonmatch_case_expr:test_case_simple3_Bad/0: case_clause
 nonmatch_case_expr:test_case_tail1_Ok/0: ok
 nonmatch_case_expr:test_case_tail2_Ok/0: ok
 nonmatch_case_expr:test_case_tail3_Bad/0: case_clause
+nonmatch_case_expr:test_constant_vs_arg_Bad/0: case_clause
+nonmatch_case_expr:test_constant_vs_arg_Ok/0: ok
+nonmatch_case_expr:test_local_var_Bad/0: case_clause
+nonmatch_case_expr:test_local_var_Ok/0: ok
 
 ----- nonmatch_case_guards -----
 nonmatch_case_guards:test_accepts_all_Ok/0: ok
@@ -653,7 +673,9 @@ nonmatch_maps:test_update_match_in_function_Ok/0: ok
 nonmatch_maps:test_update_old_value_Ok/0: ok
 
 ----- nonmatch_match_expr -----
+nonmatch_match_expr:fp_test_match_func_args_Ok/0: ok
 nonmatch_match_expr:test_match_a_Ok/0: ok
+nonmatch_match_expr:test_match_anonymus_Ok/0: ok
 nonmatch_match_expr:test_match_b_Bad/0: badmatch
 nonmatch_match_expr:test_match_c_Ok/0: ok
 nonmatch_match_expr:test_match_d_Ok/0: ok
@@ -661,6 +683,9 @@ nonmatch_match_expr:test_match_e_Bad/0: function_clause
 nonmatch_match_expr:test_match_eager_Bad/0: badmatch
 nonmatch_match_expr:test_match_eager_Ok/0: ok
 nonmatch_match_expr:test_match_f_Ok/0: ok
+nonmatch_match_expr:test_match_func_arg_Bad/0: badmatch
+nonmatch_match_expr:test_match_func_arg_Ok/0: ok
+nonmatch_match_expr:test_match_func_args_Bad/0: badmatch
 nonmatch_match_expr:test_match_g_Bad/0: function_clause
 nonmatch_match_expr:test_match_in_pattern_a_Ok/0: ok
 nonmatch_match_expr:test_match_in_pattern_b_Bad/0: case_clause
@@ -671,6 +696,13 @@ nonmatch_match_expr:test_match_in_pattern_f_Bad/0: case_clause
 nonmatch_match_expr:test_match_nested1_Ok/0: ok
 nonmatch_match_expr:test_match_nested2_Bad/0: badmatch
 nonmatch_match_expr:test_match_nested3_Bad/0: badmatch
+nonmatch_match_expr:test_match_with_var_Bad/0: badmatch
+nonmatch_match_expr:test_match_with_var_Ok/0: ok
+nonmatch_match_expr:test_match_with_var_swapped_Bad/0: badmatch
+nonmatch_match_expr:test_match_with_var_swapped_Ok/0: ok
+nonmatch_match_expr:test_not_real_anon_match1_Bad/0: badmatch
+nonmatch_match_expr:test_not_real_anon_match2_Bad/0: badmatch
+nonmatch_match_expr:test_simple_match_Bad/0: badmatch
 
 ----- nonmatch_maybe -----
 nonmatch_maybe:test_maybe1_Ok/0: ok

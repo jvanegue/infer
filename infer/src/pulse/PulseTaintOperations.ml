@@ -199,21 +199,19 @@ type taint_policy_violation =
 let check_source_against_sink_policy location ~source source_times intra_procedural_only hist
     sanitizers ~sink sink_kind sink_policy =
   let has_matching_taint_event_in_history source hist =
-    if Config.pulse_taint_check_history then
-      (* TODO(izorin): tainting based on value histories doesn't work for function calls arguments yet *)
-      if TaintItem.is_argument_origin source && not intra_procedural_only then true
-      else if TaintItem.equal source sink then true
-      else
-        let check = function
-          | ValueHistory.TaintSource (taint_item, _, _) ->
-              List.exists taint_item.kinds ~f:(source_matches_sink_policy sink_kind sink_policy)
-          | ValueHistory.TaintPropagated _ ->
-              true
-          | _ ->
-              false
-        in
-        ValueHistory.exists_main hist ~f:check
-    else true
+    (* TODO(izorin): tainting based on value histories doesn't work for function calls arguments yet *)
+    if TaintItem.is_argument_origin source && not intra_procedural_only then true
+    else if TaintItem.equal source sink then true
+    else
+      let check = function
+        | ValueHistory.TaintSource (taint_item, _, _) ->
+            List.exists taint_item.kinds ~f:(source_matches_sink_policy sink_kind sink_policy)
+        | ValueHistory.TaintPropagated _ ->
+            true
+        | _ ->
+            false
+      in
+      ValueHistory.exists hist ~f:check
   in
   let open IOption.Let_syntax in
   let* source_kind =
@@ -292,7 +290,8 @@ let fold_taint_dependencies addr_hist0 astate ~init ~f =
     | ArrayAccess _ ->
         true
     | FieldAccess _ ->
-        Language.curr_language_is Hack || Language.curr_language_is Python
+        Config.pulse_taint_follow_field_accesses
+        && (Language.curr_language_is Hack || Language.curr_language_is Python)
     | Dereference ->
         false
   in
@@ -377,7 +376,7 @@ let dedup_reports results =
   List.map ~f:dedup_result results
 
 
-let check_flows_wrt_sink_ ?(policy_violations_to_report = (IntSet.empty, [])) path location
+let check_flows_wrt_sink_ ?(policy_violations_to_report = (IInt.Set.empty, [])) path location
     ~sink:(sink_item, sink_trace) ~source astate =
   let source_value, _ = source in
   let source_expr = Decompiler.find source_value astate in
@@ -406,7 +405,7 @@ let check_flows_wrt_sink_ ?(policy_violations_to_report = (IntSet.empty, [])) pa
               ; privacy_effect= policy_privacy_effect
               ; report_as_issue_type
               ; report_as_category } =
-            if IntSet.mem violated_policy_id reported_so_far then
+            if IInt.Set.mem violated_policy_id reported_so_far then
               (reported_so_far, policy_violations_to_report)
             else
               let flow_kind : Diagnostic.flow_kind =
@@ -414,7 +413,7 @@ let check_flows_wrt_sink_ ?(policy_violations_to_report = (IntSet.empty, [])) pa
                 else if TaintConfig.Kind.is_data_flow_only sink_kind then FlowFromSource
                 else TaintedFlow
               in
-              ( IntSet.add violated_policy_id reported_so_far
+              ( IInt.Set.add violated_policy_id reported_so_far
               , mk_reportable_error
                   (TaintFlow
                      { expr= source_expr
@@ -515,31 +514,33 @@ let taint_sinks path location tainted astate =
                       mark_sinked policy_violations_to_report ~access ~sink:new_sink v hist astate )
               )
           in
-          mark_sinked (IntSet.empty, []) ~sink v history astate
+          mark_sinked (IInt.Set.empty, []) ~sink v history astate
           |> of_astate_with_accumulated_policy_violations )
   in
   L.with_indent "taint_sinks" ~f:aux
 
 
-let propagate_to path location reason value_origin values call astate =
-  let v = ValueOrigin.value value_origin in
+let propagate_to path location reason dest sources call astate =
+  let v_dest = ValueOrigin.value dest in
   let path_condition = astate.AbductiveDomain.path_condition in
-  if PulseFormula.is_known_zero path_condition v then
-    AbductiveDomain.AddressAttributes.remove_taint_attrs v astate
+  if PulseFormula.is_known_zero path_condition v_dest then
+    AbductiveDomain.AddressAttributes.remove_taint_attrs v_dest astate
   else
     let astate =
-      if not (List.is_empty values) then
+      if not (List.is_empty sources) then
         let taints_in =
-          List.map values ~f:(fun {FuncArg.arg_payload= value_origin} ->
-              let v, history = ValueOrigin.addr_hist value_origin in
+          List.map sources ~f:(fun source ->
+              let v, history = ValueOrigin.addr_hist source in
               Attribute.{v; history} )
         in
-        AbductiveDomain.AddressAttributes.add_one v (PropagateTaintFrom (reason, taints_in)) astate
+        AbductiveDomain.AddressAttributes.add_one v_dest
+          (PropagateTaintFrom (reason, taints_in))
+          astate
       else astate
     in
-    fold_reachable_values value_origin astate ~f:(fun vo astate ->
+    fold_reachable_values dest astate ~f:(fun vo astate ->
         let v = ValueOrigin.value vo in
-        List.fold values ~init:astate ~f:(fun astate {FuncArg.arg_payload= actual_value_origin} ->
+        List.fold sources ~init:astate ~f:(fun astate actual_value_origin ->
             let actual = ValueOrigin.value actual_value_origin in
             let sources, sanitizers =
               AbductiveDomain.AddressAttributes.get_taint_sources_and_sanitizers actual astate
@@ -551,7 +552,7 @@ let propagate_to path location reason value_origin values call astate =
                 Attribute.TaintedSet.map
                   (fun {source; time_trace; hist= source_hist; intra_procedural_only} ->
                     let hist =
-                      ValueHistory.sequence ~context:path.PathContext.conditions
+                      ValueHistory.sequence
                         (Call
                            { f= call
                            ; location
@@ -598,7 +599,9 @@ let taint_propagators path location reason proc_name actuals tainted astate =
               let actual = ValueOrigin.value actual_value_origin in
               not (AbstractValue.equal v actual) )
         in
-        propagate_to path location reason value_origin other_actuals (Call proc_name) astate )
+        propagate_to path location reason value_origin
+          (List.map other_actuals ~f:FuncArg.arg_payload)
+          (Call proc_name) astate )
   in
   L.with_indent "taint_propagators" ~f:aux
 
@@ -718,20 +721,26 @@ let propagate_taint_for_unknown_calls tenv path location (return, return_typ)
         let return_value_origin =
           ValueOrigin.OnStack {var= return; addr_hist= ValueOrigin.addr_hist return_vo}
         in
-        propagate_to path location UnknownCall return_value_origin actuals call astate
+        propagate_to path location UnknownCall return_value_origin
+          (List.map actuals ~f:FuncArg.arg_payload)
+          call astate
     | _ ->
         astate
   in
   let astate =
     match actuals with
     | {FuncArg.arg_payload= this} :: other_actuals when propagate_to_receiver ->
-        propagate_to path location UnknownCall this other_actuals call astate
+        propagate_to path location UnknownCall this
+          (List.map other_actuals ~f:FuncArg.arg_payload)
+          call astate
     | _ ->
         astate
   in
   match List.rev actuals with
   | {FuncArg.arg_payload= last} :: other_actuals when propagate_to_last_actual ->
-      propagate_to path location UnknownCall last other_actuals call astate
+      propagate_to path location UnknownCall last
+        (List.map other_actuals ~f:FuncArg.arg_payload)
+        call astate
   | _ ->
       astate
 

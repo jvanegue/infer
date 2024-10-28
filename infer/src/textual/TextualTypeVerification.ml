@@ -103,10 +103,7 @@ let error_loc = function
       loc
 
 
-let pp_error sourcefile fmt error =
-  let primary_error_loc = error_loc error in
-  F.fprintf fmt "%a, %a: textual type error: " SourceFile.pp sourcefile Location.pp
-    primary_error_loc ;
+let pp_error fmt error =
   match error with
   | TypeMismatch {exp; typ; expected; _} ->
       F.fprintf fmt "expression %a has type %a, while %a was expected" Exp.pp exp Typ.pp typ
@@ -212,6 +209,10 @@ let catch ~(with_ : 'a) (x : 'a monad) : 'a monad =
 
 let option_value_map (o : 'a option) ~(none : 'b monad) ~(some : 'a -> 'b monad) : 'b monad =
  fun state -> Option.value_map o ~default:(none state) ~f:(fun a -> some a state)
+
+
+let option_iter (o : 'a option) ~(f : 'a -> unit monad) : unit monad =
+  option_value_map o ~none:(ret ()) ~some:f
 
 
 (** state accessors *)
@@ -682,7 +683,7 @@ let typecheck_instr (instr : Instr.t) : Instr.t monad =
   | Let {id; exp; loc} ->
       let* () = set_location loc in
       let* exp, typ = typeof_exp exp in
-      let+ () = set_ident_type id typ in
+      let+ () = option_iter id ~f:(fun id -> set_ident_type id typ) in
       Instr.Let {id; exp; loc}
 
 

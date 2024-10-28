@@ -8,17 +8,13 @@
 open! IStd
 module Env = ErlangEnvironment
 
-val make_stmt :
-     (Procdesc.t Env.present, _) Env.t
-  -> ?kind:Procdesc.Node.stmt_nodekind
-  -> Sil.instr list
-  -> Procdesc.Node.t
+val make_stmt : (Procdesc.t Env.present, _) Env.t -> Sil.instr list -> Procdesc.Node.t
 
 val make_load : (Procdesc.t Env.present, _) Env.t -> Ident.t -> Exp.t -> Typ.t -> Procdesc.Node.t
 
 val make_nop : (Procdesc.t Env.present, _) Env.t -> Procdesc.Node.t
 
-val make_join : (Procdesc.t Env.present, _) Env.t -> Procdesc.Node.t
+val make_join : (Procdesc.t Env.present, _) Env.t -> Procdesc.Node.t list -> Procdesc.Node.t
 
 val make_if : (Procdesc.t Env.present, _) Env.t -> bool -> Exp.t -> Procdesc.Node.t
 

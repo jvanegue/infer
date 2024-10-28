@@ -14,14 +14,15 @@ let tests =
   let assert_empty = invariant "{ }" in
   let int_typ = Typ.mk (Tint IInt) in
   let int_ptr_typ = Typ.mk (Tptr (int_typ, Pk_pointer)) in
-  let fun_ptr_typ = Typ.mk (Tptr (Typ.mk Tfun, Pk_pointer)) in
+  let fun_ptr_typ = Typ.mk (Tptr (Typ.mk (Tfun None), Pk_pointer)) in
   let closure_exp captureds =
     let mk_captured_var str =
       ( Exp.Var (ident_of_str str)
       , { CapturedVar.pvar= pvar_of_str str
         ; typ= int_ptr_typ
         ; capture_mode= CapturedVar.ByReference
-        ; is_formal_of= None } )
+        ; captured_from= None
+        ; context_info= None } )
     in
     let captured_vars = List.map ~f:mk_captured_var captureds in
     let closure = {Exp.name= dummy_procname; captured_vars} in

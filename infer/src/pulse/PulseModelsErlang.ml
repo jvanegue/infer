@@ -58,8 +58,10 @@ let get_erlang_type_or_any val_ astate =
   match typename with Some (Typ.ErlangType erlang_type) -> erlang_type | _ -> ErlangTypeName.Any
 
 
+let erlang_typ erlang_type_name = Typ.mk_struct (ErlangType erlang_type_name)
+
 let write_dynamic_type_and_return (addr_val, hist) typ ret_id location astate =
-  let typ = Typ.mk_struct (ErlangType typ) in
+  let typ = erlang_typ typ in
   let astate = PulseArithmetic.and_dynamic_type_is_unsafe addr_val typ location astate in
   PulseOperations.write_id ret_id (addr_val, hist) astate
 
@@ -128,7 +130,7 @@ let value_die message opt =
 let has_erlang_type value typ : value_maker =
  fun astate ->
   let instanceof_val = AbstractValue.mk_fresh () in
-  let sil_type = Typ.mk_struct (ErlangType typ) in
+  let sil_type = erlang_typ typ in
   let++ astate = PulseArithmetic.and_equal_instanceof instanceof_val value sil_type astate in
   (astate, instanceof_val)
 
@@ -306,8 +308,7 @@ module Atoms = struct
         ~field_addr:(AbstractValue.mk_fresh (), hist)
         ~field_val:hash hash_field astate
     in
-    ( PulseArithmetic.and_dynamic_type_is_unsafe (fst addr_atom) (Typ.mk_struct (ErlangType Atom))
-        location astate
+    ( PulseArithmetic.and_dynamic_type_is_unsafe (fst addr_atom) (erlang_typ Atom) location astate
     , addr_atom )
 
 
@@ -343,7 +344,7 @@ module Atoms = struct
       of_string location path ErlangTypeName.atom_false astate
     in
     let> astate, (addr, hist) = SatUnsat.to_list astate_true @ SatUnsat.to_list astate_false in
-    let typ = Typ.mk_struct (ErlangType Atom) in
+    let typ = erlang_typ Atom in
     let astate = PulseArithmetic.and_dynamic_type_is_unsafe addr typ location astate in
     [Ok (astate, (addr, hist))]
 
@@ -357,7 +358,7 @@ end
 module Integers = struct
   let value_field = Fieldname.make (ErlangType Integer) ErlangTypeName.integer_value
 
-  let typ = Typ.mk_struct (ErlangType Integer)
+  let typ = erlang_typ Integer
 
   let make_raw location path value : sat_maker =
    fun astate ->
@@ -412,7 +413,7 @@ module Comparison = struct
 
     (** Compares two objects by comparing one specific field. No type checking is made and the user
         should take care that the field is indeed a valid one for both arguments. *)
-    let from_fields sil_op field x y location path : value_maker =
+    let from_fields sil_op field x y _tenv location path : value_maker =
      fun astate ->
       let astate, _addr, (x_field, _) = load_field path field location x astate in
       let astate, _addr, (y_field, _) = load_field path field location y astate in
@@ -421,7 +422,7 @@ module Comparison = struct
 
     (** A trivial comparison that is always false. Can be used eg. for equality on incompatible
         types. *)
-    let const_false _x _y _location _path : value_maker =
+    let const_false _x _y _tenv _location _path : value_maker =
      fun astate ->
       let const_false = AbstractValue.mk_fresh () in
       let++ astate = PulseArithmetic.prune_eq_zero const_false astate in
@@ -430,84 +431,101 @@ module Comparison = struct
 
     (** A trivial comparison that is always true. Can be used eg. for inequality on incompatible
         types. *)
-    let const_true _x _y _location _path : value_maker =
+    let const_true _x _y _tenv _location _path : value_maker =
      fun astate ->
       let const_true = AbstractValue.mk_fresh () in
       let++ astate = PulseArithmetic.prune_positive const_true astate in
       (astate, const_true)
 
 
-    (** Returns an unconstrained value. Can be used eg. for overapproximation or for unsupported
-        comparisons.
-
-        Note that, as an over-approximation, it can lead to some false positives, that we generally
-        try to avoid. However, the only solution for comparisons that we do not support (such as
-        ordering on atoms) would then be to consider the result as unreachable (that is, return an
-        empty abstract state). This would lead to code depending on such comparisons not being
-        analysed at all, which may be less desirable than analysing it without gaining information
-        from the comparison itself. *)
-    let unknown _x _y _location _path : value_maker =
+    (** Returns an unknown value by simulating an unsupported function call. Can be used eg. for
+        unsupported comparisons. *)
+    let unknown (x, ty_x) (y, ty_y) tenv location path : value_maker =
      fun astate ->
-      let result = AbstractValue.mk_fresh () in
-      Sat (Ok (astate, result))
+      let ident = Ident.create_fresh Ident.kprimed in
+      let procname_none = None in
+      let reason =
+        CallEvent.SkippedKnownCall
+          (Procname.make_erlang ~module_name:ErlangTypeName.unsupported ~function_name:"comparison"
+             ~arity:2 )
+      in
+      let++ astate =
+        PulseCallOperations.unknown_call tenv path location reason procname_none
+          ~ret:(ident, erlang_typ Atom)
+          ~actuals:[(x, erlang_typ ty_x); (y, erlang_typ ty_y)]
+          ~formals_opt:None astate
+      in
+      let astate, (result, _hist) = PulseOperations.eval_ident ident astate in
+      (astate, result)
 
 
-    (** Takes as parameters the types of two values [x] and [y] known to be incompatible and returns
-        a comparator for [x < y] based on this type. Currently, this only supports comparisons with
-        at least one integer: namely, when [x] is known to be an integer, then the comparison is
-        always true, and when [y] is, the comparison is always false. Otherwise it is unknown.
+    let mono_unknown typename x y location path = unknown (x, typename) (y, typename) location path
+
+    (** Takes as parameters two values [x] and [y] with their types known to be incompatible and
+        returns a comparator for [x < y] based on these types. Currently, this only supports
+        comparisons with at least one integer: namely, when [x] is known to be an integer, then the
+        comparison is always true, and when [y] is, the comparison is always false. Otherwise it is
+        unknown.
 
         Reference: {:https://www.erlang.org/doc/reference_manual/expressions.html#term-comparisons}. *)
-    let incompatible_lt ty_x ty_y x y location path : value_maker =
+    let incompatible_lt (x, ty_x) (y, ty_y) tenv location path : value_maker =
      fun astate ->
       match (ty_x, ty_y) with
       | ErlangTypeName.Integer, _ ->
-          const_true x y location path astate
+          const_true x y tenv location path astate
       | _, ErlangTypeName.Integer ->
-          const_false x y location path astate
+          const_false x y tenv location path astate
       | _ ->
-          unknown x y location path astate
+          unknown (x, ty_x) (y, ty_y) tenv location path astate
 
 
-    (** Takes as parameters the types of two values [x] and [y] known to be incompatible and returns
-        a comparator for [x > y] based on this type.
+    (** Takes as parameters two values [x] and [y] with their types known to be incompatible and
+        returns a comparator for [x > y] based on these types.
 
         See also {!incompatible_lt}. *)
-    let incompatible_gt ty_x ty_y x y location path : value_maker =
+    let incompatible_gt (x, ty_x) (y, ty_y) tenv location path : value_maker =
      fun astate ->
       match (ty_x, ty_y) with
       | ErlangTypeName.Integer, _ ->
-          const_false x y location path astate
+          const_false x y tenv location path astate
       | _, ErlangTypeName.Integer ->
-          const_true x y location path astate
+          const_true x y tenv location path astate
       | _ ->
-          unknown x y location path astate
+          unknown (x, ty_x) (y, ty_y) tenv location path astate
 
 
     (** Adapt {!const_false} to have the expected type for the equality of incompatible values (cf
         {!type:t}, {!recfield:t.incompatible}). *)
-    let incompatible_eq _ty_x _ty_y = const_false
+    let incompatible_eq = const_false
 
     (** Cf. {!incompatible_eq} *)
-    let incompatible_exactly_not_eq _ty_x _ty_y = const_true
+    let incompatible_exactly_not_eq = const_true
 
     (** {1 Comparators as records of functions} *)
 
-    (** The type of the functions that compare two values based on a specific type combination. They
-        take the two values as parameters and build the abstract result that holds the comparison
+    (** The type of the functions that compare two values based on their type. They take the two
+        values and types as parameters and build the abstract result that holds the comparison
         value. *)
+    type typed_comparison =
+         (AbstractValue.t * ValueHistory.t) * ErlangTypeName.t
+      -> (AbstractValue.t * ValueHistory.t) * ErlangTypeName.t
+      -> Tenv.t
+      -> Location.t
+      -> PathContext.t
+      -> value_maker
+
+    (** A specialisation of {!typed_comparison} when the types are already known and fixed. *)
     type monotyped_comparison =
          AbstractValue.t * ValueHistory.t
       -> AbstractValue.t * ValueHistory.t
+      -> Tenv.t
       -> Location.t
       -> PathContext.t
       -> value_maker
 
     type t =
-      { unsupported: monotyped_comparison
-      ; incompatible: ErlangTypeName.t -> ErlangTypeName.t -> monotyped_comparison
-            (** [incompatible] takes as first parameters the types of the values being compared in
-                order to implement type-based ordering *)
+      { unsupported: typed_comparison
+      ; incompatible: typed_comparison
       ; integer: monotyped_comparison
       ; atom: monotyped_comparison }
 
@@ -532,7 +550,7 @@ module Comparison = struct
       { unsupported= unknown
       ; incompatible
       ; integer= from_fields int_binop Integers.value_field
-      ; atom= unknown }
+      ; atom= mono_unknown Atom }
 
 
     let gt = ordering Gt incompatible_gt
@@ -587,7 +605,7 @@ module Comparison = struct
       the actual comparison operator that we're computing. For instance the equality of atoms can be
       decided on their hash, but their relative ordering should check their names as
       lexicographically ordered strings. *)
-  let make_raw (cmp : Comparator.t) location path ((x_val, _) as x) ((y_val, _) as y) :
+  let make_raw (cmp : Comparator.t) tenv location path ((x_val, _) as x) ((y_val, _) as y) :
       disjunction_maker =
    fun astate ->
     let x_typ = get_erlang_type_or_any x_val astate in
@@ -595,39 +613,43 @@ module Comparison = struct
     match (x_typ, y_typ) with
     (* When supporting more types, this should probably be refactored to avoid N² cases. *)
     | Integer, Integer ->
-        let<**> astate, result = cmp.integer x y location path astate in
+        let<**> astate, result = cmp.integer x y tenv location path astate in
         let hist = Hist.single_call path location "integer_comparison" in
         [Ok (astate, (result, hist))]
     | Atom, Atom ->
-        let<**> astate, result = cmp.atom x y location path astate in
+        let<**> astate, result = cmp.atom x y tenv location path astate in
         let hist = Hist.single_call path location "atom_comparison" in
         [Ok (astate, (result, hist))]
     | Integer, Any ->
         let> astate = prune_type path location y Integer astate in
-        let<**> astate, result = cmp.integer x y location path astate in
+        let<**> astate, result = cmp.integer x y tenv location path astate in
         let hist = Hist.single_call path location "integer_any_comparison" in
         [Ok (astate, (result, hist))]
     | Any, Integer ->
         let> astate = prune_type path location x Integer astate in
-        let<**> astate, result = cmp.integer x y location path astate in
+        let<**> astate, result = cmp.integer x y tenv location path astate in
         let hist = Hist.single_call path location "any_integer_comparison" in
         [Ok (astate, (result, hist))]
     | Atom, Any ->
         let> astate = prune_type path location y Atom astate in
-        let<**> astate, result = cmp.atom x y location path astate in
+        let<**> astate, result = cmp.atom x y tenv location path astate in
         let hist = Hist.single_call path location "atom_any_comparison" in
         [Ok (astate, (result, hist))]
     | Any, Atom ->
         let> astate = prune_type path location x Atom astate in
-        let<**> astate, result = cmp.atom x y location path astate in
+        let<**> astate, result = cmp.atom x y tenv location path astate in
         let hist = Hist.single_call path location "any_atom_comparison" in
         [Ok (astate, (result, hist))]
-    | Nil, Nil | Cons, Cons | Tuple _, Tuple _ | Map, Map | Any, _ | _, Any ->
-        let<**> astate, result = cmp.unsupported x y location path astate in
+    | Nil, Nil | Cons, Cons | Map, Map | Any, _ | _, Any ->
+        let<**> astate, result = cmp.unsupported (x, x_typ) (y, y_typ) tenv location path astate in
         let hist = Hist.single_alloc path location "unsupported_comparison" in
         [Ok (astate, (result, hist))]
+    | Tuple size_x, Tuple size_y when [%equal: int] size_x size_y ->
+        let<**> astate, result = cmp.unsupported (x, x_typ) (y, y_typ) tenv location path astate in
+        let hist = Hist.single_alloc path location "tuple_comparison" in
+        [Ok (astate, (result, hist))]
     | _ ->
-        let<**> astate, result = cmp.incompatible x_typ y_typ x y location path astate in
+        let<**> astate, result = cmp.incompatible (x, x_typ) (y, y_typ) tenv location path astate in
         let hist = Hist.single_alloc path location "incompatible_comparison" in
         [Ok (astate, (result, hist))]
 
@@ -635,14 +657,14 @@ module Comparison = struct
   (** A model of comparison operators where we store in the destination the result of comparing two
       parameters. *)
   let make cmp x y : model_no_non_disj =
-   fun {location; path; ret= ret_id, _} astate ->
-    let> astate, (result, _hist) = make_raw cmp location path x y astate in
+   fun {location; path; analysis_data= {tenv; _}; ret= ret_id, _} astate ->
+    let> astate, (result, _hist) = make_raw cmp tenv location path x y astate in
     Atoms.write_return_from_bool path location result ret_id astate
 
 
   (** Returns an abstract state that has been pruned on the comparison result being true. *)
-  let prune cmp location path x y astate : AbductiveDomain.t AccessResult.t list =
-    let> astate, (comparison, _hist) = make_raw cmp location path x y astate in
+  let prune cmp tenv location path x y astate : AbductiveDomain.t AccessResult.t list =
+    let> astate, (comparison, _hist) = make_raw cmp tenv location path x y astate in
     PulseArithmetic.prune_positive comparison astate |> SatUnsat.to_list
 
 
@@ -673,10 +695,9 @@ module Lists = struct
    fun astate ->
     let event = Hist.alloc_event path location "[]" in
     let addr_nil_val = AbstractValue.mk_fresh () in
-    let addr_nil = (addr_nil_val, Hist.single_event path event) in
+    let addr_nil = (addr_nil_val, Hist.single_event event) in
     let astate =
-      PulseArithmetic.and_dynamic_type_is_unsafe addr_nil_val (Typ.mk_struct (ErlangType Nil))
-        location astate
+      PulseArithmetic.and_dynamic_type_is_unsafe addr_nil_val (erlang_typ Nil) location astate
     in
     Ok (astate, addr_nil)
 
@@ -705,8 +726,7 @@ module Lists = struct
         ~field_val:tl tail_field astate
     in
     let astate =
-      PulseArithmetic.and_dynamic_type_is_unsafe addr_cons_val (Typ.mk_struct (ErlangType Cons))
-        location astate
+      PulseArithmetic.and_dynamic_type_is_unsafe addr_cons_val (erlang_typ Cons) location astate
     in
     (astate, addr_cons)
 
@@ -725,8 +745,8 @@ module Lists = struct
             ~field_val:fval field astate
         in
         let astate' =
-          PulseArithmetic.and_dynamic_type_is_unsafe (fst addr_cons)
-            (Typ.mk_struct (ErlangType Cons)) location astate'
+          PulseArithmetic.and_dynamic_type_is_unsafe (fst addr_cons) (erlang_typ Cons) location
+            astate'
         in
         (astate', addr_cons)
     | (fname, fval) :: fld_ls' ->
@@ -777,8 +797,8 @@ module Lists = struct
 
   let make_astate_badarg (list_val, _list_hist) data astate =
     (* arg is not a list if its type is neither Cons nor Nil *)
-    let typ_cons = Typ.mk_struct (ErlangType Cons) in
-    let typ_nil = Typ.mk_struct (ErlangType Nil) in
+    let typ_cons = erlang_typ Cons in
+    let typ_nil = erlang_typ Nil in
     let instanceof_val_cons = AbstractValue.mk_fresh () in
     let instanceof_val_nil = AbstractValue.mk_fresh () in
     let<**> astate =
@@ -922,7 +942,7 @@ module Maps = struct
   let new_ : model_no_non_disj = make []
 
   let make_astate_badmap (map_val, _map_hist) data astate =
-    let typ = Typ.mk_struct (ErlangType Map) in
+    let typ = erlang_typ Map in
     let instanceof_val = AbstractValue.mk_fresh () in
     let<**> astate = PulseArithmetic.and_equal_instanceof instanceof_val map_val typ astate in
     let<**> astate = PulseArithmetic.prune_eq_zero instanceof_val astate in
@@ -932,7 +952,7 @@ module Maps = struct
   let make_astate_goodmap path location map astate = prune_type path location map Map astate
 
   let is_key key map : model_no_non_disj =
-   fun ({location; path; ret= ret_id, _} as data) astate ->
+   fun ({location; path; analysis_data= {tenv; _}; ret= ret_id, _} as data) astate ->
     (* Return 3 cases:
      * - Error & assume not map
      * - Ok & assume map & assume empty & return false
@@ -959,7 +979,7 @@ module Maps = struct
       in
       let> astate = PulseArithmetic.prune_eq_zero is_empty astate |> SatUnsat.to_list in
       let astate, _key_addr, tracked_key = load_field path key_field location map astate in
-      let> astate = Comparison.prune_equal location path key tracked_key astate in
+      let> astate = Comparison.prune_equal tenv location path key tracked_key astate in
       let> astate = PulseArithmetic.and_eq_int ret_val_true IntLit.one astate |> SatUnsat.to_list in
       Atoms.write_return_from_bool path location ret_val_true ret_id astate
     in
@@ -967,7 +987,7 @@ module Maps = struct
 
 
   let get (key, key_history) map : model_no_non_disj =
-   fun ({location; path; ret= ret_id, _} as data) astate ->
+   fun ({location; path; analysis_data= {tenv; _}; ret= ret_id, _} as data) astate ->
     (* Return 3 cases:
      * - Error & assume not map
      * - Error & assume map & assume empty;
@@ -981,7 +1001,9 @@ module Maps = struct
       in
       let> astate = PulseArithmetic.prune_eq_zero is_empty astate |> SatUnsat.to_list in
       let astate, _key_addr, tracked_key = load_field path key_field location map astate in
-      let> astate = Comparison.prune_equal location path (key, key_history) tracked_key astate in
+      let> astate =
+        Comparison.prune_equal tenv location path (key, key_history) tracked_key astate
+      in
       let astate, _value_addr, tracked_value = load_field path value_field location map astate in
       [Ok (PulseOperations.write_id ret_id tracked_value astate)]
     in
@@ -1106,7 +1128,7 @@ end
 module BIF = struct
   let has_type (value, _hist) type_ : model_no_non_disj =
    fun {location; path; ret= ret_id, _} astate ->
-    let typ = Typ.mk_struct (ErlangType type_) in
+    let typ = erlang_typ type_ in
     let is_typ = AbstractValue.mk_fresh () in
     let<**> astate = PulseArithmetic.and_equal_instanceof is_typ value typ astate in
     Atoms.write_return_from_bool path location is_typ ret_id astate
@@ -1118,7 +1140,7 @@ module BIF = struct
    fun {location; path; ret= ret_id, _} astate ->
     let astate_not_atom =
       (* Assume not atom: just return false *)
-      let typ = Typ.mk_struct (ErlangType Atom) in
+      let typ = erlang_typ Atom in
       let is_atom = AbstractValue.mk_fresh () in
       let<**> astate = PulseArithmetic.and_equal_instanceof is_atom atom_val typ astate in
       let<**> astate = PulseArithmetic.prune_eq_zero is_atom astate in
@@ -1160,8 +1182,8 @@ module BIF = struct
 
   let is_list (list_val, _list_hist) : model_no_non_disj =
    fun {location; path; ret= ret_id, _} astate ->
-    let cons_typ = Typ.mk_struct (ErlangType Cons) in
-    let nil_typ = Typ.mk_struct (ErlangType Nil) in
+    let cons_typ = erlang_typ Cons in
+    let nil_typ = erlang_typ Nil in
     let astate_is_cons =
       let is_cons = AbstractValue.mk_fresh () in
       let<**> astate = PulseArithmetic.and_equal_instanceof is_cons list_val cons_typ astate in
@@ -1373,8 +1395,7 @@ module Custom = struct
           let ret_addr = AbstractValue.mk_fresh () in
           let ret_hist = Hist.single_alloc path location "nondet_atom" in
           let astate =
-            PulseArithmetic.and_dynamic_type_is_unsafe ret_addr (Typ.mk_struct (ErlangType Atom))
-              location astate
+            PulseArithmetic.and_dynamic_type_is_unsafe ret_addr (erlang_typ Atom) location astate
           in
           Sat (Ok (astate, (ret_addr, ret_hist)))
       | Some (Atom (Some name)) ->
@@ -1384,7 +1405,7 @@ module Custom = struct
           let ret_hist = Hist.single_alloc path location "gen_server_pid" in
           let astate =
             PulseArithmetic.and_dynamic_type_is_unsafe ret_addr
-              (Typ.mk_struct (ErlangType (GenServerPid {module_name})))
+              (erlang_typ (GenServerPid {module_name}))
               location astate
           in
           Sat (Ok (astate, (ret_addr, ret_hist)))
@@ -1394,9 +1415,7 @@ module Custom = struct
           let ret_addr = AbstractValue.mk_fresh () in
           let ret_hist = Hist.single_alloc path location "nondet_abstr_intlit" in
           let astate =
-            PulseArithmetic.and_dynamic_type_is_unsafe ret_addr
-              (Typ.mk_struct (ErlangType Integer))
-              location astate
+            PulseArithmetic.and_dynamic_type_is_unsafe ret_addr (erlang_typ Integer) location astate
           in
           Sat (Ok (astate, (ret_addr, ret_hist)))
       | Some (List elements) ->
@@ -1653,9 +1672,7 @@ module GenServer = struct
           ([Ok (ContinueProgram astate)], non_disj)
       | Some module_name ->
           let procname = Procname.make_erlang ~module_name ~function_name:"init" ~arity:1 in
-          let actuals =
-            [(args, Typ.mk_struct (ErlangType (get_erlang_type_or_any (fst args) astate)))]
-          in
+          let actuals = [(args, erlang_typ (get_erlang_type_or_any (fst args) astate))] in
           let res_list, non_disj, _, _ =
             PulseCallOperations.call analysis_data path location procname ~ret ~actuals
               ~formals_opt:None ~call_kind:`ResolvedProcname astate non_disj
@@ -1785,12 +1802,9 @@ module GenServer = struct
     match module_name_opt with
     | Some module_name ->
         let arg_nondet () =
-          ( (AbstractValue.mk_fresh (), Hist.single_alloc path location "nondet")
-          , Typ.mk_struct (ErlangType Any) )
+          ((AbstractValue.mk_fresh (), Hist.single_alloc path location "nondet"), erlang_typ Any)
         in
-        let arg_req =
-          (request, Typ.mk_struct (ErlangType (get_erlang_type_or_any (fst request) astate)))
-        in
+        let arg_req = (request, erlang_typ (get_erlang_type_or_any (fst request) astate)) in
         let procname, actuals =
           match req_type with
           | Call ->

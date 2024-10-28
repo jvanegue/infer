@@ -177,7 +177,9 @@ let s fmt l = match l with [_] -> () | [] | _ :: _ :: _ -> F.pp_print_char fmt '
 
 let exec_in_parallel ~prog ~args commands =
   L.progress "Starting parallel capture for %d command%a@\n%!" (List.length commands) s commands ;
-  let tasks () = ProcessPool.TaskGenerator.of_list commands in
+  let tasks () =
+    ProcessPool.TaskGenerator.of_list ~finish:ProcessPool.TaskGenerator.finish_always_none commands
+  in
   Tasks.Runner.create tasks ~jobs:Config.jobs ~child_prologue:ignore ~child_epilogue:ignore
     ~f:(fun command ->
       !ProcessPoolState.update_status
@@ -190,7 +192,8 @@ let exec_in_parallel ~prog ~args commands =
 
 let exec_all_commands ~prog ~args commands =
   if Int.equal Config.jobs 1 || List.length commands <= parallel_threshold then (
-    L.progress "Starting sequential capture for %d command%a@\n%!" (List.length commands) s commands ;
+    L.debug Capture Medium "Starting sequential capture for %d command%a@\n%!"
+      (List.length commands) s commands ;
     List.iter ~f:(exec_action_item ~prog ~args) commands )
   else exec_in_parallel ~prog ~args commands
 

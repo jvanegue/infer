@@ -14,7 +14,7 @@ HH_AUTO_NAMESPACE_MAP = '{ \
   "Dict": "HH\\Lib\\Dict", \
   "Vec": "HH\\Lib\\Vec" \
 }'
-HH_OPTIONS = --auto-namespace-map=$(HH_AUTO_NAMESPACE_MAP)
+HH_OPTIONS = --auto-namespace-map=$(HH_AUTO_NAMESPACE_MAP) --config hack_warnings=false
 
 infer-out$(TEST_SUFFIX)/report.json: $(SOURCES) $(HH_SOURCES) $(INFER_BIN) $(HACKC) $(MAKEFILE_LIST)
 ifneq ($(HH_SINGLE_TYPE_CHECK),no)

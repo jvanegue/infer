@@ -366,6 +366,14 @@ module ObjC_Cpp = struct
 
   let is_cpp_lambda {method_name} = String.is_substring ~substring:"operator()" method_name
 
+  let is_cpp_method {kind} =
+    match kind with
+    | CPPMethod _ ->
+        true
+    | CPPConstructor _ | CPPDestructor _ | ObjCClassMethod | ObjCInstanceMethod ->
+        false
+
+
   let pp_verbose_kind fmt = function
     | CPPMethod mangled | CPPDestructor mangled ->
         F.fprintf fmt "(%s)" (Option.value ~default:"" mangled)
@@ -569,12 +577,6 @@ module Hack = struct
 
   let get_class_name_as_a_string {class_name} = Option.map class_name ~f:HackClassName.classname
 
-  let get_static_init ~is_trait class_name =
-    let static_class_name = HackClassName.static_companion class_name in
-    let arity = if is_trait then 2 else 1 in
-    {class_name= Some static_class_name; function_name= "_86sinit"; arity= Some arity}
-
-
   let get_static_constinit ~is_trait class_name =
     let static_class_name = HackClassName.static_companion class_name in
     let arity = if is_trait then 2 else 1 in
@@ -582,8 +584,7 @@ module Hack = struct
 
 
   let is_xinit {function_name= name} =
-    String.equal name "_86sinit" || String.equal name "_86pinit" || String.equal name "_86cinit"
-    || String.equal name "_86constinit"
+    String.equal name "_86pinit" || String.equal name "_86cinit" || String.equal name "_86constinit"
 
 
   let belongs_to_static_companion {class_name} =
@@ -935,6 +936,14 @@ let is_cpp_lambda t =
   match t with ObjC_Cpp cpp_pname when ObjC_Cpp.is_cpp_lambda cpp_pname -> true | _ -> false
 
 
+let is_cpp_method t =
+  match t with
+  | ObjC_Cpp cpp_pname ->
+      ObjC_Cpp.is_cpp_method cpp_pname
+  | C _ | Erlang _ | Hack _ | Block _ | Java _ | CSharp _ | Python _ ->
+      false
+
+
 (** Return the language of the procedure. *)
 let get_language = function
   | ObjC_Cpp _ ->
@@ -1013,13 +1022,6 @@ let is_hack_builtins = function
       false
 
 
-let is_hack_sinit = function
-  | Hack {function_name} ->
-      String.equal function_name "_86sinit"
-  | _ ->
-      false
-
-
 let is_hack_constinit = function
   | Hack {function_name} ->
       String.equal function_name "_86constinit"
@@ -1033,6 +1035,8 @@ let is_hack_construct = function
   | _ ->
       false
 
+
+let is_hack_xinit = function Hack classname -> Hack.is_xinit classname | _ -> false
 
 let has_hack_classname = function Hack {class_name= Some _} -> true | _ -> false
 
@@ -1381,8 +1385,6 @@ let decr_hack_arity procname =
   | _ ->
       None
 
-
-let get_hack_static_init ~is_trait class_name = Hack (Hack.get_static_init ~is_trait class_name)
 
 let get_hack_static_constinit ~is_trait class_name =
   Hack (Hack.get_static_constinit ~is_trait class_name)

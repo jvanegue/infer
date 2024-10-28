@@ -283,7 +283,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
     let call_instr =
       match function_sil with
       | Exp.Var _ ->
-          let closure_param = (function_sil, Typ.mk Typ.Tfun) in
+          let closure_param = (function_sil, Typ.mk (Typ.Tfun None)) in
           let builtin =
             if call_flags.CallFlags.cf_is_objc_block then BuiltinDecl.__call_objc_block
             else BuiltinDecl.__call_c_function_ptr
@@ -482,8 +482,8 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
       ?method_signature:callee_ms_opt empty_control
 
 
-  let field_deref_trans trans_state stmt_info pre_trans_result decl_ref ~is_constructor_init
-      ~is_member_of_const =
+  let field_deref_trans trans_state ?(is_implicit_self = false) stmt_info pre_trans_result decl_ref
+      ~is_constructor_init ~is_member_of_const =
     let open CContext in
     let context = trans_state.context in
     let sil_loc =
@@ -532,7 +532,9 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
             fieldname_no_weak_info
       else fieldname_no_weak_info
     in
-    let field_exp = Exp.Lfield (obj_sil, field_name, class_typ) in
+    let field_exp =
+      Exp.Lfield ({exp= obj_sil; is_implicit= is_implicit_self}, field_name, class_typ)
+    in
     (* In certain cases, there is be no LValueToRValue cast, but backend needs dereference*)
     (* there either way:*)
     (* 1. Class is not a pointer type - it means that it's rvalue struct most likely coming from*)
@@ -816,7 +818,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
                 IntLit.gt n (IntLit.of_int Config.clang_compound_literal_init_limit)
             | Tint _ | Tfloat _ | Tptr _ ->
                 false
-            | Tfun | Tvoid | Tarray _ | TVar _ ->
+            | Tfun _ | Tvoid | Tarray _ | TVar _ ->
                 true
           in
           if init_with_builtin then
@@ -837,7 +839,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
                   match Tenv.lookup tenv tn with
                   | Some {fields} ->
                       List.map fields ~f:(fun {Struct.name= fieldname; typ= fieldtype} ->
-                          (Exp.Lfield (exp, fieldname, typ), fieldtype) )
+                          (Exp.Lfield ({exp; is_implicit= false}, fieldname, typ), fieldtype) )
                   | None ->
                       assert false
                 in
@@ -857,7 +859,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
                 let zero_exp = Exp.zero_of_type_exn typ in
                 let instrs = [Sil.Store {e1= exp; typ; e2= zero_exp; loc= sil_loc}] in
                 mk_trans_result (exp, typ) {empty_control with instrs}
-            | Tfun | Tvoid | Tarray _ | TVar _ ->
+            | Tfun _ | Tvoid | Tarray _ | TVar _ ->
                 CFrontend_errors.unimplemented __POS__ stmt_info.Clang_ast_t.si_source_range
                   "fill_typ_with_zero on type %a" (Typ.pp Pp.text) typ
         in
@@ -867,8 +869,8 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
 
   and var_deref_trans trans_state stmt_info (decl_ref : Clang_ast_t.decl_ref) =
     let context = trans_state.context in
-    let _, _, qual_type = CAst_utils.get_info_from_decl_ref decl_ref in
-    let ast_typ = CType_decl.qual_type_to_sil_type context.tenv qual_type in
+    let _, decl_ptr, ast_qual_type = CAst_utils.get_info_from_decl_ref decl_ref in
+    let ast_typ = CType_decl.qual_type_to_sil_type context.tenv ast_qual_type in
     let typ =
       match ast_typ.Typ.desc with
       | Tstruct _ when decl_ref.dr_kind = `ParmVar ->
@@ -877,6 +879,19 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
           else ast_typ
       | _ ->
           ast_typ
+    in
+    let typ =
+      match CAst_utils.get_decl decl_ptr with
+      | Some (BindingDecl (_, _, _, {bound_decl_type= Some qt})) -> (
+        (* clang gives us the wrong type for bindings in the AST, with missing references, we have
+           to go back to the BindingDecl that defines the binding to get the correct type *)
+        match CAst_utils.get_desugared_type qt.qt_type_ptr with
+        | Some (LValueReferenceType _) ->
+            Typ.mk (Tptr (typ, Pk_lvalue_reference))
+        | _ ->
+            typ )
+      | _ ->
+          typ
     in
     let procname = Procdesc.get_proc_name context.procdesc in
     let sil_loc =
@@ -926,8 +941,8 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
     res_trans
 
 
-  and decl_ref_trans ?(is_constructor_init = false) ?(is_member_of_const = false) ~context
-      trans_state stmt_info decl_ref =
+  and decl_ref_trans ?(is_constructor_init = false) ?(is_member_of_const = false)
+      ?(is_implicit_self = false) ~context trans_state stmt_info decl_ref =
     let decl_kind = decl_ref.Clang_ast_t.dr_kind in
     match (decl_kind, context) with
     | `EnumConstant, _ ->
@@ -940,8 +955,8 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
     | (`Field | `ObjCIvar), MemberOrIvar pre_trans_result ->
         (* a field outside of constructor initialization is probably a pointer to member, which we
            do not support *)
-        field_deref_trans trans_state stmt_info pre_trans_result decl_ref ~is_constructor_init
-          ~is_member_of_const
+        field_deref_trans trans_state ~is_implicit_self stmt_info pre_trans_result decl_ref
+          ~is_constructor_init ~is_member_of_const
     | (`CXXMethod | `CXXConversion | `CXXConstructor | `CXXDestructor), _ ->
         method_deref_trans trans_state ~context decl_ref stmt_info decl_kind
     | _ ->
@@ -1471,9 +1486,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
           ; Sil.Load {id= expected_id; e= expected_exp; typ; loc= sil_loc} ]
           @ desired_instrs
         in
-        let join_node =
-          Procdesc.create_node context.procdesc sil_loc Join_node [Sil.Metadata EndBranches]
-        in
+        let join_node = Procdesc.create_node context.procdesc sil_loc Join_node [] in
         Procdesc.node_set_succs context.procdesc join_node ~normal:trans_state.succ_nodes ~exn:[] ;
         let var_exp_typ =
           match trans_state.var_exp_typ with
@@ -1724,8 +1737,10 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
       ~is_injected_destructor:false ~is_cpp_call_virtual None ~is_inherited_ctor:false
 
 
-  and cxxConstructExpr_trans trans_state si params_stmt ei cxx_constr_info ~is_inherited_ctor =
-    let context = trans_state.context in
+  and cxxConstructExpr_trans
+      ({context= {translation_unit_context= {source_file}; tenv} as context} as trans_state) si
+      params_stmt ei ({Clang_ast_t.xcei_requires_zero_initialization} as cxx_constr_info)
+      ~is_inherited_ctor =
     let trans_state_pri = PriorityNode.try_claim_priority_node trans_state si in
     let decl_ref = cxx_constr_info.Clang_ast_t.xcei_decl_ref in
     let var_exp, class_type =
@@ -1745,8 +1760,26 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
       mk_trans_result (var_exp, this_type) {empty_control with initd_exps= [var_exp]}
     in
     let tmp_res_trans = mk_trans_result (var_exp, class_type) empty_control in
-    let res_trans_callee =
+    let ({method_name} as res_trans_callee) =
       decl_ref_trans ~context:(MemberOrIvar this_res_trans) trans_state si decl_ref
+    in
+    let field_init_instrs =
+      if xcei_requires_zero_initialization then
+        let ( let* ) x f = Option.value_map x ~default:[] ~f in
+        let* constructor = method_name in
+        let* tname = Procname.get_class_type_name constructor in
+        let* {Struct.fields} = Tenv.lookup tenv tname in
+        let loc = CLocation.location_of_stmt_info source_file si in
+        List.filter_map fields ~f:(fun {Struct.name; typ} ->
+            (* Note: This supports primitive types only for now. *)
+            Option.map (Exp.zero_of_type typ) ~f:(fun zero_exp ->
+                let field_exp = Exp.Lfield ({exp= var_exp; is_implicit= false}, name, this_type) in
+                Sil.Store {e1= field_exp; typ; e2= zero_exp; loc} ) )
+      else []
+    in
+    let res_trans_callee =
+      let instrs = field_init_instrs @ res_trans_callee.control.instrs in
+      {res_trans_callee with control= {res_trans_callee.control with instrs}}
     in
     let res_trans =
       cxx_method_construct_call_trans trans_state_pri res_trans_callee params_stmt si StdTyp.void
@@ -2002,7 +2035,9 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
                     assert false
               in
               let field_name = Fieldname.make class_tname ni_name in
-              let field_exp = Exp.Lfield (obj_sil, field_name, this_qual_type) in
+              let field_exp =
+                Exp.Lfield ({exp= obj_sil; is_implicit= false}, field_name, this_qual_type)
+              in
               let field_typ = CType_decl.qual_type_to_sil_type context.tenv qual_type in
               let this_res_trans_destruct = mk_trans_result (field_exp, field_typ) empty_control in
               get_destructor_decl_ref qual_type.Clang_ast_t.qt_type_ptr
@@ -2150,8 +2185,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
     in
     let var_typ = add_reference_if_glvalue typ expr_info in
     let join_node =
-      Procdesc.create_node trans_state.context.CContext.procdesc sil_loc Join_node
-        [Sil.Metadata EndBranches]
+      Procdesc.create_node trans_state.context.CContext.procdesc sil_loc Join_node []
     in
     Procdesc.node_set_succs context.procdesc join_node ~normal:succ_nodes ~exn:[] ;
     let var_exp_typ =
@@ -2170,7 +2204,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
         {trans_state with continuation= continuation'; succ_nodes= []; var_exp_typ= None}
       in
       exec_with_priority_exception trans_state' cond
-        (cond_trans ~if_kind:(Sil.Ik_bexp {terminated= true}) ~negate_cond:false)
+        (cond_trans ~if_kind:Sil.Ik_bexp ~negate_cond:false)
     in
     let trans_state = {trans_state with succ_nodes= [join_node]} in
     (* Note: by contruction prune nodes are leafs_nodes_cond *)
@@ -2402,9 +2436,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
       List.iter prune_nodes' ~f:(fun n ->
           Procdesc.node_set_succs context.procdesc n ~normal:nodes_branch ~exn:[] )
     in
-    let join_node =
-      Procdesc.create_node context.procdesc sil_loc Join_node [Sil.Metadata EndBranches]
-    in
+    let join_node = Procdesc.create_node context.procdesc sil_loc Join_node [] in
     Procdesc.node_set_succs context.procdesc join_node ~normal:trans_state.succ_nodes ~exn:[] ;
     let trans_state_join_succ = {trans_state with succ_nodes= [join_node]} in
     (* translate the condition expression *)
@@ -2413,7 +2445,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
       let continuation' = mk_cond_continuation trans_state.continuation in
       let trans_state'' = {trans_state with continuation= continuation'; succ_nodes= []} in
       let cond_stmt = CAst_utils.get_stmt_exn if_stmt_info.isi_cond source_range in
-      cond_trans ~if_kind:(Sil.Ik_if {terminated= true}) ~negate_cond:false trans_state'' cond_stmt
+      cond_trans ~if_kind:Sil.Ik_if ~negate_cond:false trans_state'' cond_stmt
     in
     (* translate the variable declaration inside the condition if present *)
     let res_trans_cond_var =
@@ -2930,7 +2962,8 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
       match Tenv.lookup tenv tname with
       | Some {fields; supers} ->
           ( List.map fields ~f:(fun {Struct.name= fieldname; typ= fieldtype} ->
-                (Exp.Lfield (var_exp, fieldname, init_expr_typ), fieldtype) )
+                ( Exp.Lfield ({exp= var_exp; is_implicit= false}, fieldname, init_expr_typ)
+                , fieldtype ) )
           , supers )
       | None ->
           assert false
@@ -3209,15 +3242,21 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
     let context = trans_state.context in
     let procdesc = context.CContext.procdesc in
     let procname = Procdesc.get_proc_name procdesc in
-    let do_var_dec var_decl qual_type vdi next_node trans_state =
+    let do_var_dec var_decl qual_type (vdi : Clang_ast_t.var_decl_info) next_node trans_state =
       let pvar = CVar_decl.sil_var_of_decl context var_decl procname in
       let typ = CType_decl.qual_type_to_sil_type context.CContext.tenv qual_type in
       CVar_decl.add_var_to_locals procdesc var_decl typ pvar ;
       let trans_state = {trans_state with succ_nodes= next_node} in
       let var_exp_typ = (Exp.Lvar pvar, typ) in
       let is_structured_binding = match var_decl with BindingDecl _ -> true | _ -> false in
-      init_expr_trans ~is_structured_binding trans_state var_exp_typ ~qual_type stmt_info
-        vdi.Clang_ast_t.vdi_init_expr
+      (* do not translate the initialization of static locals; to accurately represent the semantics
+         we need to only run the inilialization once at "program start" (or run it once at some
+         point) *)
+      if vdi.vdi_is_static_local then
+        mk_trans_result var_exp_typ {empty_control with root_nodes= trans_state.succ_nodes}
+      else
+        init_expr_trans ~is_structured_binding trans_state var_exp_typ ~qual_type stmt_info
+          vdi.vdi_init_expr
     in
     let aux_var res_trans_tl var_decl qt vdi =
       (* Var are defined when procdesc is created, here we only take care of initialization *)
@@ -3251,7 +3290,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
       | [] ->
           None
       | ( ( VarDecl (_, _, qt, vdi)
-          | BindingDecl (_, _, qt, Clang_ast_t.{hvdi_binding_var= Some vdi})
+          | BindingDecl (_, _, qt, {binding_var= Some vdi})
           | VarTemplateSpecializationDecl (_, _, _, qt, vdi) ) as var_decl )
         :: var_decls' ->
           let res_trans_tl = aux var_decls' in
@@ -3410,7 +3449,8 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
 
 
   (** function used in the computation for both Member_Expr and ObjCIVarRefExpr *)
-  and do_memb_ivar_ref_exp ~is_member_of_const trans_state stmt_info stmt_list decl_ref =
+  and do_memb_ivar_ref_exp ~is_member_of_const ?(is_implicit_self = false) trans_state stmt_info
+      stmt_list decl_ref =
     let exp_stmt =
       extract_stmt_from_singleton stmt_list stmt_info.Clang_ast_t.si_source_range
         "in MemberExpr there must be only one stmt defining its expression."
@@ -3420,13 +3460,23 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
     (* int p = X(1).field; *)
     let trans_state' = {trans_state with var_exp_typ= None} in
     let result_trans_exp_stmt = exec_with_glvalue_as_reference instruction trans_state' exp_stmt in
-    decl_ref_trans ~is_member_of_const ~context:(MemberOrIvar result_trans_exp_stmt) trans_state
-      stmt_info decl_ref
+    decl_ref_trans ~is_member_of_const ~is_implicit_self
+      ~context:(MemberOrIvar result_trans_exp_stmt) trans_state stmt_info decl_ref
 
 
   and objCIvarRefExpr_trans trans_state stmt_info stmt_list obj_c_ivar_ref_expr_info =
     let decl_ref = obj_c_ivar_ref_expr_info.Clang_ast_t.ovrei_decl_ref in
-    do_memb_ivar_ref_exp ~is_member_of_const:false trans_state stmt_info stmt_list decl_ref
+    let start_loc_column = (fst stmt_info.Clang_ast_t.si_source_range).Clang_ast_t.sl_column in
+    let end_loc_column = (snd stmt_info.Clang_ast_t.si_source_range).Clang_ast_t.sl_column in
+    let is_implicit_self =
+      match (start_loc_column, end_loc_column) with
+      | Some start_col, Some end_col ->
+          Int.equal start_col end_col
+      | _ ->
+          false
+    in
+    do_memb_ivar_ref_exp ~is_member_of_const:false ~is_implicit_self trans_state stmt_info stmt_list
+      decl_ref
 
 
   and memberExpr_trans trans_state stmt_info stmt_list expr_info member_expr_info =
@@ -3934,13 +3984,13 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
         in
         let block_as_arg_attributes = trans_state.block_as_arg_attributes in
         let captured_vars =
-          List.map captured_vars_no_mode ~f:(fun (var, typ, modify_in_block, is_formal_of) ->
+          List.map captured_vars_no_mode ~f:(fun (var, typ, modify_in_block, captured_from) ->
               let capture_mode, typ =
                 if modify_in_block || Pvar.is_global var then
                   (CapturedVar.ByReference, Typ.mk (Tptr (typ, Pk_lvalue_reference)))
                 else (CapturedVar.ByValue, typ)
               in
-              {CapturedVar.pvar= var; typ; capture_mode; is_formal_of} )
+              {CapturedVar.pvar= var; typ; capture_mode; captured_from; context_info= None} )
         in
         let res = closure_trans procname captured_vars context stmt_info expr_info in
         let block_data =
@@ -4070,7 +4120,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
     let captured_vars =
       List.map
         ~f:(fun (exp, var, typ, capture_mode) ->
-          (exp, {CapturedVar.pvar= var; typ; capture_mode; is_formal_of= None}) )
+          (exp, {CapturedVar.pvar= var; typ; capture_mode; captured_from= None; context_info= None}) )
         captured_vars
     in
     let captured_var_names = List.map ~f:(fun (_, captured_var) -> captured_var) captured_vars in
@@ -4392,7 +4442,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
     in
     let field_name = Fieldname.make class_tname "__type_name" in
     let ret_exp = Exp.Var ret_id in
-    let field_exp = Exp.Lfield (ret_exp, field_name, typ) in
+    let field_exp = Exp.Lfield ({exp= ret_exp; is_implicit= false}, field_name, typ) in
     let args =
       type_info_objc :: (field_exp, void_typ)
       :: Option.value_map ~default:[] res_trans_subexpr ~f:(fun trans_result ->
@@ -4549,10 +4599,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
              - [join_node] to join [dtor_trans_result] and [prune_false] and continue with the
              successor node(s) of the translation [trans_state.succ_nodes] *)
           let proc_desc = trans_state.context.procdesc in
-          let join_node =
-            Procdesc.create_node proc_desc sil_loc Join_node
-            @@ if Sil.is_terminated_if_kind if_kind then [Sil.Metadata EndBranches] else []
-          in
+          let join_node = Procdesc.create_node proc_desc sil_loc Join_node [] in
           Procdesc.node_set_succs proc_desc join_node ~normal:trans_state.succ_nodes ~exn:[] ;
           (* create dtor call as a new node connected to the join node, force new node creation by
              creating a fresh pointer and calling [force_claim_priority_node] *)
@@ -5177,6 +5224,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
     | CoyieldExpr (stmt_info, operand :: _, expr_info) ->
         coroutineSuspendExpr_trans trans_state stmt_info expr_info operand
     | AddrLabelExpr _
+    | ArraySectionExpr _
     | ArrayTypeTraitExpr _
     | AsTypeExpr _
     | CapturedStmt _
@@ -5195,6 +5243,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
     | DependentScopeDeclRefExpr _
     | DesignatedInitExpr _
     | DesignatedInitUpdateExpr _
+    | EmbedExpr _
     | ExpressionTraitExpr _
     | ExtVectorElementExpr _
     | FunctionParmPackExpr _
@@ -5208,7 +5257,6 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
     | NoInitExpr _
     | ObjCIsaExpr _
     | ObjCSubscriptRefExpr _
-    | OMPArraySectionExpr _
     | OMPArrayShapingExpr _
     | OMPAtomicDirective _
     | OMPBarrierDirective _
@@ -5227,6 +5275,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
     | OMPForDirective _
     | OMPForSimdDirective _
     | OMPGenericLoopDirective _
+    | OMPInterchangeDirective _
     | OMPInteropDirective _
     | OMPIteratorExpr _
     | OMPMaskedDirective _
@@ -5248,6 +5297,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
     | OMPParallelMasterTaskLoopDirective _
     | OMPParallelMasterTaskLoopSimdDirective _
     | OMPParallelSectionsDirective _
+    | OMPReverseDirective _
     | OMPScanDirective _
     | OMPScopeDirective _
     | OMPSectionDirective _
@@ -5284,7 +5334,10 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
     | OMPTeamsGenericLoopDirective _
     | OMPTileDirective _
     | OMPUnrollDirective _
+    | OpenACCComputeConstruct _
+    | OpenACCLoopConstruct _
     | PackExpansionExpr _
+    | PackIndexingExpr _
     | ParenListExpr _
     | RecoveryExpr _
     | RequiresExpr _

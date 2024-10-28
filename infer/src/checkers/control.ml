@@ -38,7 +38,7 @@ module ControlDepSet = AbstractDomain.FiniteSet (CVar)
 (** Map control var -> loop head location *)
 module ControlMap = PrettyPrintable.MakePPMap (Var)
 
-module GuardNodes = AbstractDomain.FiniteSet (Procdesc.Node)
+module GuardNodes = AbstractDomain.NodeSet
 module LoopHeads = Procdesc.NodeSet
 
 (** Map exit node -> loop head set *)
@@ -163,7 +163,7 @@ module TransferFunctionsControlDeps (CFG : ProcCfg.S) = struct
     | _ ->
         (* Exit node must be a prune node *)
         if ExitNodeToLoopHeads.mem node exit_map then
-          L.internal_error "Exit node must be a prune node!" ;
+          L.internal_error "Exit node must be a prune node!@\n" ;
         astate'
 
 

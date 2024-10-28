@@ -398,29 +398,32 @@ struct
 
   let pp_domain = Domain.pp_
 
-  let join_all_disj_astates ~into astates =
+  let join_all_disj_astates ~into:(disjs_into, nd_into) astates =
     let leq ~lhs ~rhs = T.DisjDomain.equal_fast lhs rhs in
-    let rec join_hd res res_n to_join =
-      if res_n >= disjunct_limit then (
-        Fqueue.iter to_join ~f:(fun disjuncts ->
-            DisjunctiveMetadata.add_dropped_disjuncts (List.length disjuncts) ) ;
-        res )
+    let rec join_hd res nd res_n to_join =
+      if res_n >= disjunct_limit then
+        let nd =
+          Fqueue.fold to_join ~init:nd ~f:(fun nd disjuncts ->
+              DisjunctiveMetadata.add_dropped_disjuncts (List.length disjuncts) ;
+              T.remember_dropped_disjuncts disjuncts nd )
+        in
+        (res, nd)
       else
         match Fqueue.dequeue to_join with
         | None ->
-            res
+            (res, nd)
         | Some ([], to_join) ->
-            join_hd res res_n to_join
+            join_hd res nd res_n to_join
         | Some (hd :: tl, to_join) ->
             let res, res_n =
               if has_geq_disj ~leq ~than:hd res then (res, res_n) else (hd :: res, res_n + 1)
             in
-            join_hd res res_n (Fqueue.enqueue to_join tl)
+            join_hd res nd res_n (Fqueue.enqueue to_join tl)
     in
     let to_join =
       List.map astates ~f:(fun (disjuncts, _) -> List.rev disjuncts) |> Fqueue.of_list
     in
-    join_hd into (List.length into) to_join
+    join_hd disjs_into nd_into (List.length disjs_into) to_join
 
 
   let join_all astates ~into =
@@ -430,11 +433,9 @@ struct
     | [astate], None ->
         Some astate
     | _ :: _, _ ->
-        let d_into, nd_into = Option.value into ~default:([], T.NonDisjDomain.bottom) in
-        let d = join_all_disj_astates astates ~into:d_into in
-        let nd =
-          List.fold astates ~init:nd_into ~f:(fun acc (_, nd) -> T.NonDisjDomain.join acc nd)
-        in
+        let into = Option.value into ~default:([], T.NonDisjDomain.bottom) in
+        let d, nd = join_all_disj_astates astates ~into in
+        let nd = List.fold astates ~init:nd ~f:(fun acc (_, nd) -> T.NonDisjDomain.join acc nd) in
         Some (d, nd)
 
 
@@ -453,36 +454,48 @@ struct
     (List.map ~f:T.DisjDomain.exceptional_to_normal l, nd)
 
 
+  let use_balanced_disjunct_strategy () = Config.pulse_balanced_disjuncts_strategy
+
   let exec_instr (pre_disjuncts, non_disj) analysis_data node _ instr =
     (* [remaining_disjuncts] is the number of remaining disjuncts taking into account disjuncts
        already recorded in the post of a node (and therefore that will stay there).  It is always
        set from [exec_node_instrs], so [remaining_disjuncts] should always be [Some _]. *)
+    let global_limit = Option.value_exn (AnalysisState.get_remaining_disjuncts ()) in
+    let nb_pre = List.length pre_disjuncts in
+    let (disjuncts, non_disj_astates), dropped, _, _ =
 
-    let unode = (CFG.Node.underlying_node node) in
-    let _ = DisjunctiveMetadata.record_cfg_node unode in
-    
-    let limit = Option.value_exn (AnalysisState.get_remaining_disjuncts ()) in
-    let (disjuncts, non_disj_astates), dropped, _ =
       List.foldi (List.rev pre_disjuncts)
-        ~init:(([], []), [], 0)
-        ~f:(fun i (((post, non_disj_astates) as post_astate), dropped, n_disjuncts) pre_disjunct ->
-          if n_disjuncts >= limit then (
+        ~init:(([], []), [], 0, 0)
+        ~f:(fun
+            i
+            (((post, non_disj_astates) as post_astate), dropped, n_disjuncts, extra)
+            pre_disjunct
+          ->
+          if n_disjuncts >= global_limit && not (use_balanced_disjunct_strategy ()) then (
             L.d_printfln "@[<v2>Reached max disjuncts limit, skipping disjunct #%d@;@]" i ;
-            (post_astate, pre_disjunct :: dropped, n_disjuncts) )
+            (post_astate, pre_disjunct :: dropped, n_disjuncts, 0) )
           else
+            let limit =
+              if use_balanced_disjunct_strategy () then
+                (global_limit / nb_pre) + extra + if i < global_limit % nb_pre then 1 else 0
+              else global_limit
+            in
             L.with_indent ~escape_result:false "Executing instruction from disjunct #%d" i
               ~f:(fun () ->
                 (* check timeout once per disjunct to execute instead of once for all disjuncts *)
                 Timer.check_timeout () ;
                 let disjuncts', non_disj' =
-                  T.exec_instr (pre_disjunct, non_disj) analysis_data node instr
+                  T.exec_instr ~limit (pre_disjunct, non_disj) analysis_data node instr
                 in
                 ( if Config.write_html then
                     let n = List.length disjuncts' in
                     L.d_printfln "@[Got %d disjunct%s back@]" n (if Int.equal n 1 then "" else "s")
                 ) ;
+                let limit =
+                  if use_balanced_disjunct_strategy () then n_disjuncts + limit else limit
+                in
                 let post_disj', n, new_dropped = Domain.join_up_to ~limit ~into:post disjuncts' in
-                ((post_disj', non_disj' :: non_disj_astates), new_dropped @ dropped, n) ) )
+                ((post_disj', non_disj' :: non_disj_astates), new_dropped @ dropped, n, limit - n) ) )
     in
     let non_disj =
       if List.is_empty disjuncts then non_disj
@@ -663,6 +676,7 @@ module AbstractInterpreterCommon (TransferFunctions : NodeTransferFunctions) = s
           post
       | Error (exn, backtrace, instr) ->
           ( match exn with
+          | RecursiveCycleException.RecursiveCycle _
           | RestartSchedulerException.ProcnameAlreadyLocked _
           | MissingDependencyException.MissingDependencyException
           | Timer.Timeout _ ->
@@ -857,7 +871,9 @@ module MakeWTONode (TransferFunctions : NodeTransferFunctions) = struct
     | Some astate_pre ->
         exec_node ~pp_instr proc_data node ~is_loop_head ~is_narrowing astate_pre inv_map
     | None ->
-        L.(die InternalError) "Could not compute the pre of a node"
+        L.internal_error "Could not compute the pre of a node in %a@\n" Procname.pp
+          (Procdesc.Node.get_proc_name (Node.underlying_node node)) ;
+        (inv_map, DidNotReachFixPoint)
 
 
   (* [WidenThenNarrow] mode is to narrow the outermost loops eagerly, so that over-approximated

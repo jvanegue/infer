@@ -87,15 +87,14 @@ typedef void (^MyBlock1)(int x);
 + (void)addOperationWithBlock:(void (^)())completion {
 }
 
-- (void)uploadTaskWithRequestOk_FP:(NSURLRequest*)urlRequest
-                          fromFile:(NSURL*)fileURL
-                          delegate:(id)delegate
-                     delegateQueue:(NSOperationQueue*)delegateQueue
-                        completion:(void (^)())completion {
+- (void)uploadTaskWithRequestWithCheckOk:(NSURLRequest*)urlRequest
+                                fromFile:(NSURL*)fileURL
+                                delegate:(id)delegate
+                           delegateQueue:(NSOperationQueue*)delegateQueue
+                              completion:(void (^)())completion {
   if (!completion) {
     return;
   }
-
   [Blocks_as_parameters addOperationWithBlock:^{
     completion();
   }];
@@ -106,7 +105,17 @@ typedef void (^MyBlock1)(int x);
                         fromFile:(NSURL*)fileURL
                         delegate:(id)delegate
                    delegateQueue:(NSOperationQueue*)delegateQueue
-                      completion:(void (^)())completion {
+                      completion:(MyBlock)completion {
+  [Blocks_as_parameters addOperationWithBlock:^{
+    completion();
+  }];
+}
+
+- (void)uploadTaskWithRequestOk:(NSURLRequest*)urlRequest
+                       fromFile:(NSURL*)fileURL
+                       delegate:(id)delegate
+                  delegateQueue:(NSOperationQueue*)delegateQueue
+                     completion:(_Nonnull MyBlock)completion {
   [Blocks_as_parameters addOperationWithBlock:^{
     completion();
   }];
@@ -120,10 +129,13 @@ typedef void (^MyBlock1)(int x);
   }];
 }
 
-typedef void (^AnnotateBlock)(const char* key, id value);
-typedef void (^AnnotateSyncBlock)(AnnotateBlock annotate);
+typedef void (^_Nonnull AnnotateBlock)(const char* key, id value);
+
+typedef void (^AnnotateSyncBlock)(AnnotateBlock _Nonnull annotate);
+typedef void (^AnnotateSyncBlock1)(AnnotateBlock annotate);
 
 void AnnotateSync(id flowId, NS_NOESCAPE AnnotateSyncBlock block) {}
+void AnnotateSync1(id flowId, NS_NOESCAPE AnnotateSyncBlock1 block) {}
 
 + (void)startWithSessionOk:(id)session video:(id)video {
   NSString* const videoID = @"";
@@ -137,7 +149,14 @@ void AnnotateSync(id flowId, NS_NOESCAPE AnnotateSyncBlock block) {}
   });
 }
 
-+ (void)startWithSessionBad:(id)session video:(id)video {
++ (void)startWithSessionOk:(NSString*)composerSessionID {
+  NSString* const flowId = @"";
+  AnnotateSync1(flowId, ^(AnnotateBlock annotate) {
+    annotate("entry_point_type", composerSessionID);
+  });
+}
+
++ (void)startWithSession2Ok:(id)session video:(id)video {
   NSString* const videoID = @"";
   NSString* const flowId = @"";
 
@@ -149,4 +168,41 @@ void AnnotateSync(id flowId, NS_NOESCAPE AnnotateSyncBlock block) {}
   });
 }
 
+#ifndef BLOCK_CALL_SAFE_ON_QUEUE
+#define BLOCK_CALL_SAFE_ON_QUEUE(QUEUE, BLOCK, ...) \
+  ((BLOCK) ? dispatch_async(QUEUE,                  \
+                            ^{                      \
+                              (BLOCK)(__VA_ARGS__); \
+                            })                      \
+           : (void)0)
+#endif
+
++ (void)block_call_safe_on_queue_macro_ok:(MyBlock)completion {
+  BLOCK_CALL_SAFE_ON_QUEUE(dispatch_get_main_queue(), completion, nil);
+}
+
 @end
+
+#ifdef __clang__
+#pragma clang assume_nonnull begin
+#endif
+
+typedef void (^NewAnnotateBlock)(const char* _Nullable key, id _Nullable value);
+typedef void (^_Nullable NewAnnotateSyncBlock)(
+    _Nonnull NewAnnotateBlock annotate);
+
+#ifdef __clang__
+#pragma clang assume_nonnull end
+#endif
+
+void MarkerAnnotateSync(NS_NOESCAPE _Nullable NewAnnotateSyncBlock block) {}
+
+void LoadAndAnnotateOk(NSString* composerSessionID) {
+  MarkerAnnotateSync(^(NewAnnotateBlock annotate) {
+    annotate("composer_session_id", composerSessionID);
+  });
+}
+
+typedef int (^_Nonnull AnotherBlock)();
+
+int blockNotCheckedBadNoAutofix(AnotherBlock block) { return block(); }

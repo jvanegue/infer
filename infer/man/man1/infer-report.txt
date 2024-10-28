@@ -142,6 +142,7 @@ OPTIONS
              CONSTANT_ADDRESS_DEREFERENCE (disabled by default),
              CONSTANT_ADDRESS_DEREFERENCE_LATENT (disabled by default),
              CXX_REF_CAPTURED_IN_BLOCK (enabled by default),
+             CXX_STRING_CAPTURED_IN_BLOCK (disabled by default),
              Cannot_star (enabled by default),
              DANGLING_POINTER_DEREFERENCE (disabled by default),
              DANGLING_POINTER_DEREFERENCE_MAYBE (disabled by default),
@@ -234,6 +235,7 @@ OPTIONS
              PULSE_UNAWAITED_AWAITABLE (enabled by default),
              PULSE_UNFINISHED_BUILDER (disabled by default),
              PULSE_UNINITIALIZED_CONST (disabled by default),
+             PULSE_UNINITIALIZED_METHOD (disabled by default),
              PULSE_UNINITIALIZED_VALUE (enabled by default),
              PULSE_UNNECESSARY_COPY (enabled by default),
              PULSE_UNNECESSARY_COPY_ASSIGNMENT (enabled by default),
@@ -246,6 +248,7 @@ OPTIONS
              PULSE_UNNECESSARY_COPY_OPTIONAL (enabled by default),
              PULSE_UNNECESSARY_COPY_OPTIONAL_CONST (disabled by default),
              PULSE_UNNECESSARY_COPY_RETURN (disabled by default),
+             PULSE_UNNECESSARY_COPY_THRIFT_ASSIGNMENT (enabled by default),
              PURE_FUNCTION (enabled by default),
              REGEX_OP_ON_UI_THREAD (enabled by default),
              RESOURCE_LEAK (enabled by default),
@@ -318,7 +321,7 @@ OPTIONS
        qualifier | suggestion | severity | line | column | procedure |
        procedure_start_line | file | bug_trace | key | hash | line_offset |
        qualifier_contains_potential_exception_note | taint_extra |
-       transitive_callees_extra | suppressed }
+       transitive_callees_extra | suppressed | autofix }
            Fields to emit with --issues-tests
 
        --merge-report +string

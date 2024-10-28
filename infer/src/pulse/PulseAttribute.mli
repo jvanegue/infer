@@ -29,6 +29,7 @@ type allocator =
   | ObjCAlloc
   | HackAsync
   | HackBuilderResource of HackClassName.t
+  | FileDescriptor
 [@@deriving equal]
 
 val pp_allocator : F.formatter -> allocator -> unit
@@ -70,7 +71,9 @@ type taint_propagation_reason = InternalModel | UnknownCall | UserConfig
 val pp_taint_propagation_reason : F.formatter -> taint_propagation_reason -> unit
 
 module CopyOrigin : sig
-  type t = CopyCtor | CopyAssignment | CopyToOptional | CopyInGetDefault
+  type assign_t = Normal | Thrift [@@deriving compare, equal]
+
+  type t = CopyCtor | CopyAssignment of assign_t | CopyToOptional | CopyInGetDefault
   [@@deriving compare, equal]
 
   val pp : Formatter.t -> t -> unit
@@ -133,7 +136,7 @@ type t =
   | DictReadConstKeys of ConstKeys.t  (** constant string keys that are read from the dictionary *)
   | EndOfCollection
   | HackBuilder of Builder.t
-  | HackSinitCalled
+  | HackConstinitCalled
   | InReportedRetainCycle
   | Initialized
   | Invalid of Invalidation.t * Trace.t
@@ -209,13 +212,13 @@ module Attributes : sig
 
   val is_java_resource_released : t -> bool
 
-  val get_hack_builder : t -> Builder.t option [@@warning "-unused-value-declaration"]
+  val get_hack_builder : t -> Builder.t option
 
-  val remove_hack_builder : t -> t [@@warning "-unused-value-declaration"]
+  val remove_hack_builder : t -> t
 
-  val is_hack_builder_discardable : t -> bool [@@warning "-unused-value-declaration"]
+  val set_hack_builder_discardable : t -> t
 
-  val is_hack_sinit_called : t -> bool
+  val is_hack_constinit_called : t -> bool
 
   val is_csharp_resource_released : t -> bool
 

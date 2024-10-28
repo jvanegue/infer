@@ -81,11 +81,12 @@ let create_json_bug ~qualifier ~suggestion ~line ~file ~source_file ~trace
   ; censored_reason= JsonReports.censored_reason ~issue_id:issue_type.unique_id source_file
   ; access= None
   ; extras= None
-  ; suppressed= false }
+  ; suppressed= false
+  ; autofix= None }
 
 
 module CostsSummary = struct
-  module DegreeMap = Caml.Map.Make (Int)
+  module DegreeMap = IInt.Map
 
   type 'a count = {top: 'a; unreachable: 'a; zero: 'a; degrees: 'a DegreeMap.t}
 

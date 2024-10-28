@@ -36,7 +36,7 @@ val force_exit_program :
   -> ExecutionDomain.t
   -> _ ExecutionDomain.base_t SatUnsat.t
 
-val pp : Format.formatter -> t -> unit
+val pp : Pp.env -> Procname.t -> Format.formatter -> t -> unit
 
 val append_objc_actual_self_positive :
      Procname.t
@@ -53,5 +53,3 @@ val mk_objc_nil_messaging_summary : Tenv.t -> ProcAttributes.t -> ExecutionDomai
 
 val merge : t -> t -> t
 (** Merge specialized summaries. *)
-
-val get_missed_captures : get_summary:(Procname.t -> t option) -> Procname.t list -> Typ.Name.Set.t

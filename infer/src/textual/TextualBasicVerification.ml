@@ -35,9 +35,7 @@ let error_loc = function
       loc
 
 
-let pp_error sourcefile fmt error =
-  let loc = error_loc error in
-  F.fprintf fmt "%a, %a: SIL consistency error: " SourceFile.pp sourcefile Location.pp loc ;
+let pp_error fmt error =
   match error with
   | ProcNotImplementedButInClosure {proc} ->
       F.fprintf fmt "function  %a is declared but not implemented: it can not be used in a closure"
@@ -98,7 +96,8 @@ let verify_decl ~env errors (decl : Module.decl) =
     else
       let procsig = Exp.call_sig proc nb_args (TextualDecls.lang env) in
       match TextualDecls.get_procdecl env procsig nb_args with
-      | None when QualifiedProcName.contains_wildcard proc ->
+      | None
+        when QualifiedProcName.contains_wildcard proc || QualifiedProcName.is_python_builtin proc ->
           errors
       | None when nb_generics_args > 0 ->
           (* second try by removing generics args *)
@@ -215,8 +214,8 @@ let verify_decl ~env errors (decl : Module.decl) =
       List.fold procdesc.nodes ~init:Ident.Set.empty ~f:(fun init node ->
           List.fold node.Node.instrs ~init ~f:(fun idents instr ->
               match instr with
-              | Instr.Let {id; exp= Call {proc}} when ProcDecl.is_generics_constructor_builtin proc
-                ->
+              | Instr.Let {id= Some id; exp= Call {proc}}
+                when ProcDecl.is_generics_constructor_builtin proc ->
                   Ident.Set.add id idents
               | _ ->
                   idents ) )

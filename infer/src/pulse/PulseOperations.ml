@@ -82,14 +82,12 @@ module Closures = struct
             else astate_result )
 
 
-  let record ({PathContext.timestamp; conditions} as path) location pname captured astate =
+  let record ({PathContext.timestamp} as path) location pname captured astate =
     let captured_addresses =
       List.filter_map captured
         ~f:(fun (captured_as, (address_captured, trace_captured), typ, mode) ->
           let new_trace =
-            ValueHistory.sequence ~context:conditions
-              (Capture {captured_as; mode; location; timestamp})
-              trace_captured
+            ValueHistory.sequence (Capture {captured_as; mode; location; timestamp}) trace_captured
           in
           Some (mode, typ, address_captured, new_trace, captured_as) )
     in
@@ -139,7 +137,8 @@ let eval_access path ?must_be_valid_reason mode location addr_hist access astate
 
 
 let eval_deref_access path ?must_be_valid_reason mode location addr_hist access astate =
-  let* astate, addr_hist = eval_access path Read location addr_hist access astate in
+  let ptr_mode = match mode with NoAccess -> NoAccess | Read | Write -> Read in
+  let* astate, addr_hist = eval_access path ptr_mode location addr_hist access astate in
   eval_access path ?must_be_valid_reason mode location addr_hist Dereference astate
 
 
@@ -245,7 +244,7 @@ and eval_to_value_origin (path : PathContext.t) mode location exp astate :
       Sat (Ok (astate, origin))
   | Lvar pvar ->
       Sat (Ok (eval_var_to_value_origin path location pvar astate))
-  | Lfield (exp', field, _) ->
+  | Lfield ({exp= exp'}, field, _) ->
       let+* astate, ((addr, _) as addr_hist) = eval path Read location exp' astate in
       let mode = degrade_mode addr astate mode in
       eval_access_to_value_origin path mode location addr_hist (FieldAccess field) astate
@@ -404,7 +403,7 @@ let prune path location ~condition astate =
 let degrade_mode_exp path location exp astate mode =
   let rec has_unknown_effect exp =
     match (exp : Exp.t) with
-    | Lfield (exp, _, _) | Lindex (exp, _) ->
+    | Lfield ({exp}, _, _) | Lindex (exp, _) ->
         let** astate, (addr, _) = eval path NoAccess location exp astate in
         if AddressAttributes.has_unknown_effect addr astate then Sat (Ok true)
         else has_unknown_effect exp
@@ -447,12 +446,13 @@ let eval_proc_name path location call_exp astate =
 let realloc_pvar tenv ({PathContext.timestamp} as path) ~set_uninitialized pvar typ location astate
     =
   let addr = AbstractValue.mk_fresh () in
-  let vo =
-    ValueOrigin.Unknown (addr, ValueHistory.singleton (VariableDeclared (pvar, location, timestamp)))
-  in
+  let hist = ValueHistory.singleton (VariableDeclared (pvar, location, timestamp)) in
+  let vo = ValueOrigin.Unknown (addr, hist) in
   let astate = Stack.add (Var.of_pvar pvar) vo astate in
   if set_uninitialized then
-    AddressAttributes.set_uninitialized tenv path (`LocalDecl (pvar, Some addr)) typ location astate
+    AddressAttributes.set_uninitialized tenv path
+      (`LocalDecl (pvar, Some (addr, hist)))
+      typ location astate
   else astate
 
 
@@ -504,7 +504,7 @@ let hack_python_propagates_type_on_load tenv path loc rhs_exp addr astate =
          so we redo part of the work ourself *)
       let open IOption.Let_syntax in
       match rhs_exp with
-      | Exp.Lfield (recv, field_name, _) ->
+      | Exp.Lfield ({exp= recv}, field_name, _) ->
           let* _, (base_addr, _) =
             eval path NoAccess loc recv astate |> PulseOperationResult.sat_ok
           in
@@ -611,15 +611,12 @@ type invalidation_access =
   | StackAddress of Var.t * ValueHistory.t
   | UntraceableAccess
 
-let record_invalidation ({PathContext.timestamp; conditions} as path) access_path location cause
-    astate =
+let record_invalidation ({PathContext.timestamp} as path) access_path location cause astate =
   match access_path with
   | StackAddress (x, hist0) ->
       let astate, vo = Stack.eval hist0 x astate in
       let hist' =
-        ValueHistory.sequence ~context:conditions
-          (Invalidated (cause, location, timestamp))
-          (ValueOrigin.hist vo)
+        ValueHistory.sequence (Invalidated (cause, location, timestamp)) (ValueOrigin.hist vo)
       in
       let vo' = ValueOrigin.with_hist hist' vo in
       Stack.add x vo' astate
@@ -631,11 +628,7 @@ let record_invalidation ({PathContext.timestamp; conditions} as path) access_pat
         | None ->
             (AbstractValue.mk_fresh (), hist_obj_default)
       in
-      let hist' =
-        ValueHistory.sequence ~context:conditions
-          (Invalidated (cause, location, timestamp))
-          hist_obj
-      in
+      let hist' = ValueHistory.sequence (Invalidated (cause, location, timestamp)) hist_obj in
       Memory.add_edge path pointer access (addr_obj, hist') location astate
   | UntraceableAccess ->
       astate

@@ -31,6 +31,7 @@ module Attribute = struct
     | ObjCAlloc
     | HackAsync
     | HackBuilderResource of HackClassName.t
+    | FileDescriptor
   [@@deriving compare, equal]
 
   let pp_allocator fmt = function
@@ -56,6 +57,8 @@ module Attribute = struct
         F.fprintf fmt "hack async"
     | HackBuilderResource class_name ->
         F.fprintf fmt "hack builder %a" HackClassName.pp class_name
+    | FileDescriptor ->
+        F.pp_print_string fmt "file descriptor"
 
 
   type taint_in = {v: AbstractValue.t; history: (ValueHistory.t[@compare.ignore] [@equal.ignore])}
@@ -112,13 +115,15 @@ module Attribute = struct
   [@@deriving compare, equal, show {with_path= false}]
 
   module CopyOrigin = struct
-    type t = CopyCtor | CopyAssignment | CopyToOptional | CopyInGetDefault
+    type assign_t = Normal | Thrift [@@deriving compare, equal]
+
+    type t = CopyCtor | CopyAssignment of assign_t | CopyToOptional | CopyInGetDefault
     [@@deriving compare, equal]
 
     let pp fmt = function
       | CopyCtor ->
           F.fprintf fmt "copied"
-      | CopyAssignment ->
+      | CopyAssignment (Normal | Thrift) ->
           F.fprintf fmt "copy assigned"
       | CopyToOptional ->
           F.fprintf fmt "copied by Optional value construction"
@@ -220,7 +225,7 @@ module Attribute = struct
     | DictReadConstKeys of ConstKeys.t
     | EndOfCollection
     | HackBuilder of Builder.t
-    | HackSinitCalled
+    | HackConstinitCalled
     | InReportedRetainCycle
     | Initialized
     | Invalid of Invalidation.t * Trace.t
@@ -279,7 +284,7 @@ module Attribute = struct
 
   let hack_builder_rank = Variants.hackbuilder.rank
 
-  let hack_sinit_called_rank = Variants.hacksinitcalled.rank
+  let hack_constinit_called_rank = Variants.hackconstinitcalled.rank
 
   let in_reported_retain_cycle_rank = Variants.inreportedretaincycle.rank
 
@@ -358,8 +363,8 @@ module Attribute = struct
         F.pp_print_string f "EndOfCollection"
     | HackBuilder builderstate ->
         F.fprintf f "HackBuilder(%a)" Builder.pp builderstate
-    | HackSinitCalled ->
-        F.pp_print_string f "HackSinitCalled"
+    | HackConstinitCalled ->
+        F.pp_print_string f "HackConstinitCalled"
     | InReportedRetainCycle ->
         F.pp_print_string f "InReportedRetainCycle"
     | Initialized ->
@@ -441,7 +446,7 @@ module Attribute = struct
     | CopiedReturn _
     | DictContainConstKeys
     | EndOfCollection
-    | HackSinitCalled
+    | HackConstinitCalled
     | InReportedRetainCycle
     | Initialized
     | JavaResourceReleased
@@ -485,7 +490,7 @@ module Attribute = struct
     | CopiedReturn _
     | DictContainConstKeys
     | EndOfCollection
-    | HackSinitCalled
+    | HackConstinitCalled
     | InReportedRetainCycle
     | Initialized
     | Invalid _
@@ -537,7 +542,7 @@ module Attribute = struct
     | CSharpResourceReleased
     | HackAsyncAwaited
     | HackBuilder _
-    | HackSinitCalled
+    | HackConstinitCalled
     | MustBeInitialized _
     | MustBeValid _
     | MustNotBeTainted _
@@ -639,7 +644,7 @@ module Attribute = struct
       | EndOfCollection
       | HackAsyncAwaited
       | HackBuilder _
-      | HackSinitCalled
+      | HackConstinitCalled
       | Initialized
       | JavaResourceReleased
       | LastLookup _
@@ -656,7 +661,8 @@ module Attribute = struct
     | (CMalloc | CustomMalloc _ | CRealloc | CustomRealloc _), Some (CFree, _)
     | CppNew, Some (CppDelete, _)
     | CppNewArray, Some (CppDeleteArray, _)
-    | ObjCAlloc, _ ->
+    | ObjCAlloc, _
+    | FileDescriptor, Some (FClose, _) ->
         true
     | JavaResource _, _ | CSharpResource _, _ | HackAsync, _ | HackBuilderResource _, _ ->
         is_released
@@ -666,6 +672,8 @@ module Attribute = struct
 
   let is_hack_resource allocator =
     match allocator with
+    | HackAsync | HackBuilderResource _ ->
+        true
     | CMalloc
     | CustomMalloc _
     | CRealloc
@@ -674,10 +682,9 @@ module Attribute = struct
     | CppNewArray
     | ObjCAlloc
     | JavaResource _
-    | CSharpResource _ ->
+    | CSharpResource _
+    | FileDescriptor ->
         false
-    | HackAsync | HackBuilderResource _ ->
-        true
 
 
   let filter_unreachable subst f_keep attr =
@@ -730,7 +737,7 @@ module Attribute = struct
       | EndOfCollection
       | HackAsyncAwaited
       | HackBuilder _
-      | HackSinitCalled
+      | HackConstinitCalled
       | InReportedRetainCycle
       | Initialized
       | Invalid _
@@ -903,7 +910,15 @@ module Attributes = struct
 
   let remove_hack_builder = remove_by_rank Attribute.hack_builder_rank
 
-  let is_hack_sinit_called = mem_by_rank Attribute.hack_sinit_called_rank
+  let set_hack_builder_discardable s =
+    match get_hack_builder s with
+    | Some NonDiscardable ->
+        Set.add (remove_hack_builder s) (HackBuilder Discardable)
+    | _ ->
+        s
+
+
+  let is_hack_constinit_called = mem_by_rank Attribute.hack_constinit_called_rank
 
   let is_csharp_resource_released = mem_by_rank Attribute.csharp_resource_released_rank
 

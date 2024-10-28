@@ -32,6 +32,7 @@ BUILD_SYSTEMS_TESTS += \
   infer-debug \
   j1 \
   missing_deps \
+  procs_to_analyze \
   project_root_rel \
   pulse_messages_c \
   pulse_messages_cpp \
@@ -99,15 +100,16 @@ endif
 endif
 endif
 
-ifneq ($(BUCK),no)
-BUILD_SYSTEMS_TESTS += \
-  buck_block_list \
-  buck-clang-db \
-  buck_flavors \
-  buck_flavors_diff \
-  buck_flavors_run \
-  buck_flavors_deterministic
-endif
+# ifneq ($(BUCK),no)
+# TODO convert to buck2
+# BUILD_SYSTEMS_TESTS += \
+#   buck_block_list \
+#   buck-clang-db \
+#   buck_flavors \
+#   buck_flavors_diff \
+#   buck_flavors_run \
+#   buck_flavors_deterministic
+# endif
 
 ifneq ($(CMAKE),no)
 BUILD_SYSTEMS_TESTS += clang_compilation_db cmake inferconfig inferconfig_not_strict
@@ -197,12 +199,14 @@ DIRECT_TESTS += \
 BUILD_SYSTEMS_TESTS += \
   differential_hack \
   pulse_messages_hack \
+	pulse_taint_hack_no_follow_field_accesses \
 
 endif
 
 ifeq ($(BUILD_PYTHON_ANALYZERS),yes)
 ifneq ($(PYTHON),no)
 DIRECT_TESTS += \
+  python_exec \
   python_pulse \
 
 endif
@@ -283,9 +287,10 @@ endif
 ifneq ($(ANT),no)
 BUILD_SYSTEMS_TESTS += ant
 endif
-ifneq ($(BUCK),no)
-BUILD_SYSTEMS_TESTS += buck_java_flavor
-endif
+# ifneq ($(BUCK),no)
+# TODO: convert to buck2
+# BUILD_SYSTEMS_TESTS += buck_java_flavor
+# endif
 ifneq ($(MVN),no)
 BUILD_SYSTEMS_TESTS += \
 	mvn \
@@ -478,8 +483,6 @@ byte_infer: byte
 .PHONY: opt
 opt:
 	$(QUIET)$(MAKE) BUILD_MODE=opt infer
-
-PLUGIN_SETUP_SCRIPT ?= setup.sh
 
 .PHONY: clang_setup
 clang_setup:

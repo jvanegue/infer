@@ -98,7 +98,7 @@ end
 
 let add_unreachable_code (cfg : CFG.t) (node : CFG.Node.t) instr rem_instrs (checks : Checks.t) =
   match instr with
-  | Sil.Prune (_, _, _, (Ik_land_lor | Ik_bexp _)) ->
+  | Sil.Prune (_, _, _, (Ik_land_lor | Ik_bexp)) ->
       checks
   | Sil.Prune (condition, location, true_branch, _) ->
       let unused_branch = UnusedBranch.{node; location; condition; true_branch} in
@@ -166,7 +166,7 @@ let check_expr_for_array_access :
              location
     | Exp.BinOp (_, e1, e2) ->
         cond_set |> check_sub_expr e1 |> check_sub_expr e2
-    | Exp.Lfield (e, _, _) | Exp.UnOp (_, e, _) | Exp.Exn e ->
+    | Exp.Lfield ({exp= e}, _, _) | Exp.UnOp (_, e, _) | Exp.Exn e ->
         check_sub_expr e cond_set
     | Exp.Cast (_, e) ->
         check_sub_expr e cond_set
@@ -210,7 +210,7 @@ let rec check_expr_for_integer_overflow integer_type_widths pname exp location m
   match exp with
   | Exp.UnOp (_, e, _)
   | Exp.Exn e
-  | Exp.Lfield (e, _, _)
+  | Exp.Lfield ({exp= e}, _, _)
   | Exp.Cast (_, e)
   | Exp.Sizeof {dynamic_length= Some e} ->
       check_expr_for_integer_overflow integer_type_widths pname e location mem cond_set
@@ -263,7 +263,7 @@ let check_call get_checks_summary get_summary get_formals pname tenv integer_typ
   in
   let fun_arg_list =
     List.map args ~f:(fun (exp, typ) ->
-        ProcnameDispatcher.Call.FuncArg.{exp; typ; arg_payload= ()} )
+        {ProcnameDispatcher.Call.FuncArg.exp; typ; arg_payload= ()} )
   in
   match Models.Call.dispatch tenv callee_pname fun_arg_list with
   | Some {Models.check} ->

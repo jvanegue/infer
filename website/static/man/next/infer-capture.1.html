@@ -250,11 +250,27 @@ otherwise <b>plain</b>.</p>
 <p style="margin-left:17%;">Specify the root directory of
 the project</p>
 
+<p style="margin-left:11%;"><b>--python-files-index</b>
+<i>path</i></p>
+
+<p style="margin-left:17%;">A file containing a list of
+newline-separated Python files to capture. Compatible with
+<b>infer capture -- python3 file1.py file2.py</b> but not
+with <b>--pyc-file</b>.</p>
+
 <p style="margin-left:11%;"><b>--results-dir</b>,<b>-o</b>
 <i>dir</i></p>
 
 <p style="margin-left:17%;">Write results and internal
 files in the specified directory</p>
+
+
+<p style="margin-left:11%;"><b>--run-python-interpreter</b></p>
+
+<p style="margin-left:17%;">Activates: Capture all .py
+files, transform them into internal PyIR form and run the
+PyIR interpreter on them. (Conversely:
+<b>--no-run-python-interpreter</b>)</p>
 
 <p style="margin-left:11%;"><b>--skip-analysis-in-path</b>
 <i>+regex</i></p>
@@ -737,6 +753,13 @@ capture. (Conversely: <b>--kotlin-capture</b>)</p>
 <p style="margin-left:17%;">Deactivates: Mask exceptions
 thrown by Sawja/Javalib during Java capture (Conversely:
 <b>--mask-sawja-exceptions</b>)</p>
+
+
+<p style="margin-left:11%;"><b>--no-read-java-modules</b></p>
+
+<p style="margin-left:17%;">Deactivates: Read java modules
+file using <b>jimage</b>. (Conversely:
+<b>--read-java-modules</b>)</p>
 
 <h2>ENVIRONMENT
 <a name="ENVIRONMENT"></a>

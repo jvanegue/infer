@@ -139,7 +139,7 @@ end = struct
       | [] ->
           acc
       | Field (f, t) :: syn_offs' ->
-          let acc' = List.map ~f:(fun e -> Exp.Lfield (e, f, t)) acc in
+          let acc' = List.map ~f:(fun e -> Exp.Lfield ({exp= e; is_implicit= false}, f, t)) acc in
           convert acc' syn_offs'
       | Index idx :: syn_offs' ->
           let acc' = List.map ~f:(fun e -> Exp.Lindex (e, idx)) acc in
@@ -484,7 +484,7 @@ let keep_only_indices tenv (p : Prop.normal Prop.t) (path : StrexpMatch.path) (i
 (** If the type is array, check whether we should do abstraction *)
 let array_typ_can_abstract {Typ.desc} =
   match desc with
-  | Tarray {elt= {desc= Tptr ({desc= Tfun}, _)}} ->
+  | Tarray {elt= {desc= Tptr ({desc= Tfun _}, _)}} ->
       false (* don't abstract arrays of pointers *)
   | _ ->
       true

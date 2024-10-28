@@ -40,7 +40,7 @@ let iter_print_history history =
     match (event : ValueHistory.iter_event) with
     | EnterCall (call, _) ->
         call_stack := call :: !call_stack ;
-        F.printf "Enter %a()@,[@[<hv>" CallEvent.pp_name_only call ;
+        F.printf "Enter %a()@,[@[<hv>" (CallEvent.pp_name_only ~with_class:true) call ;
         is_first := true ;
         ()
     | ReturnFromCall (call, _) ->
@@ -52,7 +52,7 @@ let iter_print_history history =
         F.printf "ev%a" Timestamp.pp (ValueHistory.timestamp_of_event event)
   in
   F.printf "@[<hv>" ;
-  (ValueHistory.iter ~main_only:false history) ~f:(fun event ->
+  (ValueHistory.iter history) ~f:(fun event ->
       if not !is_first then F.printf ";@," ;
       is_first := false ;
       print_time event ) ;

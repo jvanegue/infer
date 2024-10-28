@@ -6,16 +6,16 @@
  *)
 open! IStd
 
-let make sources =
+let make ~finish sources =
   let open TaskSchedulerTypes in
   let gen =
     List.rev_map sources ~f:(fun sf -> File sf)
     |> List.permute ~random_state:(Random.State.make (Array.create ~len:1 0))
-    |> ProcessPool.TaskGenerator.of_list
+    |> ProcessPool.TaskGenerator.of_list ~finish
   in
   let next x =
     gen.next x
     (* see defn of gen above to see why res should never match Some (Procname _) *)
-    |> Option.map ~f:(function File _ as v -> v | Procname _ | ProcUID _ -> assert false)
+    |> Option.map ~f:(function (File _, _) as v -> v | Procname _, _ -> assert false)
   in
   {gen with next}

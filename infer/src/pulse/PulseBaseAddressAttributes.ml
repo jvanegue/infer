@@ -212,6 +212,8 @@ let set_hack_builder address builderstate memory =
   remove_hack_builder address memory |> add_one address (Attribute.HackBuilder builderstate)
 
 
+let finalize_all_hack_builders = Graph.map Attributes.set_hack_builder_discardable
+
 let get_hack_builder = get_attribute Attributes.get_hack_builder
 
 let remove_must_be_valid_attr = remove_attribute Attributes.remove_must_be_valid
@@ -334,8 +336,8 @@ let has_unknown_effect address attrs =
   |> Option.exists ~f:(fun attribute -> Option.is_some (Attributes.get_unknown_effect attribute))
 
 
-let is_hack_sinit_called address attrs =
-  Graph.find_opt address attrs |> Option.exists ~f:Attributes.is_hack_sinit_called
+let is_hack_constinit_called address attrs =
+  Graph.find_opt address attrs |> Option.exists ~f:Attributes.is_hack_constinit_called
 
 
 let merge attrs attrs' =
@@ -487,6 +489,8 @@ module type S = sig
 
   val remove_all_must_not_be_tainted : ?kinds:TaintConfig.Kind.Set.t -> t -> t
 
+  val finalize_all_hack_builders : t -> t
+
   val remove_must_be_valid_attr : key -> t -> t
 
   val initialize : key -> t -> t
@@ -495,5 +499,5 @@ module type S = sig
 
   val has_unknown_effect : key -> t -> bool
 
-  val is_hack_sinit_called : key -> t -> bool
+  val is_hack_constinit_called : key -> t -> bool
 end

@@ -432,12 +432,12 @@ let method_exists right_proc_name methods =
 
 
 let resolve_method tenv class_name proc_name =
-  match Tenv.resolve_method ~method_exists tenv class_name proc_name |> fst with
-  | None ->
+  match Tenv.resolve_method ~method_exists tenv class_name proc_name with
+  | Error _ ->
       Logging.d_printfln "Couldn't find method in the hierarchy of type %s"
         (Typ.Name.name class_name) ;
       proc_name
-  | Some method_info ->
+  | Ok method_info ->
       Tenv.MethodInfo.get_procname method_info
 
 
@@ -1314,8 +1314,7 @@ let rec sym_exec
   | Sil.Metadata (ExitScope (dead_vars, _)) ->
       let dead_ids = List.filter_map dead_vars ~f:Var.get_ident in
       ret_old_path [Prop.exist_quantify tenv dead_ids prop_]
-  | Sil.Metadata
-      (CatchEntry _ | EndBranches | Skip | TryEntry _ | TryExit _ | VariableLifetimeBegins _) ->
+  | Sil.Metadata (CatchEntry _ | Skip | TryEntry _ | TryExit _ | VariableLifetimeBegins _) ->
       ret_old_path [prop_]
 
 

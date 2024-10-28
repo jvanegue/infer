@@ -11,11 +11,13 @@ module CLOpt = CommandLineOption
 module L = Logging
 
 module TaskGenerator = struct
+  type for_child_info = {child_slot: int; child_pid: Pid.t; is_first_update: bool}
+
   type ('a, 'b) t =
     { remaining_tasks: unit -> int
     ; is_empty: unit -> bool
     ; finished: result:'b option -> 'a -> unit
-    ; next: unit -> 'a option }
+    ; next: for_child_info -> ('a * (unit -> unit)) option }
 
   let chain (gen1 : ('a, 'b) t) (gen2 : ('a, 'b) t) : ('a, 'b) t =
     let remaining_tasks () = gen1.remaining_tasks () + gen2.remaining_tasks () in
@@ -28,25 +30,36 @@ module TaskGenerator = struct
     let finished ~result work_item =
       if gen1_is_empty () then gen2.finished ~result work_item else gen1.finished ~result work_item
     in
-    let next x = if gen1_is_empty () then gen2.next x else gen1.next x in
+    let next for_child_info =
+      if gen1_is_empty () then gen2.next for_child_info else gen1.next for_child_info
+    in
     {remaining_tasks; is_empty; finished; next}
 
 
-  let of_list (lst : 'a list) : ('a, _) t =
+  let of_list ~finish (lst : 'a list) : ('a, _) t =
     let content = ref lst in
     let length = ref (List.length lst) in
     let remaining_tasks () = !length in
     let is_empty () = List.is_empty !content in
-    let finished ~result:_ _work_item = decr length in
-    let next () =
+    let finished ~result work_item =
+      match finish result work_item with
+      | None ->
+          decr length
+      | Some task ->
+          content := task :: !content
+    in
+    let next _for_child_info =
       match !content with
       | [] ->
           None
       | x :: xs ->
           content := xs ;
-          Some x
+          Some (x, Fn.id)
     in
     {remaining_tasks; is_empty; finished; next}
+
+
+  let finish_always_none result _ = match result with Some _ -> assert false | None -> None
 end
 
 let log_or_die fmt = if Config.keep_going then L.internal_error fmt else L.die InternalError fmt
@@ -59,8 +72,9 @@ type child_info = {pid: Pid.t; down_pipe: Out_channel.t}
     - [Initializing] is the state a newly-forked worker is in.
     - [Idle] is the state a worker goes to after it finishes initializing, or finishes processing a
       work item.
-    - [Processing x] means the worker is currently processing [x]. *)
-type 'a child_state = Initializing | Idle | Processing of 'a
+    - [Processing (x, finalizer)] means the worker is currently processing [x] and we should run
+      [finalizer] when the worker has finished. *)
+type 'a child_state = Initializing | Idle | Processing of 'a * (unit -> unit)
 
 (** the state of the pool *)
 type ('work, 'final, 'result) t =
@@ -213,15 +227,6 @@ let child_is_idle = function Idle -> true | _ -> false
 
 let all_children_idle pool = Array.for_all pool.children_states ~f:child_is_idle
 
-let send_work_to_child pool slot =
-  assert (child_is_idle pool.children_states.(slot)) ;
-  pool.tasks.next ()
-  |> Option.iter ~f:(fun x ->
-         let {down_pipe} = pool.slots.(slot) in
-         pool.children_states.(slot) <- Processing x ;
-         marshal_to_pipe down_pipe (Do x) )
-
-
 (* this should not be called in any other arch than Linux *)
 let should_throttle =
   let currently_throttled = ref false in
@@ -246,9 +251,58 @@ let should_throttle =
     !currently_throttled
 
 
-let send_work_to_child pool slot =
+(** try to schedule more work if there are idle workers, stop as soon as there is no more work *)
+let send_work_to_idle_children pool =
+  let exception NoMoreWork in
+  let is_first_update_ref = ref true in
+  let send_work_to_child pool slot =
+    let child_pid = pool.slots.(slot).pid in
+    let is_first_update = !is_first_update_ref in
+    is_first_update_ref := false ;
+    match pool.tasks.next {child_slot= slot; child_pid; is_first_update} with
+    | None ->
+        raise_notrace NoMoreWork
+    | Some (x, finish) ->
+        let {down_pipe} = pool.slots.(slot) in
+        pool.children_states.(slot) <- Processing (x, finish) ;
+        marshal_to_pipe down_pipe (Do x)
+  in
   let throttled = Option.exists Config.oom_threshold ~f:should_throttle in
-  if not throttled then send_work_to_child pool slot
+  if not throttled then
+    try
+      Array.iteri pool.children_states ~f:(fun slot state ->
+          match state with
+          | Idle ->
+              send_work_to_child pool slot
+          | Initializing | Processing _ ->
+              () )
+    with NoMoreWork -> ()
+
+
+let process_update pool = function
+  | UpdateStatus (slot, t, status) ->
+      TaskBar.update_status pool.task_bar ~slot t status
+  | UpdateHeapWords (slot, heap_words) ->
+      TaskBar.update_heap_words pool.task_bar ~slot heap_words
+  | Crash slot ->
+      (* NOTE: the workers only send this message if {!Config.keep_going} is not [true] so if
+         we receive it we know we should fail hard *)
+      let {pid} = pool.slots.(slot) in
+      (* clean crash, give the child process a chance to cleanup *)
+      Unix.wait (`Pid pid) |> ignore ;
+      one_child_died pool ~slot "see backtrace above"
+  | Ready {worker= slot; heap_words; result} ->
+      ( match pool.children_states.(slot) with
+      | Initializing ->
+          ()
+      | Processing (work, finish) ->
+          finish () ;
+          pool.tasks.finished ~result work
+      | Idle ->
+          L.die InternalError "Received a Ready message from an idle worker@." ) ;
+      TaskBar.set_remaining_tasks pool.task_bar (pool.tasks.remaining_tasks ()) ;
+      TaskBar.update_status pool.task_bar ~slot (Some (Mtime_clock.now ())) ?heap_words "idle" ;
+      pool.children_states.(slot) <- Idle
 
 
 (** main dispatch function that responds to messages from worker processes and updates the taskbar
@@ -258,34 +312,8 @@ let process_updates pool buffer =
   has_dead_child pool
   |> Option.iter ~f:(fun (slot, status) ->
          one_child_died pool ~slot (Unix.Exit_or_signal.to_string_hum status) ) ;
-  wait_for_updates pool buffer
-  |> List.iter ~f:(function
-       | UpdateStatus (slot, t, status) ->
-           TaskBar.update_status pool.task_bar ~slot t status
-       | UpdateHeapWords (slot, heap_words) ->
-           TaskBar.update_heap_words pool.task_bar ~slot heap_words
-       | Crash slot ->
-           (* NOTE: the workers only send this message if {!Config.keep_going} is not [true] so if
-              we receive it we know we should fail hard *)
-           let {pid} = pool.slots.(slot) in
-           (* clean crash, give the child process a chance to cleanup *)
-           Unix.wait (`Pid pid) |> ignore ;
-           one_child_died pool ~slot "see backtrace above"
-       | Ready {worker= slot; heap_words; result} ->
-           ( match pool.children_states.(slot) with
-           | Initializing ->
-               ()
-           | Processing work ->
-               pool.tasks.finished ~result work
-           | Idle ->
-               L.die InternalError "Received a Ready message from an idle worker@." ) ;
-           TaskBar.set_remaining_tasks pool.task_bar (pool.tasks.remaining_tasks ()) ;
-           TaskBar.update_status pool.task_bar ~slot (Some (Mtime_clock.now ())) ?heap_words "idle" ;
-           pool.children_states.(slot) <- Idle ) ;
-  (* try to schedule more work if there are idle workers *)
-  if not (pool.tasks.is_empty ()) then
-    Array.iteri pool.children_states ~f:(fun slot state ->
-        match state with Idle -> send_work_to_child pool slot | Initializing | Processing _ -> () )
+  wait_for_updates pool buffer |> List.iter ~f:(fun update -> process_update pool update) ;
+  if not (pool.tasks.is_empty ()) then send_work_to_idle_children pool
 
 
 type 'a final_worker_message = Finished of int * 'a option | FinalCrash of int

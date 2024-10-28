@@ -137,11 +137,25 @@ let resolve_field_info tenv name fieldname =
 
 
 let resolve_fieldname tenv name fieldname_str =
+  (* problem is that it gets dummy, missed capture *)
+  let missed_capture_types = ref Typ.Name.Set.empty in
+  let find ~f =
+    find_map_supers ~ignore_require_extends:true tenv name ~f:(fun name str_opt ->
+        match str_opt with
+        | None | Some {dummy= true} ->
+            if Language.curr_language_is Hack then
+              missed_capture_types := Typ.Name.Set.add name !missed_capture_types ;
+            None
+        | Some {Struct.fields} ->
+            if List.exists fields ~f then Some name else None )
+  in
   let is_fld {Struct.name} = String.equal (Fieldname.get_field_name name) fieldname_str in
-  find_map_supers ~ignore_require_extends:true tenv name ~f:(fun name str_opt ->
-      Option.bind str_opt ~f:(fun {Struct.fields} ->
-          if List.exists fields ~f:is_fld then Some name else None ) )
-  |> Option.map ~f:(fun name -> Fieldname.make name fieldname_str)
+  let is_non_abstract_fld ({Struct.annot} as x) = is_fld x && not (Annot.Item.is_abstract annot) in
+  let resolved_fld =
+    (match find ~f:is_non_abstract_fld with Some _ as fld -> fld | None -> find ~f:is_fld)
+    |> Option.map ~f:(fun name -> Fieldname.make name fieldname_str)
+  in
+  (resolved_fld, !missed_capture_types)
 
 
 let mem_supers tenv name ~f =
@@ -403,8 +417,26 @@ module MethodInfo = struct
   let get_hack_kind = function HackInfo {kind} -> Some kind | _ -> None
 end
 
-let is_captured tenv type_name =
-  lookup tenv type_name |> Option.exists ~f:(fun (s : Struct.t) -> not s.dummy)
+type unresolved_reason =
+  | ClassNameNotFound
+  | CurryInfoNotFound
+  | MaybeMissingDueToMissedCapture
+  | MaybeMissingDueToIncompleteModel
+[@@deriving show {with_path= false}]
+
+type unresolved_data = {missed_captures: Typ.Name.Set.t; unresolved_reason: unresolved_reason option}
+
+let mk_unresolved_data ?(missed_captures = Typ.Name.Set.empty) unresolved_reason =
+  {missed_captures; unresolved_reason}
+
+
+type resolution_result = (MethodInfo.t, unresolved_data) Result.t
+
+let is_hack_model source_file =
+  let source_file = SourceFile.to_abs_path source_file in
+  String.is_suffix source_file ~suffix:Config.default_hack_builtin_models_rel
+  || List.exists (Config.hack_builtin_models :: Config.hack_models) ~f:(fun hack_model ->
+         String.equal source_file hack_model )
 
 
 let resolve_method ~method_exists tenv class_name proc_name =
@@ -413,20 +445,28 @@ let resolve_method ~method_exists tenv class_name proc_name =
      we will only visit traits from now on *)
   let last_class_visited = ref None in
   let missed_capture_types = ref Typ.Name.Set.empty in
+  let visited_hack_model = ref false in
   let rec resolve_name (class_name : Typ.Name.t) =
-    Option.bind (lookup tenv class_name) ~f:(fun ({Struct.methods; supers} as class_struct) ->
-        if
-          (not (Typ.Name.is_class class_name))
-          || (not (Struct.is_not_java_interface class_struct))
-          || Typ.Name.Set.mem class_name !visited
-        then None
-        else (
-          visited := Typ.Name.Set.add class_name !visited ;
-          if Language.curr_language_is Hack && not (is_captured tenv class_name) then
-            (* we do not need to record class names for which [lookup tenv class_name == None] because
-               we assume that all direct super classes of a captured class are declared in Tenv
-               (even if not necessarily properly captured) *)
+    if Typ.Name.Set.mem class_name !visited || not (Typ.Name.is_class class_name) then None
+    else (
+      visited := Typ.Name.Set.add class_name !visited ;
+      let struct_opt = lookup tenv class_name in
+      (* NOTE: We give an exception on [HH::classname].  The [visited_hack_model] value is to
+         provide a hint "the resolved method may be incorrect".  However, [HH::classname] is just an
+         alias to string, thus there is no method to be incorrect, even if it is defined in the
+         Infer's models. *)
+      if not (Typ.Name.Hack.is_HH_classname class_name) then
+        Option.iter struct_opt ~f:(fun {Struct.source_file} ->
+            Option.iter source_file ~f:(fun source_file ->
+                if is_hack_model source_file then visited_hack_model := true ) ) ;
+      match struct_opt with
+      | None | Some {dummy= true} ->
+          if Language.curr_language_is Hack then
             missed_capture_types := Typ.Name.Set.add class_name !missed_capture_types ;
+          None
+      | Some class_struct when not (Struct.is_not_java_interface class_struct) ->
+          None
+      | Some ({Struct.methods; supers} as class_struct) ->
           let kind =
             MethodInfo.get_kind_from_struct ~last_class_visited:!last_class_visited class_name
               class_struct
@@ -472,10 +512,20 @@ let resolve_method ~method_exists tenv class_name proc_name =
                   (* We currently only support single inheritance for Python so this is straightforward *)
                   supers
             in
-            List.find_map supers_to_search ~f:resolve_name ) )
+            List.find_map supers_to_search ~f:resolve_name )
   in
-  let opt_info = resolve_name class_name in
-  (opt_info, !missed_capture_types)
+  match resolve_name class_name with
+  | _ when not (Typ.Name.Set.is_empty !missed_capture_types) ->
+      Error
+        { missed_captures= !missed_capture_types
+        ; unresolved_reason= Some MaybeMissingDueToMissedCapture }
+  | None ->
+      let unresolved_reason =
+        if !visited_hack_model then Some MaybeMissingDueToIncompleteModel else None
+      in
+      Error {missed_captures= !missed_capture_types; unresolved_reason}
+  | Some method_info ->
+      Ok method_info
 
 
 let find_cpp_destructor tenv class_name =
@@ -512,16 +562,18 @@ let rec is_trivially_copyable tenv {Typ.desc} =
       true
   | Tarray {elt} ->
       is_trivially_copyable tenv elt
-  | Tfun | TVar _ ->
+  | Tfun _ | TVar _ ->
       false
 
 
-let get_hack_direct_used_traits tenv class_name =
+let get_hack_direct_used_traits_interfaces tenv class_name =
   Option.value_map (lookup tenv class_name) ~default:[] ~f:(fun {Struct.supers} ->
       List.fold supers ~init:[] ~f:(fun acc name ->
           match (name, lookup tenv name) with
           | Typ.HackClass name, Some str ->
-              if Struct.is_hack_trait str then name :: acc else acc
+              if Struct.is_hack_trait str then (`Trait, name) :: acc
+              else if Struct.is_hack_interface str then (`Interface, name) :: acc
+              else acc
           | _, _ ->
               acc ) )
 
@@ -535,7 +587,7 @@ let alias_expansion_limit = 100
 let expand_hack_alias tenv tname =
   let rec _expand_hack_alias tname n =
     if Int.(n = 0) then (
-      L.internal_error "exceeded alias expansion limit (cycle?), not expanding" ;
+      L.internal_error "exceeded alias expansion limit (cycle?), not expanding@\n" ;
       None )
     else
       match lookup tenv tname with
@@ -546,10 +598,10 @@ let expand_hack_alias tenv tname =
       | Some {class_info= HackClassInfo Alias; supers= ss} -> (
         match ss with
         | [] ->
-            L.internal_error "empty type alias \"supers\", not expanding" ;
+            L.internal_error "empty type alias \"supers\", not expanding@\n" ;
             None
         | x :: _xs ->
-            L.internal_error "alias type defined as union, taking first element" ;
+            L.internal_error "alias type defined as union, taking first element@\n" ;
             Some x )
       | _ ->
           Some tname

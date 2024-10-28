@@ -52,9 +52,6 @@ and t = private
       (** [Sequence [event, hist]] represents an event [event] occurring *after* [hist]. Invariant:
           the timestamp of [event] is greater than all the (local, i.e. not inside function calls)
           timestamps in [hist]. *)
-  | InContext of
-      { main: t  (** trace of the "main" value being traced *)
-      ; context: t list  (** contextual traces, eg conditionals that the path is under *) }
   | BinaryOp of Binop.t * t * t  (** branch history due to a binop *)
   | FromCellIds of CellId.Set.t * t
       (** the set of cells that this were used in this history; used in particular in summary
@@ -66,9 +63,7 @@ and t = private
 
 val epoch : t
 
-val sequence : ?context:t list -> event -> t -> t
-
-val in_context : t list -> t -> t
+val sequence : event -> t -> t
 
 val binary_op : Binop.t -> t -> t -> t
 
@@ -96,11 +91,10 @@ type iter_event =
   | ReturnFromCall of CallEvent.t * Location.t
   | Event of event
 
-val rev_iter_main : t -> f:(iter_event -> unit) -> unit
-(** iterate on all events in reverse timestamp order, ignoring events in contexts and recursing into
-    the histories inside call events. Timestamp order is the lexicographic order induced by
-    projecting events onto their timestamps and appending timestamps within calls, e.g. the
-    timestamp of the inner assignement in
+val rev_iter : t -> f:(iter_event -> unit) -> unit
+(** iterate on all events in reverse timestamp order, recursing into the histories inside call
+    events. Timestamp order is the lexicographic order induced by projecting events onto their
+    timestamps and appending timestamps within calls, e.g. the timestamp of the inner assignement in
 
     {[
       Call {timestamp=10; in_call=[..., Call{timestamp=4;
@@ -110,11 +104,9 @@ val rev_iter_main : t -> f:(iter_event -> unit) -> unit
     can be written [10.4.3] and the order is such that, e.g., [10.4.3 < 10.5], [10.5] being the
     timestamp of the event following the inner [Call] event in the example above. *)
 
-val iter : main_only:bool -> t -> f:(iter_event -> unit) -> unit
+val iter : t -> f:(iter_event -> unit) -> unit
 [@@warning "-unused-value-declaration"]
-(** like [rev_iter_main] but iterates in order (by reversing the order iteration) and iterates on
-    only main events like [rev_iter_main] if [main_only] is [true], otherwise iterates on *all*
-    events including contexts if [main_only] is [false] *)
+(** like [rev_iter] but iterates in order (by reversing the order iteration) *)
 (* used in unit tests *)
 
 val location_of_event : event -> Location.t
@@ -129,6 +121,6 @@ val add_to_errlog :
   -> Errlog.loc_trace_elem list
   -> Errlog.loc_trace_elem list
 
-val get_first_main_event : t -> event option
+val get_first_event : t -> event option
 
-val exists_main : t -> f:(event -> bool) -> bool
+val exists : t -> f:(event -> bool) -> bool

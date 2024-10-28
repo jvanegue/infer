@@ -34,22 +34,13 @@ module rec Constant : sig
     | PYCFrozenSet of t list
     | PYCCode of Code.t
     | PYCNone
-  [@@deriving compare]
-
-  val show : ?full:bool -> t -> string
-  [@@warning "-unused-value-declaration"]
-  (** Only shows the name of a [PYCCode] constant if [full] is [false]. Otherwise, shows everything. *)
-
-  val pp : Format.formatter -> t -> unit
-
-  val as_code : t -> Code.t option
-
-  val as_name : t -> string option
+  [@@deriving compare, equal]
 end
 
 and Code : sig
   type t = private
     { co_name: string
+    ; co_firstlineno: int
     ; co_filename: string
     ; co_flags: int
     ; co_cellvars: string array
@@ -67,7 +58,6 @@ and Code : sig
               local variables). *)
     ; co_nlocals: int
     ; co_argcount: int
-    ; co_firstlineno: int
     ; co_posonlyargcount: int
     ; co_stacksize: int
     ; co_kwonlyargcount: int
@@ -76,15 +66,7 @@ and Code : sig
           (** A tuple containing the literals used by the bytecode. By experience, it is only [int],
               [string], [tuple]s, [None] or [code] objects *)
     ; instructions: Instruction.t list }
-  [@@deriving show, compare]
-
-  val full_show : t -> string [@@warning "-unused-value-declaration"]
-
-  val is_closure : t -> bool
-
-  val get_arguments : t -> string array
-
-  val get_locals : t -> string array
+  [@@deriving show, compare, equal]
 end
 
 and Instruction : sig
@@ -97,7 +79,9 @@ and Instruction : sig
     ; offset: int
     ; starts_line: int option
     ; is_jump_target: bool }
-  [@@deriving show, compare]
+  [@@deriving compare]
+
+  val pp : ?code:Code.t -> Format.formatter -> t -> unit
 end
 
 val from_string : source:string -> filename:string -> (Code.t, Error.t) result

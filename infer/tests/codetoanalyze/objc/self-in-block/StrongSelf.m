@@ -23,7 +23,13 @@
 
 @end
 
-@interface SelfInBlockTest : NSObject
+@interface SelfInBlockTestSuper : NSObject
+
+@property(nonatomic, weak) NSString* userSession;
+
+@end
+
+@interface SelfInBlockTest : SelfInBlockTestSuper
 
 @property(nonatomic, weak) SelfInBlockTestUser* user;
 
@@ -41,6 +47,7 @@ void m2(_Nullable SelfInBlockTest* obj) {}
 
 @implementation SelfInBlockTest {
   int x;
+  NSString* _name;
 }
 
 - (void)foo {
@@ -96,7 +103,7 @@ void m2(_Nullable SelfInBlockTest* obj) {}
 
 - (void)strongSelfCheckOnce_bad {
   __weak __typeof(self) weakSelf = self;
-  int (^my_block)(BOOL) = ^(BOOL isTapped) {
+  void (^my_block)(BOOL) = ^(BOOL isTapped) {
     __strong __typeof(weakSelf) strongSelf = weakSelf;
     if (strongSelf) {
       [strongSelf foo];
@@ -106,7 +113,6 @@ void m2(_Nullable SelfInBlockTest* obj) {}
       [strongSelf foo]; // no bug here
       m(strongSelf); // no bug here because of dedup
     }
-    return 0;
   };
 }
 
@@ -238,7 +244,7 @@ void m2(_Nullable SelfInBlockTest* obj) {}
     if (strongSelf) {
       int (^my_block)() = ^() {
         int x = strongSelf->x; // bug here
-        x = strongSelf->x; // no bug here because of dedup
+        x = strongSelf->x; // bug here
         return 0;
       };
       int x = strongSelf->x;
@@ -273,4 +279,112 @@ void m2(_Nullable SelfInBlockTest* obj) {}
     return 0;
   };
 }
+
+// Super is actually self but using it means find the method in the super class.
+// So using weakSelf and super is still the same problem, but the fix is less
+// clear, so we produce no autofix.
+- (void)mixSelfWeakSelf_super_bad_no_autofix {
+  __weak __typeof(self) weakSelf = self;
+  int (^my_block)() = ^() {
+    __strong __typeof(weakSelf) strongSelf = weakSelf;
+    if (strongSelf) {
+      [strongSelf foo];
+      id copy = [super copy]; // bug here
+      [copy foo];
+    }
+    return 0;
+  };
+}
+
+// No autofix because self is used before strongSelf is defined.
+// The developer needs to move the use of self to a different line.
+- (void)mixSelfWeakSelf_bad_no_autofix {
+  __weak __typeof(self) weakSelf = self;
+  int (^my_block)() = ^() {
+    [self foo];
+    __strong __typeof(weakSelf) strongSelf = weakSelf;
+    if (strongSelf) {
+      [strongSelf foo];
+    }
+    return 0;
+  };
+}
+
+#define _UNWRAP_STRONG_VARIABLE(nullable_ptr)                         \
+  ({                                                                  \
+    _Pragma("clang diagnostic push");                                 \
+    _Pragma("clang diagnostic ignored \"-Wvoid-ptr-dereference\"");   \
+    __typeof(*(nullable_ptr))* null_unspecified_ptr = (nullable_ptr); \
+    __typeof(null_unspecified_ptr) _Nonnull nonnull_ptr =             \
+        null_unspecified_ptr;                                         \
+    _Pragma("clang diagnostic pop");                                  \
+    nonnull_ptr;                                                      \
+  })
+
+#define WEAK_SELF __weak __typeof(*self)* _Nullable weakSelf = self
+
+#define STRONG_VARIABLE_OR_RETURN(weakVariable, strongVariable) \
+  __typeof(*weakVariable)* _Nonnull(strongVariable) =           \
+      _UNWRAP_STRONG_VARIABLE(weakVariable);                    \
+  do {                                                          \
+    if (!(strongVariable)) {                                    \
+      return;                                                   \
+    }                                                           \
+  } while (0)
+
+#define STRONG_SELF_OR_RETURN STRONG_VARIABLE_OR_RETURN(weakSelf, strongSelf)
+
+- (void)mixSelfWeakSelf_bad_correct_autofix_macro {
+  __weak __typeof(self) weakSelf = self;
+  void (^my_block)() = ^() {
+    STRONG_SELF_OR_RETURN;
+    [strongSelf foo];
+    [self foo];
+  };
+}
+
+#define MY_LOG(format, ...) NSLog(format, ##__VA_ARGS__)
+
+// When the code comes from a macro expansion we can't tell what
+// the syntactical line and column is precisely, so we avoid computing autofixes
+// in that case.
+- (void)mixSelfWeakSelf_bad_no_autofix_macro {
+  __weak __typeof(self) weakSelf = self;
+  int (^my_block)() = ^() {
+    __strong __typeof(weakSelf) strongSelf = weakSelf;
+    if (strongSelf) {
+      [strongSelf foo];
+      MY_LOG(@"%@ async load asset completed.", self);
+    }
+    return 0;
+  };
+}
+
+- (void)mixSelfWeakSelf_bad_autofix_implicit_self {
+  __weak __typeof(self) weakSelf = self;
+  int (^my_block)() = ^() {
+    __strong __typeof(weakSelf) strongSelf = weakSelf;
+    if (strongSelf) {
+      [strongSelf foo];
+      _name = @"Dulma";
+    }
+    return 0;
+  };
+}
+
+// Super is actually self but using it means find the method in the super class.
+// So using weakSelf and super is still the same problem, but the fix is less
+// clear, so we produce no autofix.
+- (void)mixSelfWeakSelf_bad_no_autofix_super_property {
+  __weak __typeof(self) weakSelf = self;
+  int (^my_block)() = ^() {
+    __strong __typeof(weakSelf) strongSelf = weakSelf;
+    if (strongSelf) {
+      [strongSelf foo];
+      NSString* s = super.userSession;
+    }
+    return 0;
+  };
+}
+
 @end

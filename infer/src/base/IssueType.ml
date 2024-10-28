@@ -534,6 +534,12 @@ let constant_address_dereference =
     ~user_documentation:[%blob "./documentation/issues/CONSTANT_ADDRESS_DEREFERENCE.md"]
 
 
+let cxx_string_captured_in_block =
+  register ~category:MemoryError ~enabled:false ~id:"CXX_STRING_CAPTURED_IN_BLOCK"
+    ~hum:"C++ String Captured in Block" Error SelfInBlock
+    ~user_documentation:[%blob "./documentation/issues/CXX_STRING_CAPTURED_IN_BLOCK.md"]
+
+
 let cxx_ref_captured_in_block =
   register ~category:MemoryError ~id:"CXX_REF_CAPTURED_IN_BLOCK"
     ~hum:"C++ Reference Captured in Block" Error SelfInBlock
@@ -876,6 +882,12 @@ let pulse_uninitialized_const =
     ~user_documentation:[%blob "./documentation/issues/PULSE_UNINITIALIZED_CONST.md"]
 
 
+let pulse_uninitialized_method =
+  register ~category:RuntimeException ~enabled:false ~id:"PULSE_UNINITIALIZED_METHOD" Error Pulse
+    ~hum:"Uninitialized Method"
+    ~user_documentation:[%blob "./documentation/issues/PULSE_UNINITIALIZED_METHOD.md"]
+
+
 let pure_function =
   register ~category:NoCategory ~id:"PURE_FUNCTION" Error PurityChecker
     ~user_documentation:[%blob "./documentation/issues/PURE_FUNCTION.md"]
@@ -1043,6 +1055,12 @@ let unnecessary_copy_return_pulse =
   register ~enabled:false ~category:PerfRegression ~id:"PULSE_UNNECESSARY_COPY_RETURN" Error Pulse
     ~hum:"Unnecessary Copy Return"
     ~user_documentation:[%blob "./documentation/issues/PULSE_UNNECESSARY_COPY_RETURN.md"]
+
+
+let unnecessary_copy_thrift_assignment_pulse =
+  register ~category:PerfRegression ~id:"PULSE_UNNECESSARY_COPY_THRIFT_ASSIGNMENT" Error Pulse
+    ~hum:"Unnecessary Copy Assignment into Thrift"
+    ~user_documentation:[%blob "./documentation/issues/PULSE_UNNECESSARY_COPY_THRIFT_ASSIGNMENT.md"]
 
 
 let unreachable_code_after = register_hidden ~id:"UNREACHABLE_CODE" Error BufferOverrunChecker

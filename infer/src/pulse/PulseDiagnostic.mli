@@ -114,6 +114,7 @@ type t =
       ; call_trace: Trace.t
       ; transitive_callees: TransitiveInfo.Callees.t
       ; transitive_missed_captures: Typ.Name.Set.t }
+  | UninitMethod of {callee: Procname.t; history: ValueHistory.t; location: Location.t}
   | UnnecessaryCopy of
       { copied_into: PulseAttribute.CopiedInto.t
       ; source_typ: Typ.t option
@@ -132,6 +133,8 @@ val aborts_execution : t -> bool
 (** whether the presence of an error should abort the execution *)
 
 val get_message_and_suggestion : t -> string * string option
+
+val get_autofix : Procdesc.t -> t -> Jsonbug_t.autofix option
 
 val get_location : t -> Location.t
 

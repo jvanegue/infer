@@ -111,6 +111,7 @@ let should_report (astate : AbductiveDomain.Summary.t) (diagnostic : Diagnostic.
   | TaintFlow _
   | InfiniteError _
   | TransitiveAccess _
+  | UninitMethod _
   | UnnecessaryCopy _ ->
       (* these issues are reported regardless of the calling context, not sure if that's the right
          decision yet *)

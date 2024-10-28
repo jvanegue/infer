@@ -156,6 +156,8 @@ let describe_allocation fmt = function
       F.pp_print_string fmt "async call"
   | HackBuilderResource class_name ->
       F.fprintf fmt "constructor `%a()`" HackClassName.pp class_name
+  | Memory FileDescriptor ->
+      F.pp_print_string fmt "`fopen()`"
   | Memory allocator ->
       F.fprintf fmt "`%a`" Attribute.pp_allocator allocator
 
@@ -167,12 +169,14 @@ let resource_type_s = function
       "awaitable"
   | HackBuilderResource _ ->
       "builder object"
+  | Memory FileDescriptor ->
+      "file descriptor"
   | Memory _ ->
       "memory"
 
 
 let resource_closed_s = function
-  | CSharpClass _ | JavaClass _ ->
+  | CSharpClass _ | JavaClass _ | Memory FileDescriptor ->
       "closed"
   | HackAsync ->
       "awaited"
@@ -219,6 +223,7 @@ type t =
       ; call_trace: Trace.t
       ; transitive_callees: TransitiveInfo.Callees.t [@ignore]
       ; transitive_missed_captures: Typ.Name.Set.t [@ignore] }
+  | UninitMethod of {callee: Procname.t; history: ValueHistory.t; location: Location.t}
   | UnnecessaryCopy of
       { copied_into: PulseAttribute.CopiedInto.t
       ; source_typ: Typ.t option
@@ -298,6 +303,9 @@ let pp fmt diagnostic =
         (fun fmt ->
           if Typ.Name.Set.is_empty transitive_missed_captures then ()
           else Typ.Name.Set.pp fmt transitive_missed_captures )
+  | UninitMethod {callee; history; location} ->
+      F.fprintf fmt "UninitMethod {@[callee:%a;@;history:%a;@;location:%a@]}" Procname.pp callee
+        ValueHistory.pp history Location.pp location
   | UnnecessaryCopy
       {copied_into; source_typ; source_opt; location; copied_location; from; location_instantiated}
     ->
@@ -365,9 +373,10 @@ let get_location = function
   | RetainCycle {location}
   | StackVariableAddressEscape {location}
   | TaintFlow {location}
+
+  | UninitMethod {location}
   | UnnecessaryCopy {location} -> location
   | InfiniteError {location} -> location
-
 
 let get_location_instantiated = function
   | UnnecessaryCopy {location_instantiated} ->
@@ -417,6 +426,7 @@ let aborts_execution = function
   | StackVariableAddressEscape _
   | TaintFlow _
   | TransitiveAccess _
+  | UninitMethod _
   | UnnecessaryCopy _ ->
       false
 
@@ -710,13 +720,13 @@ let get_message_and_suggestion diagnostic =
   | ReadUninitialized {typ; calling_context; trace} ->
       let get_access_path_from_trace () =
         let root_var =
-          Trace.find_map_last_main trace ~f:(function
+          Trace.find_map_last trace ~f:(function
             | VariableDeclared (pvar, _, _) ->
                 Some pvar
             | _ ->
                 None )
           |> IOption.if_none_evalopt ~f:(fun () ->
-                 Trace.find_map_last_main trace ~f:(function
+                 Trace.find_map_last trace ~f:(function
                    | FormalDeclared (pvar, _, _) ->
                        Some pvar
                    | _ ->
@@ -724,7 +734,7 @@ let get_message_and_suggestion diagnostic =
           |> Option.map ~f:(F.asprintf "%a" Pvar.pp_value_non_verbose)
         in
         let declared_fields =
-          Trace.find_map_last_main trace ~f:(function
+          Trace.find_map_last trace ~f:(function
             | StructFieldAddressCreated (fields, _, _) ->
                 Some fields
             | _ ->
@@ -772,7 +782,7 @@ let get_message_and_suggestion diagnostic =
           F.asprintf "%t doesn't seem to be initialized. This will cause a runtime error%t"
             pp_access_path pp_location )
       |> no_suggestion
-  | ResourceLeak {resource; location; allocation_trace} ->
+  | ResourceLeak {resource; location; allocation_trace} -> (
       let allocation_line =
         let {Location.line; _} = Trace.get_outer_location allocation_trace in
         line
@@ -785,10 +795,16 @@ let get_message_and_suggestion diagnostic =
             F.fprintf fmt "by %a, indirectly via call to %a on line %d" describe_allocation resource
               CallEvent.describe f allocation_line
       in
-      F.asprintf "%s dynamically allocated %a is not %s after the last access at %a"
-        (resource_type_s resource |> String.capitalize)
-        pp_allocation_trace allocation_trace (resource_closed_s resource) Location.pp location
-      |> no_suggestion
+      ( F.asprintf "%s dynamically allocated %a is not %s after the last access at %a"
+          (resource_type_s resource |> String.capitalize)
+          pp_allocation_trace allocation_trace (resource_closed_s resource) Location.pp location
+      , match resource with
+        | HackAsync ->
+            Some
+              "Unawaited asynchronous computations can lead to SEVs. Please ensure there is an \
+               await on all code paths, even if the result value is not needed."
+        | _ ->
+            None ) )
   | RetainCycle {location; values} ->
       F.asprintf "Retain cycle found at %a between the following objects: %a" Location.pp location
         pp_retain_cycle values
@@ -830,6 +846,8 @@ let get_message_and_suggestion diagnostic =
               location
       in
       F.asprintf "%s. Transitive access %a. %s" tag pp call_trace description |> no_suggestion
+  | UninitMethod {callee} ->
+      F.asprintf "The method %a is uninitialized." Procname.pp callee |> no_suggestion
   | UnnecessaryCopy {copied_into; copied_location= Some (callee, {file; line})} ->
       let open PulseAttribute in
       ( F.asprintf
@@ -920,6 +938,73 @@ let get_message_and_suggestion diagnostic =
           , Some (get_suggestion_msg source_opt) ) )
 
 
+let make_autofix {Location.file; line; col} candidates =
+  let open IOption.Let_syntax in
+  let* line_str =
+    let file_path = SourceFile.to_abs_path file in
+    match Sys.is_file file_path with
+    | `No | `Unknown ->
+        None
+    | `Yes ->
+        Utils.with_file_in file_path ~f:(fun in_chan ->
+            Container.fold_until in_chan
+              ~fold:(In_channel.fold_lines ~fix_win_eol:false)
+              ~finish:(fun _final_line_number -> None)
+              ~init:1
+              ~f:(fun line_number line_str ->
+                if Int.equal line_number line then Stop (Some line_str)
+                else Continue (line_number + 1) ) )
+  in
+  List.find_map candidates ~f:(fun (original, replacement) ->
+      if String.is_substring_at line_str ~pos:(col - 1) ~substring:original then
+        Some {Jsonbug_t.original= Some original; replacement= Some replacement; additional= None}
+      else
+        Option.map (String.substr_index line_str ~pattern:original) ~f:(fun idx ->
+            { Jsonbug_t.original= None
+            ; replacement= None
+            ; additional= Some [{line; column= idx + 1; original; replacement}] } ) )
+
+
+let get_autofix pdesc diagnostic =
+  match diagnostic with
+  | UnnecessaryCopy {copied_into; source_opt; location; copied_location= None} -> (
+      let is_formal pvar =
+        let pvar_name = Pvar.get_name pvar in
+        List.exists (Procdesc.get_formals pdesc) ~f:(fun (formal, _, _) ->
+            Mangled.equal pvar_name formal )
+      in
+      let is_local pvar =
+        let pvar_name = Pvar.get_name pvar in
+        List.exists (Procdesc.get_locals pdesc) ~f:(fun ProcAttributes.{name= local} ->
+            Mangled.equal pvar_name local )
+      in
+      match (copied_into, source_opt) with
+      | IntoField {field}, Some (DecompilerExpr.PVar pvar, [Dereference])
+        when Procname.is_constructor (Procdesc.get_proc_name pdesc) && is_formal pvar ->
+          let param = Pvar.to_string pvar in
+          make_autofix location
+            [ ( F.asprintf "%a(%s)" Fieldname.pp field param
+              , F.asprintf "%a(std::move(%s))" Fieldname.pp field param )
+            ; ( F.asprintf "%a{%s}" Fieldname.pp field param
+              , F.asprintf "%a{std::move(%s)}" Fieldname.pp field param )
+            ; ( F.asprintf "%a = %s;" Fieldname.pp field param
+              , F.asprintf "%a = std::move(%s);" Fieldname.pp field param ) ]
+      | IntoField {field}, Some (DecompilerExpr.PVar pvar, []) when is_local pvar ->
+          let param = Pvar.to_string pvar in
+          make_autofix location
+            [ ( F.asprintf "%a = %s;" Fieldname.pp field param
+              , F.asprintf "%a = std::move(%s);" Fieldname.pp field param )
+            ; ( F.asprintf ".%a = %s," Fieldname.pp field param
+              , F.asprintf ".%a = std::move(%s)," Fieldname.pp field param ) ]
+      | IntoVar {copied_var= ProgramVar pvar}, Some (DecompilerExpr.PVar _, [MethodCall _]) ->
+          let tgt = Pvar.to_string pvar in
+          make_autofix location [(F.asprintf "auto %s = " tgt, F.asprintf "auto& %s = " tgt)]
+      | _ ->
+          None )
+  | _ ->
+      None
+
+
 let add_errlog_header ~nesting ~title location errlog =
   let tags = [] in
   Errlog.make_trace_element nesting location title tags :: errlog
@@ -958,6 +1043,7 @@ let invalidation_titles (invalidation : Invalidation.t) =
   | CppDelete
   | CppDeleteArray
   | EndIterator
+  | FClose
   | GoneOutOfScope _
   | OptionalEmpty
   | StdVector _
@@ -1006,7 +1092,7 @@ let get_trace = function
   | AccessToInvalidAddress {calling_context; invalidation; invalidation_trace; access_trace} ->
       let in_context_nesting = List.length calling_context in
       let should_print_invalidation_trace =
-        not (Trace.exists_main access_trace ~f:(function Invalidated _ -> true | _ -> false))
+        not (Trace.exists access_trace ~f:(function Invalidated _ -> true | _ -> false))
       in
       ( if should_print_invalidation_trace then
           add_invalidation_trace ~nesting:in_context_nesting invalidation invalidation_trace
@@ -1136,6 +1222,10 @@ let get_trace = function
       Trace.add_to_errlog ~nesting:1
         ~pp_immediate:(fun fmt -> F.fprintf fmt "access occurs here")
         call_trace []
+  | UninitMethod {history; location} ->
+      let nesting = 0 in
+      ValueHistory.add_to_errlog ~nesting history
+      @@ [Errlog.make_trace_element nesting location "method call here" []]
   | UnnecessaryCopy {location; source_typ; copied_location= None; from} ->
       let nesting = 0 in
       [ Errlog.make_trace_element nesting location
@@ -1204,6 +1294,8 @@ let get_issue_type ~latent issue_type =
         IssueType.pulse_memory_leak_c
     | CppNew | CppNewArray ->
         IssueType.pulse_memory_leak_cpp
+    | FileDescriptor ->
+        IssueType.pulse_resource_leak
     | JavaResource _ | CSharpResource _ | HackAsync | HackBuilderResource _ | ObjCAlloc ->
         L.die InternalError
           "Memory leaks should not have a Java resource, Hack async, C sharp, or Objective-C alloc \
@@ -1226,9 +1318,11 @@ let get_issue_type ~latent issue_type =
       IssueType.sensitive_data_flow
   | TransitiveAccess _, false ->
       IssueType.pulse_transitive_access
+  | UninitMethod _, false ->
+      IssueType.pulse_uninitialized_method
   | UnnecessaryCopy {copied_location= Some _}, false ->
       IssueType.unnecessary_copy_return_pulse
-  | UnnecessaryCopy {copied_into= IntoField _; source_typ; from= CopyAssignment}, false
+  | UnnecessaryCopy {copied_into= IntoField _; source_typ; from= CopyAssignment Normal}, false
     when Option.exists ~f:Typ.is_rvalue_reference source_typ ->
       IssueType.unnecessary_copy_assignment_movable_pulse
   | UnnecessaryCopy {copied_into= IntoField _; source_typ; from= CopyCtor}, false
@@ -1244,9 +1338,11 @@ let get_issue_type ~latent issue_type =
       IssueType.unnecessary_copy_intermediate_pulse
   | UnnecessaryCopy {copied_into= IntoVar _; from= CopyCtor | CopyInGetDefault}, false ->
       IssueType.unnecessary_copy_pulse
-  | UnnecessaryCopy {from= CopyAssignment; source_typ}, false ->
+  | UnnecessaryCopy {from= CopyAssignment Normal; source_typ}, false ->
       if is_from_const source_typ then IssueType.unnecessary_copy_assignment_const_pulse
       else IssueType.unnecessary_copy_assignment_pulse
+  | UnnecessaryCopy {from= CopyAssignment Thrift}, false ->
+      IssueType.unnecessary_copy_thrift_assignment_pulse
   | UnnecessaryCopy {source_typ; from= CopyToOptional}, false ->
       if is_from_const source_typ then IssueType.unnecessary_copy_optional_const_pulse
       else IssueType.unnecessary_copy_optional_pulse
@@ -1259,6 +1355,7 @@ let get_issue_type ~latent issue_type =
       | RetainCycle _
       | StackVariableAddressEscape _
       | TransitiveAccess _
+      | UninitMethod _
       | UnnecessaryCopy _ )
     , true ) ->
       L.die InternalError "Issue type cannot be latent"

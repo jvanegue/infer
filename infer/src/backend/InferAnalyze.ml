@@ -54,14 +54,6 @@ let clear_caches () =
   Dependencies.clear ()
 
 
-let proc_name_of_uid uid =
-  match Attributes.load_from_uid uid with
-  | Some attrs ->
-      ProcAttributes.get_proc_name attrs
-  | None ->
-      L.die InternalError "Requested non-existent proc_uid: %s@." uid
-
-
 let useful_time = ref ExecutionDuration.zero
 
 let analyze_target : (TaskSchedulerTypes.target, TaskSchedulerTypes.analysis_result) Tasks.doer =
@@ -70,8 +62,8 @@ let analyze_target : (TaskSchedulerTypes.target, TaskSchedulerTypes.analysis_res
       f () ;
       Some Ok
     with
-    | RestartSchedulerException.ProcnameAlreadyLocked {dependency_filename} ->
-        Some (RaceOn {dependency_filename})
+    | RestartSchedulerException.ProcnameAlreadyLocked {dependency_filenames} ->
+        Some (RaceOn {dependency_filenames})
     | MissingDependencyException.MissingDependencyException ->
         Some Ok
   in
@@ -85,29 +77,17 @@ let analyze_target : (TaskSchedulerTypes.target, TaskSchedulerTypes.analysis_res
         if Config.write_html then Printer.write_all_html_files source_file ;
         result )
   in
-  (* In call-graph scheduling, log progress every [per_procedure_logging_granularity] procedures.
-     The default roughly reflects the average number of procedures in a C++ file. *)
-  let per_procedure_logging_granularity = 200 in
-  (* [procs_left] is set to 1 so that we log the first procedure sent to us. *)
-  let procs_left = ref 1 in
-  let analyze_proc_name exe_env proc_name =
-    decr procs_left ;
-    if Int.( <= ) !procs_left 0 then (
-      L.log_task "Analysing block of %d procs, starting with %a@." per_procedure_logging_granularity
-        Procname.pp proc_name ;
-      procs_left := per_procedure_logging_granularity ) ;
+  let analyze_proc_name exe_env ~specialization proc_name =
     run_and_interpret_result ~f:(fun () ->
-        Ondemand.analyze_proc_name_toplevel exe_env AnalysisRequest.all proc_name )
+        Ondemand.analyze_proc_name_toplevel exe_env AnalysisRequest.all ~specialization proc_name )
   in
   fun target ->
     let start = ExecutionDuration.counter () in
     let exe_env = Exe_env.mk () in
     let result =
       match target with
-      | Procname procname ->
-          analyze_proc_name exe_env procname
-      | ProcUID proc_uid ->
-          proc_name_of_uid proc_uid |> analyze_proc_name exe_env
+      | Procname {proc_name; specialization} ->
+          analyze_proc_name exe_env ~specialization proc_name
       | File source_file ->
           analyze_source_file exe_env source_file
     in
@@ -119,7 +99,7 @@ let analyze_target : (TaskSchedulerTypes.target, TaskSchedulerTypes.analysis_res
     result
 
 
-let source_file_should_be_analyzed ~changed_files source_file =
+let source_file_should_be_analyzed ?(no_file_means_all = true) ~changed_files source_file =
   (* whether [fname] is one of the [changed_files] *)
   let is_changed_file =
     if Config.suffix_match_changed_files then
@@ -140,20 +120,20 @@ let source_file_should_be_analyzed ~changed_files source_file =
   | None when Config.reactive_mode ->
       check_modified ()
   | None ->
-      true
+      no_file_means_all
 
 
 let register_active_checkers () =
   RegisterCheckers.get_active_checkers () |> RegisterCheckers.register
 
 
-let get_source_files_to_analyze ~changed_files =
+let get_source_files_to_analyze ~no_file_means_all ~changed_files =
   let n_all_source_files = ref 0 in
   let n_source_files_to_analyze = ref 0 in
   let filter sourcefile =
     let result =
       (Lazy.force Filtering.source_files_filter) sourcefile
-      && source_file_should_be_analyzed ~changed_files sourcefile
+      && source_file_should_be_analyzed ~no_file_means_all ~changed_files sourcefile
     in
     incr n_all_source_files ;
     if result then incr n_source_files_to_analyze ;
@@ -184,15 +164,15 @@ let get_source_files_to_analyze ~changed_files =
 let tasks_generator_builder_for replay_call_graph_opt sources =
   match replay_call_graph_opt with
   | Some replay_call_graph ->
-      ReplayScheduler.make replay_call_graph sources
+      ReplayScheduler.make ~finish:RestartScheduler.finish replay_call_graph sources
   | None -> (
     match Config.scheduler with
     | File ->
-        FileScheduler.make sources
+        FileScheduler.make ~finish:RestartScheduler.finish sources
     | Restart ->
         RestartScheduler.make sources
     | SyntacticCallGraph ->
-        SyntacticCallGraph.make sources )
+        SyntacticCallGraph.make ~finish:RestartScheduler.finish sources )
 
 
 let analyze replay_call_graph source_files_to_analyze =
@@ -205,7 +185,14 @@ let analyze replay_call_graph source_files_to_analyze =
       List.rev_map (Lazy.force source_files_to_analyze) ~f:(fun sf -> TaskSchedulerTypes.File sf)
     in
     let pre_analysis_gc_stats = GCStats.get ~since:ProgramStart in
-    Tasks.run_sequentially ~f:analyze_target target_files ;
+    let fail_on_race (result : TaskSchedulerTypes.analysis_result option) _ =
+      match result with
+      | None | Some Ok ->
+          None
+      | Some (RaceOn _) ->
+          L.die InternalError "Race detected in -j 1"
+    in
+    Tasks.run_sequentially ~finish:fail_on_race ~f:analyze_target target_files ;
     ( [Stats.get ()]
     , [GCStats.get ~since:(PreviousStats pre_analysis_gc_stats)]
     , [MissingDependencies.get ()] ) )
@@ -247,7 +234,7 @@ let analyze replay_call_graph source_files_to_analyze =
           | Some stats ->
               Some (GCStats.get ~since:(PreviousStats stats))
           | None ->
-              L.internal_error "child did not store GC stats in its prologue, what happened?" ;
+              L.internal_error "child did not store GC stats in its prologue, what happened?@\n" ;
               None
         in
         let () =
@@ -300,7 +287,8 @@ let main ~changed_files =
       IssueLog.invalidate_all ~procedures ;
       L.progress "Done@." )
     else if not Config.incremental_analysis then DBWriter.delete_all_specs () ;
-  let source_files = lazy (get_source_files_to_analyze ~changed_files) in
+  let no_file_means_all = Option.is_none Config.procs_to_analyze_index in
+  let source_files = lazy (get_source_files_to_analyze ~no_file_means_all ~changed_files) in
   (* empty all caches to minimize the process heap to have less work to do when forking *)
   clear_caches () ;
   let initial_spec_count =

@@ -1,0 +1,236 @@
+[
+    {
+        "bug_type": "PULSE_INFINITE",
+        "qualifier": "Recurring state leading to infinite execution at line 33.",
+        "severity": "ERROR",
+        "category": "No_category",
+        "line": 33,
+        "column": -1,
+        "procedure": "infiniteTests.loop_call_not_terminate(int):void",
+        "procedure_start_line": 31,
+        "file": "infiniteTests.java",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "infiniteTests.java",
+                "line_number": 33,
+                "column_number": -1,
+                "description": "in loop"
+            }
+        ],
+        "bug_trace_length": 1,
+        "bug_trace_max_depth": 0,
+        "key": "infiniteTests.java|loop_call_not_terminate|PULSE_INFINITE",
+        "hash": "6aed1b0d49aeab4fab400e064393f1b4",
+        "bug_type_hum": "Infinite",
+        "extras": {}
+    },
+    {
+        "bug_type": "PULSE_INFINITE",
+        "qualifier": "Recurring state leading to infinite execution at line 53.",
+        "severity": "ERROR",
+        "category": "No_category",
+        "line": 53,
+        "column": -1,
+        "procedure": "infiniteTests.loop_pointer_non_terminate(int,int):void",
+        "procedure_start_line": 49,
+        "file": "infiniteTests.java",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "infiniteTests.java",
+                "line_number": 53,
+                "column_number": -1,
+                "description": "in loop"
+            }
+        ],
+        "bug_trace_length": 1,
+        "bug_trace_max_depth": 0,
+        "key": "infiniteTests.java|loop_pointer_non_terminate|PULSE_INFINITE",
+        "hash": "d444392b68722f5478b611bb7805e1df",
+        "bug_type_hum": "Infinite",
+        "extras": {}
+    },
+    {
+        "bug_type": "PULSE_INFINITE",
+        "qualifier": "Recurring state leading to infinite execution at line 65.",
+        "severity": "ERROR",
+        "category": "No_category",
+        "line": 65,
+        "column": -1,
+        "procedure": "infiniteTests.loop_conditional_not_terminate(int):void",
+        "procedure_start_line": 59,
+        "file": "infiniteTests.java",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "infiniteTests.java",
+                "line_number": 65,
+                "column_number": -1,
+                "description": "in loop"
+            }
+        ],
+        "bug_trace_length": 1,
+        "bug_trace_max_depth": 0,
+        "key": "infiniteTests.java|loop_conditional_not_terminate|PULSE_INFINITE",
+        "hash": "bc159fe2a28edd90412a2eedb44153a6",
+        "bug_type_hum": "Infinite",
+        "extras": {}
+    },
+    {
+        "bug_type": "PULSE_INFINITE",
+        "qualifier": "Recurring state leading to infinite execution at line 135.",
+        "severity": "ERROR",
+        "category": "No_category",
+        "line": 135,
+        "column": -1,
+        "procedure": "infiniteTests.inner_loop_non_terminate(int,int):void",
+        "procedure_start_line": 130,
+        "file": "infiniteTests.java",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "infiniteTests.java",
+                "line_number": 135,
+                "column_number": -1,
+                "description": "in loop"
+            }
+        ],
+        "bug_trace_length": 1,
+        "bug_trace_max_depth": 0,
+        "key": "infiniteTests.java|inner_loop_non_terminate|PULSE_INFINITE",
+        "hash": "7bb185079b345aaa6f1bfa9efe7cbf53",
+        "bug_type_hum": "Infinite",
+        "extras": {}
+    },
+    {
+        "bug_type": "PULSE_INFINITE",
+        "qualifier": "Recurring state leading to infinite execution at line 153.",
+        "severity": "ERROR",
+        "category": "No_category",
+        "line": 153,
+        "column": -1,
+        "procedure": "infiniteTests.loop_signedarith_terminate(int):void",
+        "procedure_start_line": 150,
+        "file": "infiniteTests.java",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "infiniteTests.java",
+                "line_number": 153,
+                "column_number": -1,
+                "description": "in loop"
+            }
+        ],
+        "bug_trace_length": 1,
+        "bug_trace_max_depth": 0,
+        "key": "infiniteTests.java|loop_signedarith_terminate|PULSE_INFINITE",
+        "hash": "adde186e09774af7efb2c230ac35208f",
+        "bug_type_hum": "Infinite",
+        "extras": {}
+    },
+    {
+        "bug_type": "PULSE_INFINITE",
+        "qualifier": "Recurring state leading to infinite execution at line 440.",
+        "severity": "ERROR",
+        "category": "No_category",
+        "line": 440,
+        "column": -1,
+        "procedure": "infiniteTests.nondet_loop_non_terminate(int):void",
+        "procedure_start_line": 438,
+        "file": "infiniteTests.java",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "infiniteTests.java",
+                "line_number": 440,
+                "column_number": -1,
+                "description": "in loop"
+            }
+        ],
+        "bug_trace_length": 1,
+        "bug_trace_max_depth": 0,
+        "key": "infiniteTests.java|nondet_loop_non_terminate|PULSE_INFINITE",
+        "hash": "f540e94b0081e51a1ce73e3985af7be2",
+        "bug_type_hum": "Infinite",
+        "extras": {}
+    },
+    {
+        "bug_type": "PULSE_INFINITE",
+        "qualifier": "Recurring state leading to infinite execution at line 490.",
+        "severity": "ERROR",
+        "category": "No_category",
+        "line": 490,
+        "column": -1,
+        "procedure": "infiniteTests.loop_non_terminating_harris10(int,int,int):void",
+        "procedure_start_line": 484,
+        "file": "infiniteTests.java",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "infiniteTests.java",
+                "line_number": 490,
+                "column_number": -1,
+                "description": "in loop"
+            }
+        ],
+        "bug_trace_length": 1,
+        "bug_trace_max_depth": 0,
+        "key": "infiniteTests.java|loop_non_terminating_harris10|PULSE_INFINITE",
+        "hash": "84c21d7b7da138b319a205c8663eac0b",
+        "bug_type_hum": "Infinite",
+        "extras": {}
+    },
+    {
+        "bug_type": "PULSE_INFINITE",
+        "qualifier": "Recurring state leading to infinite execution at line 569.",
+        "severity": "ERROR",
+        "category": "No_category",
+        "line": 569,
+        "column": -1,
+        "procedure": "infiniteTests.array_iter_nonterminate(int[],int):void",
+        "procedure_start_line": 563,
+        "file": "infiniteTests.java",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "infiniteTests.java",
+                "line_number": 569,
+                "column_number": -1,
+                "description": "in loop"
+            }
+        ],
+        "bug_trace_length": 1,
+        "bug_trace_max_depth": 0,
+        "key": "infiniteTests.java|array_iter_nonterminate|PULSE_INFINITE",
+        "hash": "11fc232be757886262c3fbb1de65b724",
+        "bug_type_hum": "Infinite",
+        "extras": {}
+    },
+    {
+        "bug_type": "PULSE_INFINITE",
+        "qualifier": "Recurring state leading to infinite execution at line 616.",
+        "severity": "ERROR",
+        "category": "No_category",
+        "line": 616,
+        "column": -1,
+        "procedure": "infiniteTests.iterate_bitmask_nonterminate(int[],int):void",
+        "procedure_start_line": 610,
+        "file": "infiniteTests.java",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "infiniteTests.java",
+                "line_number": 616,
+                "column_number": -1,
+                "description": "in loop"
+            }
+        ],
+        "bug_trace_length": 1,
+        "bug_trace_max_depth": 0,
+        "key": "infiniteTests.java|iterate_bitmask_nonterminate|PULSE_INFINITE",
+        "hash": "e1fef63ab1b8ee479ec3664f6095ac3b",
+        "bug_type_hum": "Infinite",
+        "extras": {}
+    }
+]

@@ -1,0 +1,20 @@
+Entering directory '/huge/jvanegue/PUBLIC_GITHUB/infer/infer'
+File "src/pulse/PulseAbductiveDomain.ml", line 1945, characters 31-37:
+1945 |     let astate_before_filter = astate in
+                                      ^^^^^^
+Error: Unbound value astate
+Hint: Did you mean astate0?
+File "src/pulse/PulseFormula.ml", line 3688, characters 32-73:
+3688 |                                 and_normalized_atoms (phi, new_eqs) atoms >>| snd )
+                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error (warning 5 [ignored-partial-application]): this function application is partial,
+maybe some arguments are missing.
+File "src/pulse/PulseFormula.ml", line 3688, characters 32-73:
+3688 |                                 and_normalized_atoms (phi, new_eqs) atoms >>| snd )
+                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: This expression has type
+         orig_atom:Atom.t list ->
+         add_term:bool -> ('a * (t * new_eqs)) sat_unsat_t
+       but an expression was expected of type 'b sat_unsat_t
+Leaving directory '/huge/jvanegue/PUBLIC_GITHUB/infer/infer'
+make: *** [Makefile:124: /huge/jvanegue/PUBLIC_GITHUB/infer/infer/bin/infer.exe] Error 1

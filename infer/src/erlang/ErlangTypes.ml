@@ -30,7 +30,7 @@ let rec type_condition_real (env : (_, _) Env.t) constraints ((ident, type_) : I
   let simple_condition typ id =
     let is_typ = mk_fresh_id () in
     let start = Node.make_stmt env [Env.has_type_instr env ~result:is_typ ~value:(Var id) typ] in
-    ({Block.start; exit_success= start; exit_failure= Node.make_nop env}, Exp.Var is_typ)
+    ({Block.start; exit_success= start; exit_failure= None}, Exp.Var is_typ)
   in
   let userdef_condition module_ name =
     let procname = Env.procname_for_user_type module_ name in
@@ -172,7 +172,7 @@ let process_disjuncts env spec f =
      and somehow Infer can't figure out that this is unsat. Adding a temp variable helps. T115354480 *)
   let cond_id = mk_fresh_id () in
   let load_block = Block.make_load env cond_id condition any_typ in
-  let prune_block = Block.make_branch env (Var cond_id) in
+  let prune_block = Block.make_branch env [] (Var cond_id) in
   Block.all env (blocks @ [load_block; prune_block])
 
 

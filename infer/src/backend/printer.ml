@@ -78,7 +78,7 @@ end = struct
       else (true, Io_infer.Html.create source node_path)
     in
     curr_html_formatter := fmt ;
-    Hashtbl.replace log_files (node_fname, source) fd ;
+    Hashtbl.add log_files (node_fname, source) fd ;
     if needs_initialization then (
       F.fprintf fmt "<center><h1>Cfg Node %a</h1></center>"
         (Io_infer.Html.pp_line_link source ~text:(Some (string_of_int nodeid)) [".."])
@@ -96,35 +96,34 @@ end = struct
       pp_node_link_seq fmt (Procdesc.Node.get_exn node) ;
       F.fprintf fmt "<br>@\n" ;
       (* Instruction listing + buttons to control stickiness/visibility *)
-      F.fprintf fmt "<DIV id='node_listing'>@\n" ;
+      F.fprintf fmt "<div id='node_listing'>@\n" ;
       F.fprintf fmt
-        "<BUTTON type='button' onclick='toggleListingOnTop()'>Listing on top</BUTTON>@\n" ;
+        "<button type='button' onclick='toggleListingOnTop()'>Sticky Instructions</button>@\n" ;
       F.fprintf fmt
-        "<BUTTON type='button' onclick='toggleListingVisibility()'>Listing visibility</BUTTON>@\n" ;
-      F.fprintf fmt "<LISTING class='%s'>%a</LISTING>@\n" (Pp.color_string Green)
+        "<button type='button' onclick='toggleListingVisibility()'>Listing visibility</button>@\n" ;
+      F.fprintf fmt "<code class='code %s'>@\n%a</code>@\n" (Pp.color_string Green)
         (Instrs.pp ~indent:false (Pp.html Green))
         (Procdesc.Node.get_instrs node) ;
-      F.fprintf fmt "</DIV>@\n" ;
+      F.fprintf fmt "</div>@\n" ;
       (* Listing end *)
-      F.fprintf fmt "<BUTTON type='button' onclick='toggleDetailsBlock()'>Toggle details</BUTTON>" ) ;
+      F.fprintf fmt "<button type='button' onclick='toggleDetailsBlock()'>Toggle details</button>" ) ;
     F.fprintf fmt "%a%a %t" Io_infer.Html.pp_hline ()
       (Io_infer.Html.pp_session_link source ~with_name:true [".."] ~proc_name)
       (nodeid, session, line) pp_name ;
-    F.fprintf fmt "@\n<LISTING class='%s'>" (Pp.color_string Black)
+    F.fprintf fmt "@\n<div class='%s state code'>" (Pp.color_string Black)
 
 
   let finish_session node =
-    F.fprintf !curr_html_formatter "</LISTING>@?" ;
-    let fd =
-      let source = (Procdesc.Node.get_loc node).file in
-      let node_fname =
-        let proc_name = Procdesc.Node.get_proc_name node in
-        let nodeid = (Procdesc.Node.get_id node :> int) in
-        Io_infer.Html.node_filename proc_name nodeid
-      in
-      Hashtbl.find log_files (node_fname, source)
+    F.fprintf !curr_html_formatter "</div>@?" ;
+    let source = (Procdesc.Node.get_loc node).file in
+    let node_fname =
+      let proc_name = Procdesc.Node.get_proc_name node in
+      let nodeid = (Procdesc.Node.get_id node :> int) in
+      Io_infer.Html.node_filename proc_name nodeid
     in
+    let fd = Hashtbl.find log_files (node_fname, source) in
     Unix.close fd ;
+    Hashtbl.remove log_files (node_fname, source) ;
     curr_html_formatter := F.std_formatter
 end
 
@@ -132,27 +131,39 @@ module ProcsHtml : sig
   val write : Procdesc.t -> unit
 end = struct
   let write pdesc =
-    let pname = Procdesc.get_proc_name pdesc in
+    let proc_name = Procdesc.get_proc_name pdesc in
     let loc = Procdesc.get_loc pdesc in
     let source = loc.file in
     let nodes = List.sort ~compare:Procdesc.Node.compare (Procdesc.get_nodes pdesc) in
     let linenum = loc.Location.line in
-    let fd, fmt = Io_infer.Html.create source [Procname.to_filename pname] in
+    let fd, fmt = Io_infer.Html.create source [Procname.to_filename proc_name] in
     F.fprintf fmt "<center><h1>Procedure %a</h1></center>@\n"
       (Io_infer.Html.pp_line_link source
-         ~text:(Some (Escape.escape_xml (Procname.to_string ~verbosity:Verbose pname)))
+         ~text:(Some (Escape.escape_xml (Procname.to_string ~verbosity:Verbose proc_name)))
          [] )
       linenum ;
     pp_node_link_seq [] ~description:true fmt nodes ;
     (* load payloads eagerly as we need them to print them all *)
-    ( match Summary.OnDisk.get ~lazy_payloads:false AnalysisRequest.all pname with
+    ( match Summary.OnDisk.get ~lazy_payloads:false AnalysisRequest.all proc_name with
     | None ->
         ()
     | Some summary ->
-        F.pp_print_string fmt "<br />@\n" ;
+        F.fprintf fmt "<br />@\n" ;
         Summary.pp_html source fmt summary ) ;
-    F.fprintf fmt "<hr />@\n<pre>@\n%s</pre>@\n"
-      (Escape.escape_xml (F.asprintf "%a" ProcAttributes.pp (Procdesc.get_attributes pdesc))) ;
+    F.fprintf fmt
+      "<hr />@\n\
+       <pre>@\n\
+       Attributes:@\n\
+       %s@\n\
+       @\n\
+       sexp for --procs-to-analyze:@\n\
+       (@\n\
+      \  @[%a@]@\n\
+       )@\n\
+       </pre>@\n"
+      (Escape.escape_xml (F.asprintf "%a" ProcAttributes.pp (Procdesc.get_attributes pdesc)))
+      Sexp.pp_hum
+      (SpecializedProcname.sexp_of_t {proc_name; specialization= None}) ;
     Io_infer.Html.close (fd, fmt)
 end
 

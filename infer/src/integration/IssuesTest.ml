@@ -113,6 +113,22 @@ let pp_custom_of_report fmt report fields =
                 F.fprintf fmt "%s{%a}" (comma_separator index)
                   (Pp.seq ~sep:"," pp_missed_capture)
                   transitive_missed_captures )
+      | Autofix ->
+          let escape s = Escape.escape_double_quotes s |> Escape.escape_line_space in
+          let pp_autofix fmt (original, replacement, line, col) =
+            F.fprintf fmt "\"%s\"=>\"%s\"@%d:%d" (escape original) (escape replacement) line col
+          in
+          let pp_autofix_opt fmt (original, replacement, line, col) =
+            if Option.is_some original || Option.is_some replacement then
+              pp_autofix fmt
+                (Option.value ~default:"" original, Option.value ~default:"" replacement, line, col)
+          in
+          Option.iter issue.autofix ~f:(fun {original; replacement; additional} ->
+              F.pp_print_string fmt (comma_separator index) ;
+              F.fprintf fmt "%a" pp_autofix_opt (original, replacement, issue.line, issue.column) ;
+              Option.iter additional ~f:(fun additional ->
+                  List.iter additional ~f:(fun {line; column; original; replacement} ->
+                      F.fprintf fmt "+%a" pp_autofix (original, replacement, line, column) ) ) )
     in
     List.iteri ~f:pp_field fields ;
     F.fprintf fmt "@."

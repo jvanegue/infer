@@ -372,8 +372,7 @@ let biabduction_models_jar = lib_dir ^/ "java" ^/ "models.jar"
 (** Path to the textual file with Hack models *)
 let default_hack_builtin_models = lib_dir ^/ "hack" ^/ "models.sil"
 
-(** Path to the textual file with Python models *)
-let default_python_builtin_models = lib_dir ^/ "python" ^/ "models.sil"
+let default_hack_builtin_models_rel = "lib" ^/ "hack" ^/ "models.sil"
 
 let pulse_default_taint_config = config_dir ^/ "taint"
 
@@ -597,6 +596,12 @@ and annotation_reachability_apply_superclass_annotations =
     ~default:true
 
 
+and annotation_reachability_check_loops =
+  CLOpt.mk_bool ~long:"annotation-reachability-check-loops"
+    ~in_help:InferCommand.[(Analyze, manual_java)]
+    "Highlights callsites in the trace that are nested in some loop." ~default:false
+
+
 and annotation_reachability_custom_models =
   CLOpt.mk_json ~long:"annotation-reachability-custom-models"
     ~in_help:InferCommand.[(Analyze, manual_java)]
@@ -618,6 +623,14 @@ and annotation_reachability_expensive =
     ~default:false
     "check if methods annotated with @PerformanceCritical can call expensive methods (annotated \
      @Expensive or modeled, with annotation reachability checker)"
+
+
+and annotation_reachability_minimize_sinks =
+  CLOpt.mk_bool ~long:"annotation-reachability-minimize-sinks"
+    ~in_help:InferCommand.[(Analyze, manual_java)]
+    "do not report paths where a prefix is also a source to sink path. For example if there is a \
+     source() -> sink1() -> sink2() path then only source() -> sink1() will be reported."
+    ~default:true
 
 
 and annotation_reachability_minimize_sources =
@@ -2206,6 +2219,13 @@ and never_returning_null =
        $(i,null)." )
 
 
+and noescaping_function_list =
+  CLOpt.mk_string_list ~long:"noescaping-function-list" ~meta:"string"
+    ~in_help:InferCommand.[(Analyze, manual_generic)]
+    "Useful for the check CXX_REF_CAPTURED_IN_BLOCK. It declares a list of functions that take \
+     blocks as arguments that are no escaping but we cannot annotate them accordingly."
+
+
 and no_censor_report =
   CLOpt.mk_string_list ~long:"no-censor-report" ~meta:"issue_type_regex"
     ~in_help:InferCommand.[(Report, manual_generic); (Run, manual_generic)]
@@ -2216,12 +2236,29 @@ and nullable_annotation =
   CLOpt.mk_string_opt ~long:"nullable-annotation-name" "Specify a custom nullable annotation name."
 
 
+and objc_block_execution_macro =
+  CLOpt.mk_string_opt ~long:"objc-block-execution-macro" ~meta:"string"
+    ~in_help:InferCommand.[(Analyze, manual_generic)]
+    "Macro for executing Objective-C blocks safely."
+
+
 and objc_synthesize_dealloc =
   CLOpt.mk_bool ~long:"objc-synthesize-dealloc"
     ~in_help:InferCommand.[(Capture, manual_clang)]
     ~default:false
     "If enabled, the capture tries to synthesize code in the dealloc methods of Objective-C \
      classes corresponding to what the compiler does."
+
+
+and ondemand_recursion_restart_limit =
+  CLOpt.mk_int ~long:"ondemand-recursion-restart-limit" ~default:100
+    ~in_help:InferCommand.[(Analyze, manual_generic)]
+    "In order to make the analysis of mutual recursion cycles deterministic in their output, the \
+     analysis of a cycle of mutually recursive functions may restart the analysis of the entire \
+     cycle from a deterministic place. If the graph of mutual recursion is more complex than a \
+     simple cycle this could potentially result in many restarts before finding the \"right\" \
+     procedure from which to start. This limits the number of restarts before we give up and \
+     analyze the cycle as-is instead."
 
 
 and oom_threshold =
@@ -2351,6 +2388,14 @@ and process_clang_ast =
      $(b,--export-changed-functions) (Not available for Java)"
 
 
+and procs_to_analyze_index =
+  CLOpt.mk_path_opt ~long:"procs-to-analyze-index"
+    ~in_help:InferCommand.[(Analyze, manual_generic)]
+    ~meta:"file"
+    "Specify the file containing an Sexp representing a list of pairs of procedures and \
+     specializations to analyze. Only works with the restart scheduler."
+
+
 and progress_bar =
   CLOpt.mk_bool ~short:'p' ~long:"progress-bar" ~default:true
     ~in_help:InferCommand.[(Run, manual_generic)]
@@ -2375,6 +2420,12 @@ and project_root =
         ; (Run, manual_generic)
         ; (Report, manual_generic) ]
     ~meta:"dir" "Specify the root directory of the project"
+
+
+and pulse_balanced_disjuncts_strategy =
+  CLOpt.mk_bool ~long:"pulse-balanced-disjuncts-strategy"
+    "Enable a disjunct selection strategy where each caller disjunct is given near the same budget \
+     of post disjuncts."
 
 
 and pulse_cut_to_one_path_procedures_pattern =
@@ -2420,6 +2471,12 @@ and pulse_log_summary_count =
 
 and pulse_log_unknown_calls =
   CLOpt.mk_bool ~long:"pulse-log-unknown-calls" "log calls to unknown functions in pulse in stats"
+
+
+and pulse_log_unknown_calls_sampled =
+  CLOpt.mk_int_opt ~long:"pulse-log-unknown-calls-sampled"
+    "log calls to unknown functions in pulse in stats with specified sample rate bound to avoid \
+     excessive logging"
 
 
 and pulse_max_cfg_size =
@@ -2538,6 +2595,12 @@ and pulse_model_skip_pattern_list =
   CLOpt.mk_string_list ~long:"pulse-model-skip-pattern-list"
     ~in_help:InferCommand.[(Analyze, manual_pulse)]
     "Regex of methods that should be modelled as \"skip\" in Pulse"
+
+
+and pulse_model_unreachable =
+  CLOpt.mk_string_list ~long:"pulse-model-unreachable"
+    ~in_help:InferCommand.[(Analyze, manual_clang)]
+    "Methods to be modeled as unreachable."
 
 
 and pulse_models_for_erlang =
@@ -2693,14 +2756,6 @@ and pulse_specialization_partial =
      specialized analysis of the callee."
 
 
-and pulse_taint_check_history =
-  CLOpt.mk_bool ~long:"pulse-taint-check-history" ~default:true
-    ~in_help:InferCommand.[(Analyze, manual_pulse)]
-    "Check values histories for taint events before reporting a taint issue. This is a temporary \
-     flag while the taint analysis transitions from being mainly attribute-based to being \
-     history-based."
-
-
 and pulse_taint_config =
   CLOpt.mk_path_list ~long:"pulse-taint-config"
     ~in_help:InferCommand.[(Analyze, manual_pulse)]
@@ -2719,6 +2774,12 @@ and pulse_taint_data_flow_kinds =
     "Specify which taint kinds should be used for data flow reporting only. If a source has such a \
      kind, only data flows to sinks which originate at the source will be reported. If a sink has \
      such a kind, only sensitive data flows to the sink will be reported."
+
+
+and pulse_taint_follow_field_accesses =
+  CLOpt.mk_bool ~long:"pulse-taint-follow-field-accesses" ~default:true
+    ~in_help:InferCommand.[(Analyze, manual_pulse)]
+    "Specify if taint analysis should follow field accesses when propagating taints."
 
 
 and pulse_taint_opaque_files =
@@ -2895,9 +2956,11 @@ and pure_by_default =
 
 and pyc_file = CLOpt.mk_path_list ~long:"pyc-file" "Collection of compiled Python files (byte-code)"
 
-and python_builtin_models =
-  CLOpt.mk_string ~long:"python-builtin-models" ~default:default_python_builtin_models
-    "Specify .sil file to use as Python builtin models (uses bundled models by default)"
+and python_files_index =
+  CLOpt.mk_path_opt ~long:"python-files-index" ~meta:"path"
+    ~in_help:InferCommand.[(Capture, manual_generic)]
+    "A file containing a list of newline-separated Python files to capture. Compatible with \
+     $(b,infer capture -- python3 file1.py file2.py) but not with $(b,--pyc-file)."
 
 
 and qualified_cpp_name_block_list =
@@ -3568,6 +3631,14 @@ and xcpretty =
      to be in the path, infer command is still just $(i,`infer -- <xcodebuild command>`)."
 
 
+let run_python_interpreter =
+  CLOpt.mk_bool_group ~default:false ~long:"run-python-interpreter"
+    ~in_help:InferCommand.[(Capture, manual_generic)]
+    "Capture all .py files, transform them into internal PyIR form and run the PyIR interpreter on \
+     them."
+    [quiet] []
+
+
 (* The "rest" args must appear after "--" on the command line, and hence after other args, so they
    are allowed to refer to the other arg variables. *)
 
@@ -3778,11 +3849,15 @@ and annotation_reachability_apply_superclass_annotations =
   !annotation_reachability_apply_superclass_annotations
 
 
+and annotation_reachability_check_loops = !annotation_reachability_check_loops
+
 and annotation_reachability_custom_models = !annotation_reachability_custom_models
 
 and annotation_reachability_custom_pairs = !annotation_reachability_custom_pairs
 
 and annotation_reachability_expensive = !annotation_reachability_expensive
+
+and annotation_reachability_minimize_sinks = !annotation_reachability_minimize_sinks
 
 and annotation_reachability_minimize_sources = !annotation_reachability_minimize_sources
 
@@ -4287,17 +4362,23 @@ and modeled_expensive = match modeled_expensive with k, r -> (k, !r)
 
 and never_returning_null = match never_returning_null with k, r -> (k, !r)
 
+and noescaping_function_list = RevList.to_list !noescaping_function_list
+
 and no_censor_report = RevList.rev_map !no_censor_report ~f:Str.regexp
 
 and no_translate_libs = not !headers
 
 and nullable_annotation = !nullable_annotation
 
+and objc_block_execution_macro = !objc_block_execution_macro
+
+and objc_synthesize_dealloc = !objc_synthesize_dealloc
+
+and ondemand_recursion_restart_limit = !ondemand_recursion_restart_limit
+
 and only_cheap_debug = !only_cheap_debug
 
 and oom_threshold = !oom_threshold
-
-and objc_synthesize_dealloc = !objc_synthesize_dealloc
 
 and pmd_xml = !pmd_xml
 
@@ -4341,6 +4422,8 @@ and procedures_summary_skip_empty = !procedures_summary_skip_empty
 
 and process_clang_ast = !process_clang_ast
 
+and procs_to_analyze_index = !procs_to_analyze_index
+
 and progress_bar =
   let style =
     if !progress_bar && not !quiet then
@@ -4371,6 +4454,8 @@ and progress_bar =
 
 and project_root = !project_root
 
+and pulse_balanced_disjuncts_strategy = !pulse_balanced_disjuncts_strategy
+
 and pulse_cut_to_one_path_procedures_pattern =
   Option.map ~f:Str.regexp !pulse_cut_to_one_path_procedures_pattern
 
@@ -4386,6 +4471,8 @@ and pulse_intraprocedural_only = !pulse_intraprocedural_only
 and pulse_log_summary_count = !pulse_log_summary_count
 
 and pulse_log_unknown_calls = !pulse_log_unknown_calls
+
+and pulse_log_unknown_calls_sampled = !pulse_log_unknown_calls_sampled
 
 and pulse_max_cfg_size = !pulse_max_cfg_size
 
@@ -4446,6 +4533,8 @@ and pulse_model_transfer_ownership_namespace, pulse_model_transfer_ownership =
   RevList.rev_partition_map ~f:aux models
 
 
+and pulse_model_unreachable = RevList.to_list !pulse_model_unreachable
+
 and pulse_models_for_erlang = RevList.to_list !pulse_models_for_erlang
 
 and pulse_monitor_transitive_callees = !pulse_monitor_transitive_callees
@@ -4479,8 +4568,6 @@ and pulse_specialization_iteration_limit = !pulse_specialization_iteration_limit
 and pulse_specialization_limit = !pulse_specialization_limit
 
 and pulse_specialization_partial = !pulse_specialization_partial
-
-and pulse_taint_check_history = !pulse_taint_check_history
 
 and pulse_taint_config =
   (* TODO: write our own json handling using [Yojson] directly as atdgen generated parsers ignore
@@ -4547,6 +4634,8 @@ and pulse_taint_config =
 
 and pulse_taint_opaque_files = RevList.to_list !pulse_taint_opaque_files
 
+and pulse_taint_follow_field_accesses = !pulse_taint_follow_field_accesses
+
 and pulse_taint_short_traces = !pulse_taint_short_traces
 
 and pulse_taint_skip_sources = !pulse_taint_skip_sources
@@ -4565,7 +4654,7 @@ and pure_by_default = !pure_by_default
 
 and pyc_file = RevList.to_list !pyc_file
 
-and python_builtin_models = !python_builtin_models
+and python_files_index = !python_files_index
 
 and qualified_cpp_name_block_list = RevList.to_list !qualified_cpp_name_block_list
 
@@ -4621,6 +4710,8 @@ and reports_include_ml_loc = !reports_include_ml_loc
 and results_dir = !results_dir
 
 and run_as_child = !run_as_child
+
+and run_python_interpreter = !run_python_interpreter
 
 and sarif = !sarif
 

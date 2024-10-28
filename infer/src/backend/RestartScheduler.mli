@@ -12,9 +12,12 @@ val make :
      SourceFile.t list
   -> (TaskSchedulerTypes.target, TaskSchedulerTypes.analysis_result) ProcessPool.TaskGenerator.t
 
-val with_lock : f:(unit -> 'a) -> Procname.t -> 'a
+val with_lock :
+  get_actives:(unit -> SpecializedProcname.t list) -> f:(unit -> 'a) -> Procname.t -> 'a
 (** Run [f] after having taken a lock on the given [Procname.t] and unlock after. If the lock is
     already held by another worker, throw [RestartSchedulerException.ProcnameAlreadyLocked] so that
     the dependency can be sent to the scheduler process. Finally, account for time spent analysing
     each procedure as useful (finished analysis) or not (an exception was thrown, terminating
     analysis early). *)
+
+val finish : TaskSchedulerTypes.analysis_result option -> 'a -> 'a option

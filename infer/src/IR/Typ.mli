@@ -47,6 +47,8 @@ type ptr_kind =
   | Pk_objc_weak  (** Obj-C __weak pointer *)
   | Pk_objc_unsafe_unretained  (** Obj-C __unsafe_unretained pointer *)
   | Pk_objc_autoreleasing  (** Obj-C __autoreleasing pointer *)
+  | Pk_objc_nullable_block  (** Obj-C block annotated with nullable *)
+  | Pk_objc_nonnull_block  (** Obj-C block annotated with nonnull *)
 [@@deriving compare]
 
 val equal_ptr_kind : ptr_kind -> ptr_kind -> bool
@@ -71,11 +73,14 @@ val is_volatile : type_quals -> bool
 (** types for sil (structured) expressions *)
 type t = {desc: desc; quals: type_quals}
 
+and function_prototype = {params_type: t list; return_type: t}
+[@@deriving compare, equal, yojson_of, sexp, hash, normalize]
+
 and desc =
   | Tint of ikind  (** integer type *)
   | Tfloat of fkind  (** float type *)
   | Tvoid  (** void type *)
-  | Tfun  (** function type *)
+  | Tfun of function_prototype option  (** function type *)
   | Tptr of t * ptr_kind  (** pointer type *)
   | Tstruct of name  (** structured value type name *)
   | TVar of string  (** type variable (ie. C++ template variables) *)
@@ -145,6 +150,8 @@ val size_t : ikind
 (** ikind of size_t *)
 
 val is_weak_pointer : t -> bool
+
+val is_block_nonnull_pointer : t -> bool
 
 val is_strong_pointer : t -> bool
 
@@ -226,6 +233,9 @@ module Name : sig
 
     val extract_curry_info : t -> (HackClassName.t * string) option
     (** See {!HackClassName.extract_curry_info} *)
+
+    val is_HH_classname : t -> bool
+    (** Check return true if the typename is [HH::classname] *)
   end
 
   module Java : sig
@@ -345,6 +355,8 @@ val is_shared_pointer : t -> bool
 val is_folly_coro : t -> bool
 
 val is_thrift_field_ref : t -> bool
+
+val is_thrift_field_ref_str : string -> bool
 
 val is_pointer_to_void : t -> bool
 

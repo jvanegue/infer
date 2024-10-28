@@ -7,165 +7,250 @@
 open! IStd
 module F = Format
 module L = Logging
-module Debug = PyDebug
-module Builtin = PyBuiltin
-module SMap = PyCommon.SMap
-module SSet = PyCommon.SSet
-module IMap = PyCommon.IMap
+module IMap = IInt.Map
 
-module Const = struct
-  (** This module is a small layer above [FFI.Constant]. It turns all "byte" strings into strings,
-      and the tuples from array to list.
-
-      TODO: Maybe merge it with FFI.Constant.t *)
-
-  type t =
-    | Int of Z.t
-    | Bool of bool
-    | Float of float
-    | Complex of {real: float; imag: float}
-    | String of string
-    | InvalidUnicode of int array
-    | Tuple of t list
-    | FrozenSet of t list
-    | Code of FFI.Code.t
-    | Null
-  [@@deriving compare]
-
-  let rec pp fmt = function
-    | Int z ->
-        F.pp_print_string fmt (Z.to_string z)
-    | Bool b ->
-        Bool.pp fmt b
-    | Float f ->
-        Float.pp fmt f
-    | Complex {real; imag} ->
-        F.fprintf fmt "(%f + %fj)" real imag
-    | String s ->
-        String.pp fmt s
-    | InvalidUnicode b ->
-        F.fprintf fmt "$InvalidUnicode[%a]" (Pp.seq ~sep:" " F.pp_print_int) (Array.to_list b)
-    | Null ->
-        F.pp_print_string fmt "None"
-    | Tuple tuple ->
-        F.fprintf fmt "(@[%a@])" (Pp.seq ~sep:", " pp) tuple
-    | FrozenSet set ->
-        F.fprintf fmt "$frozenset({@[%a@]})" (Pp.seq ~sep:", " pp) set
-    | Code {FFI.Code.co_name; co_freevars; co_cellvars} ->
-        let sz = Array.length co_freevars + Array.length co_cellvars in
-        let maybe_closure = sz <> 0 in
-        F.fprintf fmt "Code(%s, %b)" co_name maybe_closure
+let remove_angles str =
+  if String.is_prefix str ~prefix:"<" && String.is_suffix str ~suffix:">" then
+    let str = String.sub str ~pos:1 ~len:(String.length str - 2) in
+    "_$" ^ str
+  else str
 
 
-  let rec from_const c =
-    match (c : FFI.Constant.t) with
-    | PYCBool b ->
-        Bool b
-    | PYCInt i ->
-        Int i
-    | PYCFloat f ->
-        Float f
-    | PYCComplex {real; imag} ->
-        Complex {real; imag}
-    | PYCString s ->
-        String s
-    | PYCInvalidUnicode b ->
-        InvalidUnicode b
-    | PYCBytes b ->
-        let s = Bytes.to_string b in
-        String s
-    | PYCNone ->
-        Null
-    | PYCTuple tuple ->
-        let rev_values =
-          Array.fold ~init:[]
-            ~f:(fun consts c ->
-              let c = from_const c in
-              c :: consts )
-            tuple
-        in
-        Tuple (List.rev rev_values)
-    | PYCFrozenSet lst ->
-        let lst = List.map ~f:from_const lst in
-        FrozenSet lst
-    | PYCCode code ->
-        Code code
+module Ident : sig
+  type t [@@deriving equal, compare]
 
+  val mk : string -> t
 
-  let as_name = function String s -> Some s | _ -> None
+  val pp : F.formatter -> t -> unit
 
-  let as_names = function
-    | String s ->
-        Ok [s]
-    | Null ->
-        Ok []
-    | Tuple tuple ->
-        let opt_lst = List.map ~f:as_name tuple in
-        let opt_lst = Option.all opt_lst in
-        Result.of_option ~error:() opt_lst
-    | _ ->
-        Error ()
+  module Special : sig
+    val aiter : t
+
+    val anext : t
+
+    val cause : t
+
+    val enter : t
+
+    val name : t
+
+    val print : t
+  end
+
+  module Hashtbl : Caml.Hashtbl.S with type key = t
+end = struct
+  type t = string [@@deriving equal, compare, hash]
+
+  let pp fmt ident = F.pp_print_string fmt ident
+
+  let mk ident = remove_angles ident
+
+  module Special = struct
+    let aiter = "__aiter__"
+
+    let anext = "__anext__"
+
+    let cause = "__cause__"
+
+    let enter = "__enter__"
+
+    let name = "__name__"
+
+    let print = "print"
+  end
+
+  module Hashtbl = Caml.Hashtbl.Make (struct
+    type nonrec t = t
+
+    let equal = equal
+
+    let hash = hash
+  end)
 end
 
-module ConstMap = Caml.Map.Make (Const)
+module ScopedIdent = struct
+  type scope = Global | Fast | Name [@@deriving equal]
 
-module Ident = struct
-  (** An identifier is a sequence of strings, a qualified name. We only keep track of some shallow
-      source: an identifier can be [Imported], a [Builtin], or a [Normal] identifier otherwise *)
+  type t = {scope: scope; ident: Ident.t} [@@deriving equal]
 
-  type kind = Builtin | Imported | Normal
+  let pp fmt {scope; ident} =
+    match scope with
+    | Global ->
+        F.fprintf fmt "GLOBAL[%a]" Ident.pp ident
+    | Fast ->
+        F.fprintf fmt "LOCAL[%a]" Ident.pp ident
+    | Name ->
+        F.fprintf fmt "TOPLEVEL[%a]" Ident.pp ident
+end
 
-  (* An identifier is never empty, hence the [root] field. Then we mostly add
-     or remove qualifier at the end of the path, so [path] is a reversed list
-     of the attribute access on [root] *)
-  type t = {root: string; path: string list; kind: kind}
+module QualName : sig
+  type t [@@deriving equal]
+
+  val from_qualified_string : sep:char -> string -> t
+
+  val extend : t -> string -> t
+
+  val pp : F.formatter -> t -> unit
+
+  module Map : Caml.Map.S with type key = t
+end = struct
+  type t = {root: string; path: string list} [@@deriving compare, equal]
 
   let pp fmt {root; path} =
     if List.is_empty path then F.pp_print_string fmt root
     else F.fprintf fmt "%s.%a" root (Pp.seq ~sep:"." F.pp_print_string) (List.rev path)
 
 
-  let mk ?(kind = Normal) root = {root; path= []; kind}
-
-  let from_string ?(kind = Normal) ~on s =
-    let l = String.split ~on s in
+  let from_qualified_string ~sep s =
+    let l = String.split ~on:sep s in
     match l with
     | [] ->
-        L.die ExternalError "Ident.from_string with an empty string"
+        L.die ExternalError "QualName.from_qualified_string with an empty string"
     | hd :: tl ->
-        {root= hd; path= List.rev tl; kind}
+        {root= hd; path= List.rev_map ~f:remove_angles tl}
 
 
-  let extend {root; path; kind} attr = {root; path= attr :: path; kind}
-
-  let append {root; path; kind} attrs = {root; path= List.rev_append attrs path; kind}
-
-  let concat {root; path; kind} {root= root2; path= path2} =
-    {root; path= path2 @ (root2 :: path); kind}
+  let extend {root; path} attr =
+    let attr = remove_angles attr in
+    {root; path= attr :: path}
 
 
-  let pop {root; path; kind} = match path with [] -> None | _ :: path -> Some {root; path; kind}
+  module Map = Caml.Map.Make (struct
+    type nonrec t = t
 
-  let length {path} = 1 + List.length path
+    let compare = compare
+  end)
+end
 
-  let root {root; kind} = {root; path= []; kind}
+module NodeName : sig
+  type t [@@deriving equal]
+
+  val mk : offset:int -> string -> t
+
+  val get_offset : t -> int
+
+  val pp : F.formatter -> t -> unit
+
+  module Map : sig
+    include Caml.Map.S with type key = t
+
+    val map_result : f:(key -> 'a -> ('b, 'c) result) -> 'a t -> ('b t, 'c) result
+  end
+end = struct
+  type t = {name: string; offset: int [@compare.ignore] [@equal.ignore]} [@@deriving equal, compare]
+
+  let pp ~debug fmt {name; offset} =
+    if debug then F.fprintf fmt "%s@%d" name offset else F.pp_print_string fmt name
+
+
+  let pp = pp ~debug:false
+
+  let mk ~offset name = {name; offset}
+
+  let get_offset {offset} = offset
+
+  module Map = struct
+    include Caml.Map.Make (struct
+      type nonrec t = t
+
+      let compare = compare
+    end)
+
+    let map_result ~f map =
+      let open IResult.Let_syntax in
+      fold
+        (fun key elt acc ->
+          let* map = acc in
+          let+ elt = f key elt in
+          add key elt map )
+        map (Ok empty)
+  end
 end
 
 module SSA = struct
-  type t = int
+  type t = int [@@deriving equal, hash]
+
+  let id x = x
 
   let pp fmt i = F.fprintf fmt "n%d" i
 
   let next n = 1 + n
+
+  module Hashtbl = Caml.Hashtbl.Make (struct
+    type nonrec t = t
+
+    let equal = equal
+
+    let hash = hash
+  end)
 end
 
-module BuiltinCaller = struct
-  type format_function = Str | Repr | Ascii
+module CompareOp = struct
+  (* Some interesting source of information: https://docs.python.org/3/library/operator.html *)
+  type t = Lt | Le | Eq | Neq | Gt | Ge | In | NotIn | Is | IsNot | Exception | BAD
+  [@@deriving compare, enumerate, equal]
 
-  let show_format_function = function Str -> "str" | Repr -> "repr" | Ascii -> "ascii"
+  let to_string = function
+    | Lt ->
+        "lt"
+    | Le ->
+        "le"
+    | Eq ->
+        "eq"
+    | Neq ->
+        "neq"
+    | Gt ->
+        "gt"
+    | Ge ->
+        "ge"
+    | In ->
+        "in"
+    | NotIn ->
+        "not_in"
+    | Is ->
+        "is"
+    | IsNot ->
+        "is_not"
+    | Exception ->
+        "exception"
+    | BAD ->
+        "bad"
+end
 
-  let show_binary op =
-    match (op : Builtin.binary_op) with
+module UnaryOp = struct
+  type t = Positive | Negative | Not | Invert [@@deriving compare, equal]
+
+  let to_string op =
+    match op with
+    | Positive ->
+        "Positive"
+    | Negative ->
+        "Negative"
+    | Not ->
+        "Not"
+    | Invert ->
+        "Invert"
+end
+
+module BinaryOp = struct
+  type t =
+    | Add
+    | And
+    | FloorDivide
+    | LShift
+    | MatrixMultiply
+    | Modulo
+    | Multiply
+    | Or
+    | Power
+    | RShift
+    | Subtract
+    | TrueDivide
+    | Xor
+  [@@deriving compare, equal]
+
+  let to_string op =
+    match op with
     | Add ->
         "Add"
     | And ->
@@ -192,28 +277,27 @@ module BuiltinCaller = struct
         "TrueDivide"
     | Xor ->
         "Xor"
+end
 
+module FormatFunction = struct
+  type t = Str | Repr | Ascii [@@deriving equal]
 
-  let show_unary op =
-    match (op : Builtin.unary_op) with
-    | Positive ->
-        "Positive"
-    | Negative ->
-        "Negative"
-    | Not ->
-        "Not"
-    | Invert ->
-        "Invert"
+  let to_string = function Str -> "str" | Repr -> "repr" | Ascii -> "ascii"
+end
 
-
+module BuiltinCaller = struct
   type t =
     | BuildClass  (** [LOAD_BUILD_CLASS] *)
+    | BuildConstKeyMap  (** [BUILD_CONST_KEY_MAP] *)
     | Format
-    | FormatFn of format_function
-    | Inplace of Builtin.binary_op
-    | Binary of Builtin.binary_op
-    | Unary of Builtin.unary_op
-    | Compare of Builtin.Compare.t
+    | FormatFn of FormatFunction.t
+    | CallFunctionEx  (** [CALL_FUNCTION_EX] *)
+    | Inplace of BinaryOp.t
+    | ImportStar
+    | Binary of BinaryOp.t
+    | Unary of UnaryOp.t
+    | Compare of CompareOp.t
+    | GetAIter  (** [GET_AITER] *)
     | GetIter  (** [GET_ITER] *)
     | NextIter  (** [FOR_ITER] *)
     | HasNextIter  (** [FOR_ITER] *)
@@ -222,32 +306,41 @@ module BuiltinCaller = struct
     | ListAppend  (** [LIST_APPEND] *)
     | SetAdd  (** [SET_ADD] *)
     | DictSetItem  (** [MAP_ADD] *)
-    | Delete  (** [DELETE_FAST] & cie *)
+    | DeleteSubscr
     | YieldFrom  (** [YIELD_FROM] *)
     | GetAwaitable  (** [GET_AWAITABLE] *)
     | UnpackEx  (** [UNPACK_EX] *)
     | GetPreviousException  (** [RAISE_VARARGS] *)
+  [@@deriving equal]
 
   let show = function
     | BuildClass ->
         "$BuildClass"
+    | BuildConstKeyMap ->
+        "$BuildConstKeyMap"
     | Format ->
         "$Format"
     | FormatFn fn ->
-        sprintf "$FormatFn.%s" (show_format_function fn)
+        sprintf "$FormatFn.%s" (FormatFunction.to_string fn)
+    | CallFunctionEx ->
+        "$CallFunctionEx"
+    | ImportStar ->
+        sprintf "$ImportStar"
     | Binary op ->
-        let op = show_binary op in
+        let op = BinaryOp.to_string op in
         sprintf "$Binary.%s" op
     | Inplace op ->
-        let op = show_binary op in
+        let op = BinaryOp.to_string op in
         sprintf "$Inplace.%s" op
     | Unary op ->
-        let op = show_unary op in
+        let op = UnaryOp.to_string op in
         sprintf "$Unary.%s" op
     | Compare op ->
-        sprintf "$Compare.%s" (Builtin.Compare.to_string op)
+        sprintf "$Compare.%s" (CompareOp.to_string op)
     | GetIter ->
         "$GetIter"
+    | GetAIter ->
+        "$GetAIter"
     | NextIter ->
         "$NextIter"
     | HasNextIter ->
@@ -262,8 +355,8 @@ module BuiltinCaller = struct
         "$SetAdd"
     | DictSetItem ->
         "$DictSetItem"
-    | Delete ->
-        "$Delete"
+    | DeleteSubscr ->
+        "$DeleteSubscr"
     | YieldFrom ->
         "$YieldFrom"
     | GetAwaitable ->
@@ -274,31 +367,42 @@ module BuiltinCaller = struct
         "GetPreviousException"
 end
 
+module Const = struct
+  type t =
+    | Bool of bool
+    | Int of Z.t
+    | Float of float
+    | Complex of {real: float; imag: float}
+    | String of string
+    | InvalidUnicode of int array
+    | Bytes of bytes
+    | None
+  [@@deriving equal]
+
+  let pp fmt = function
+    | Bool b ->
+        F.pp_print_bool fmt b
+    | Int i ->
+        F.pp_print_string fmt (Z.to_string i)
+    | Float f ->
+        F.pp_print_float fmt f
+    | Complex {real; imag} ->
+        F.fprintf fmt "Complex[real:%f; imag:%f ]" real imag
+    | String s ->
+        F.fprintf fmt "\"%s\"" s
+    | InvalidUnicode _ ->
+        F.pp_print_string fmt "InvalidUnicode"
+    | Bytes bytes ->
+        Bytes.pp fmt bytes
+    | None ->
+        F.pp_print_string fmt "None"
+end
+
 module Exp = struct
-  type collection = List | Set | Tuple | Slice | Map | String
+  type collection = List | Set | Tuple | Map [@@deriving equal]
 
-  let show_collection = function
-    | List ->
-        "list"
-    | Set ->
-        "set"
-    | Tuple ->
-        "tuple"
-    | Slice ->
-        "slice"
-    | Map ->
-        "map"
-    | String ->
-        "string"
+  let show_collection = function List -> "List" | Set -> "Set" | Tuple -> "Tuple" | Map -> "Map"
   [@@warning "-unused-value-declaration"]
-
-
-  type import_name = {id: Ident.t; fromlist: string list}
-
-  let pp_import_name fmt {id; fromlist} =
-    F.fprintf fmt "$ImportName(%a, from_list= [%a])" Ident.pp id
-      (Pp.seq ~sep:", " F.pp_print_string)
-      fromlist
 
 
   (** An expression is an abstraction of the state of Python bytecode interpreter, waiting to be
@@ -308,143 +412,100 @@ module Exp = struct
       In this IR, name resolution is done so naming is not ambiguous. Also, we have reconstructed
       the CFG of the program, lost during Python compilation *)
   type t =
+    | BuildFrozenSet of t list
+    | BuildSlice of t list (* 2 < length <= 3 *)
+    | BuildString of t list
+    | Collection of {kind: collection; values: t list; unpack: bool}
+        (** Helper for [BUILD_LIST/SET/TUPLE/MAP] opcodes *)
+    (* [unpack=true] if the arguments in [values] are collections that must be
+       unpack and flatten all together to create a unique collection *)
     | Const of Const.t
-    | Var of Ident.t  (** Non ambiguous name for variables, imports, functions, classes, ... *)
-    | LocalVar of string
-    | Temp of SSA.t
-    | Subscript of {exp: t; index: t}  (** foo[bar] *)
-    | Collection of {kind: collection; values: t list; packed: bool}
-        (** Helper for [BUILD_LIST] and other builder opcodes *)
-    (* [packed] is tracking the [BUILD_*_UNPACK] that should be flatten in Pulse *)
-    | ConstMap of t ConstMap.t
     | Function of
-        { qualname: Ident.t
-        ; short_name: string
-        ; code: FFI.Code.t
-        ; default_values: t SMap.t
-        ; annotations: t ConstMap.t }  (** Result of the [MAKE_FUNCTION] opcode *)
-    | Class of t list
-        (** Result of calling [LOAD_BUILD_CLASS] to create a class. Not much is processed of its
-            content for now *)
-    | GetAttr of (t * string) (* foo.bar *)
-    | LoadMethod of (t * string)  (** [LOAD_METHOD] *)
-    | ImportName of import_name  (** [IMPORT_NAME] *)
-    | ImportFrom of {from: import_name; names: Ident.t}  (** [IMPORT_FROM] *)
-    | Ref of string  (** [LOAD_CLOSURE] *)
-    | Deref of Ident.t  (** [LOAD_DEREF] [STORE_DEREF] *)
-    | Not of t
-    | BuiltinCaller of BuiltinCaller.t
-    | ContextManagerExit of t
-    (* TODO: maybe this one is not useful, but at least it is not harmful :)
-       Maybe consider removing it *)
-    | Packed of {exp: t; is_map: bool}
+        { qual_name: QualName.t
+        ; short_name: Ident.t
+        ; default_values: t
+        ; default_values_kw: t
+        ; annotations: t
+        ; cells_for_closure: t }  (** [MAKE_FUNCTION] *)
+    | GetAttr of {exp: t; attr: Ident.t} (* foo.bar *)
+    | ImportFrom of {name: Ident.t; exp: t}
+    | ImportName of {name: Ident.t; fromlist: t; level: t}
+    | LoadClassDeref of {name: Ident.t; slot: int}  (** [LOAD_CLASSDEREF] *)
+    | LoadClosure of {name: Ident.t; slot: int}  (** [LOAD_CLOSURE] *)
+    | LoadDeref of {name: Ident.t; slot: int}  (** [LOAD_DEREF] *)
+    | Subscript of {exp: t; index: t}  (** foo[bar] *)
+    | Temp of SSA.t
+    | Var of ScopedIdent.t
     | Yield of t
+  [@@deriving equal]
 
-  let show = function
-    | Const _ ->
-        "Const"
-    | Var _ ->
-        "Var"
-    | LocalVar _ ->
-        "LocalVar"
-    | Temp _ ->
-        "Temp"
-    | Subscript _ ->
-        "Subscript"
-    | Collection _ ->
-        "Collection"
-    | ConstMap _ ->
-        "ConstMap"
-    | Function _ ->
-        "Function"
-    | Class _ ->
-        "Class"
-    | GetAttr _ ->
-        "GetAttr"
-    | LoadMethod _ ->
-        "LoadMethod"
-    | ImportName _ ->
-        "ImportName"
-    | ImportFrom _ ->
-        "ImportFrom"
-    | Ref _ ->
-        "Ref"
-    | Deref _ ->
-        "Deref"
-    | Not _ ->
-        "Not"
-    | BuiltinCaller _ ->
-        "BuiltinCaller"
-    | ContextManagerExit _ ->
-        "ContextManagerExit"
-    | Packed _ ->
-        "Packed"
-    | Yield _ ->
-        "Yield"
-  [@@warning "-unused-value-declaration"]
+  type opstack_symbol =
+    | Exp of t
+    | Code of FFI.Code.t
+    | LoadMethod of (t * Ident.t)  (** [LOAD_METHOD] *)
+    | BuiltinCaller of BuiltinCaller.t
+    | CallFinallyReturn of {offset: int}
+    | ContextManagerExit of t
+  [@@deriving equal]
 
+  let none = Const Const.None
+
+  let of_int i = Const (Int (Z.of_int i))
 
   let rec pp fmt = function
     | Const c ->
         Const.pp fmt c
-    | Var id ->
-        Ident.pp fmt id
-    | LocalVar s ->
-        F.pp_print_string fmt s
+    | Var scope_ident ->
+        ScopedIdent.pp fmt scope_ident
     | Temp i ->
         SSA.pp fmt i
+    | ImportFrom {name; exp} ->
+        F.fprintf fmt "$ImportFrom(%a, %a)" Ident.pp name pp exp
+    | ImportName {name; fromlist; level} ->
+        F.fprintf fmt "$ImportName(%a, %a, %a)" Ident.pp name pp fromlist pp level
     | Subscript {exp; index} ->
         F.fprintf fmt "%a[@[%a@]]" pp exp pp index
-    | Collection {kind; values; packed} -> (
-        let packed = if packed then "(packed)" else "" in
-        match kind with
-        | List ->
-            F.fprintf fmt "%s[@[%a@]]" packed (Pp.seq ~sep:", " pp) values
-        | Set ->
-            F.fprintf fmt "%s{@[%a@]}" packed (Pp.seq ~sep:", " pp) values
-        | Map ->
-            F.fprintf fmt "%s{|@[%a@]|}" packed (Pp.seq ~sep:", " pp) values
-        | Tuple ->
-            F.fprintf fmt "%s(@[%a@])" packed (Pp.seq ~sep:", " pp) values
-        | String ->
-            F.fprintf fmt "$Concat%s(%a)" packed (Pp.seq ~sep:", " pp) values
-        | Slice ->
-            F.fprintf fmt "%s[@[%a@]]" packed (Pp.seq ~sep:":" pp) values )
-    | ConstMap map ->
-        F.fprintf fmt "{@[" ;
-        ConstMap.iter (fun key exp -> F.fprintf fmt "%a: %a, " Const.pp key pp exp) map ;
-        F.fprintf fmt "@]}"
-    | Function {qualname; short_name; default_values} ->
-        F.fprintf fmt "$FuncObj(%s, %a, {" short_name Ident.pp qualname ;
-        SMap.iter (fun key value -> F.fprintf fmt "(%s, %a); " key pp value) default_values ;
-        F.pp_print_string fmt "})"
-    | Class cls ->
-        F.fprintf fmt "$ClassObj(%a)" (Pp.seq ~sep:", " pp) cls
-    | GetAttr (t, name) ->
-        F.fprintf fmt "%a.%s" pp t name
-    | LoadMethod (self, meth) ->
-        F.fprintf fmt "$LoadMethod(%a, %s)" pp self meth
-    | ImportName import_name ->
-        pp_import_name fmt import_name
-    | ImportFrom {from; names} ->
-        F.fprintf fmt "$ImportFrom(%a,@ name= %a)" pp_import_name from Ident.pp names
-    | Ref s ->
-        F.fprintf fmt "$Ref(%s)" s
-    | Deref id ->
-        F.fprintf fmt "$Deref(%a)" Ident.pp id
-    | Not exp ->
-        F.fprintf fmt "$Not(%a)" pp exp
-    | BuiltinCaller bc ->
-        F.pp_print_string fmt (BuiltinCaller.show bc)
-    | ContextManagerExit exp ->
-        F.fprintf fmt "CM(%a).__exit__" pp exp
-    | Packed {exp; is_map} ->
-        F.fprintf fmt "$Packed%s(%a)" (if is_map then "Map" else "") pp exp
+    | BuildSlice values ->
+        F.fprintf fmt "$BuildSlice(%a)" (Pp.seq ~sep:", " pp) values
+    | BuildString values ->
+        F.fprintf fmt "$BuildString(%a)" (Pp.seq ~sep:", " pp) values
+    | BuildFrozenSet values ->
+        F.fprintf fmt "$BuildFrozenSet(%a)" (Pp.seq ~sep:", " pp) values
+    | Collection {kind; values; unpack} ->
+        F.fprintf fmt "$Build%s%s(%a)" (show_collection kind)
+          (if unpack then "Unpack" else "")
+          (Pp.seq ~sep:", " pp) values
+    | GetAttr {exp; attr} ->
+        F.fprintf fmt "%a.%a" pp exp Ident.pp attr
+    | LoadClosure {name; slot} ->
+        F.fprintf fmt "$LoadClosure(%d,\"%a\")" slot Ident.pp name
+    | LoadDeref {name; slot} ->
+        F.fprintf fmt "$LoadDeref(%d,\"%a\")" slot Ident.pp name
+    | LoadClassDeref {name; slot} ->
+        F.fprintf fmt "$LoadClassDeref(%d,\"%a\")" slot Ident.pp name
+    | Function
+        {qual_name; short_name; default_values; default_values_kw; annotations; cells_for_closure}
+      ->
+        F.fprintf fmt "$MakeFunction[\"%a\", \"%a\", %a, %a, %a, %a]" Ident.pp short_name
+          QualName.pp qual_name pp default_values pp default_values_kw pp annotations pp
+          cells_for_closure
     | Yield exp ->
         F.fprintf fmt "$Yield(%a)" pp exp
 
 
-  let as_short_string = function Const (String s) -> Some s | _ -> None
+  let pp_opstack_symbol fmt = function
+    | Exp exp ->
+        pp fmt exp
+    | Code {FFI.Code.co_name} ->
+        F.fprintf fmt "<%s>" co_name
+    | LoadMethod (self, meth) ->
+        F.fprintf fmt "$LoadMethod(%a, %a)" pp self Ident.pp meth
+    | BuiltinCaller bc ->
+        F.fprintf fmt "BUILTIN_CALLER(%s)" (BuiltinCaller.show bc)
+    | ContextManagerExit exp ->
+        F.fprintf fmt "CM(%a).__exit__" pp exp
+    | CallFinallyReturn {offset} ->
+        F.fprintf fmt "CFR(%d)" offset
 end
 
 module Location = struct
@@ -460,34 +521,29 @@ module Location = struct
   let of_instructions = function instr :: _ -> of_instruction instr | [] -> None
 
   let of_code {FFI.Code.instructions} = of_instructions instructions
+
+  let line x = x
 end
 
 module Error = struct
   type kind =
     | EmptyStack of string
     | UnsupportedOpcode of string
-    | MakeFunction of string * Exp.t
-    | BuildConstKeyMapLength of int * int
-    | BuildConstKeyMapKeys of Exp.t
-    | LoadBuildClass of Exp.t list
-    | LoadBuildClassName of Exp.t
-    | ImportNameFromList of (string * Exp.t)
-    | ImportNameLevel of (string * Exp.t)
-    | ImportNameLevelOverflow of (string * Z.t)
-    | ImportNameDepth of (Ident.t * int)
-    | ImportFrom of (string * Exp.t)
+    | MakeFunction of string * Exp.opstack_symbol
+    | LoadMethodExpected of Exp.opstack_symbol
     | CompareOp of int
+    | CodeWithoutQualifiedName of FFI.Code.t
+    | IllFormedOpstack of int
     | UnpackSequence of int
-    | FormatValueSpec of Exp.t
+    | UnexpectedExpression of Exp.opstack_symbol
+    | FixpointComputationHeaderReachedTwice of int
+    | FixpointComputationNotReached of {src: int; dest: int}
     | NextOffsetMissing
-    | MissingBackEdge of int * int
-    | InvalidBackEdgeArity of (string * int * int)
-    | CallKeywordNotString0 of Const.t
-    | CallKeywordNotString1 of Exp.t
-    | MakeFunctionInvalidDefaults of Exp.t
-    | WithCleanupFinish of Exp.t
-    | RaiseException of int
+    | MissingNodeInformation of int
+    | WithCleanupStart of Exp.opstack_symbol
+    | WithCleanupFinish of Exp.opstack_symbol
     | RaiseExceptionInvalid of int
+    | SubroutineEmptyStack of int
 
   type t = L.error * Location.t * kind
 
@@ -497,124 +553,119 @@ module Error = struct
     | UnsupportedOpcode s ->
         F.fprintf fmt "Unsupported opcode: %s" s
     | MakeFunction (kind, exp) ->
-        F.fprintf fmt "MAKE_FUNCTION: expected %s but got %a" kind Exp.pp exp
-    | BuildConstKeyMapLength (m, n) ->
-        F.fprintf fmt "BUILD_CONST_KEY_MAP: expected %d keys but got %d" m n
-    | BuildConstKeyMapKeys exp ->
-        F.fprintf fmt "BUILD_CONST_KEY_MAP: expect constant set of keys but got %a" Exp.pp exp
-    | LoadBuildClass args ->
-        F.fprintf fmt "LOAD_BUILD_CLASS: not enough arguments. Got %a" (Pp.seq ~sep:", " Exp.pp)
-          args
-    | LoadBuildClassName arg ->
-        F.fprintf fmt "LOAD_BUILD_CLASS: expected a name, but got %a" Exp.pp arg
-    | ImportNameFromList (name, args) ->
-        F.fprintf fmt "IMPORT_NAME(%s): expected constant fromlist but got %a" name Exp.pp args
-    | ImportNameLevel (name, arg) ->
-        F.fprintf fmt "IMPORT_NAME(%s): expected int but got %a" name Exp.pp arg
-    | ImportNameLevelOverflow (name, level) ->
-        F.fprintf fmt "IMPORT_NAME(%s): level is too big: %s" name (Z.to_string level)
-    | ImportNameDepth (module_name, depth) ->
-        F.fprintf fmt
-          "IMPORT_NAME: module path %a is not deep enough for relative import with level %d"
-          Ident.pp module_name depth
-    | ImportFrom (name, from) ->
-        F.fprintf fmt "IMPORT_FROM(%s): expected an `import` but got %a" name Exp.pp from
+        F.fprintf fmt "MAKE_FUNCTION: expected %s but got %a" kind Exp.pp_opstack_symbol exp
     | CompareOp n ->
         F.fprintf fmt "COMPARE_OP(%d): invalid operation" n
+    | CodeWithoutQualifiedName {FFI.Code.co_name; co_firstlineno; co_filename} ->
+        F.fprintf fmt "Unknown code object: %s, at line %d, in %s" co_name co_firstlineno
+          co_filename
+    | IllFormedOpstack offset ->
+        F.fprintf fmt "bad operand stack: offset %d is reachable with two stacks of different sizes"
+          offset
     | UnpackSequence n ->
         F.fprintf fmt "UNPACK_SEQUENCE: invalid count %d" n
-    | FormatValueSpec exp ->
-        F.fprintf fmt "FORMAT_VALUE: expected string literal or temporary, got %a" Exp.pp exp
+    | UnexpectedExpression exp ->
+        F.fprintf fmt "UNEXPECTED_EXPRESSION: %a" Exp.pp_opstack_symbol exp
+    | FixpointComputationHeaderReachedTwice offset ->
+        F.fprintf fmt "FIXPOINT_COMPUTATION: loop header %d is already assigned a symbolic stack"
+          offset
+    | FixpointComputationNotReached {src; dest} ->
+        F.fprintf fmt
+          "FIXPOINT_COMPUTATION: loop header invariant at %d is not compatible with stack obtained \
+           at predecessor %d"
+          dest src
+    | LoadMethodExpected exp ->
+        F.fprintf fmt "LOAD_METHOD_EXPECTED: expected a LOAD_METHOD result but got %a"
+          Exp.pp_opstack_symbol exp
     | NextOffsetMissing ->
         F.fprintf fmt "Jump to next instruction detected, but next instruction is missing"
-    | MissingBackEdge (from, to_) ->
-        F.fprintf fmt "Invalid absolute jump: missing target of back-edge from %d to %d" from to_
-    | InvalidBackEdgeArity (name, expect, actual) ->
-        F.fprintf fmt "Invalid backedge to #%s with arity mismatch (expecting %d but got %d)" name
-          expect actual
-    | CallKeywordNotString0 cst ->
-        F.fprintf fmt "CALL_FUNCTION_KW: keyword is not a string: %a" Const.pp cst
-    | CallKeywordNotString1 exp ->
-        F.fprintf fmt "CALL_FUNCTION_KW: keyword is not a tuple of strings: %a" Exp.pp exp
-    | MakeFunctionInvalidDefaults exp ->
-        F.fprintf fmt "MAKE_FUNCTION: expecting tuple of default values but got %a" Exp.pp exp
+    | MissingNodeInformation offset ->
+        F.fprintf fmt "No information about offset %d" offset
+    | WithCleanupStart exp ->
+        F.fprintf fmt "WITH_CLEANUP_START/TODO: unsupported scenario with %a" Exp.pp_opstack_symbol
+          exp
     | WithCleanupFinish exp ->
-        F.fprintf fmt "WITH_CLEANUP_FINISH/TODO: unsupported scenario with %a" Exp.pp exp
-    | RaiseException n ->
-        F.fprintf fmt "RAISE_VARARGS/TODO: Unsupported argc = %d" n
+        F.fprintf fmt "WITH_CLEANUP_FINISH/TODO: unsupported scenario with %a" Exp.pp_opstack_symbol
+          exp
     | RaiseExceptionInvalid n ->
         F.fprintf fmt "RAISE_VARARGS: Invalid mode %d" n
+    | SubroutineEmptyStack offset ->
+        F.fprintf fmt "SUBROUTINE_EMPTY_STACK: Invalid subroutine call stack at offset %d" offset
 end
 
+type 'a pyresult = ('a, Error.t) result
+
 module Stmt = struct
-  (** Statements are an extension of Textual's statements: we still keep some specific Python
-      behavior around, like the difference between [CALL_FUNCTION] and [CALL_METHOD] *)
-  type call_arg = {name: string option; value: Exp.t}
+  let pp_call_arg fmt value = Exp.pp fmt value
 
-  let pp_call_arg fmt {name; value} =
-    match name with
-    | None ->
-        Exp.pp fmt value
-    | Some name ->
-        F.fprintf fmt "%s= %a" name Exp.pp value
-
-
-  let unnamed_call_arg value = {name= None; value}
+  let unnamed_call_arg value = value
 
   let unnamed_call_args args = List.map ~f:unnamed_call_arg args
 
   type t =
-    | Assign of {lhs: Exp.t; rhs: Exp.t}
-    | Call of {lhs: SSA.t; exp: Exp.t; args: call_arg list; packed: bool}
-    | CallMethod of {lhs: SSA.t; call: Exp.t; args: Exp.t list}
-    | ImportName of Exp.import_name
-    | BuiltinCall of {lhs: SSA.t; call: BuiltinCaller.t; args: Exp.t list}
+    | Let of {lhs: SSA.t; rhs: Exp.t}
+    | SetAttr of {lhs: Exp.t; attr: Ident.t; rhs: Exp.t}
+    | Store of {lhs: ScopedIdent.t; rhs: Exp.t}
+    | StoreSubscript of {lhs: Exp.t; index: Exp.t; rhs: Exp.t}
+    | Call of {lhs: SSA.t; exp: Exp.t; args: Exp.t list; arg_names: Exp.t}
+    | CallMethod of
+        {lhs: SSA.t; name: Ident.t; self_if_needed: Exp.t; args: Exp.t list; arg_names: Exp.t}
+    | BuiltinCall of {lhs: SSA.t; call: BuiltinCaller.t; args: Exp.t list; arg_names: Exp.t}
+    | StoreDeref of {name: Ident.t; slot: int; rhs: Exp.t}  (** [STORE_DEREF] *)
+    | Delete of ScopedIdent.t  (** [DELETE_FAST] & cie *)
+    | DeleteDeref of {name: Ident.t; slot: int}  (** [DELETE_DEREF] *)
+    | DeleteAttr of {exp: Exp.t; attr: Ident.t}
     | SetupAnnotations
 
   let pp fmt = function
-    | Assign {lhs; rhs} ->
-        F.fprintf fmt "%a <- %a" Exp.pp lhs Exp.pp rhs
-    | Call {lhs; exp; args; packed} ->
-        F.fprintf fmt "%a <- %a(@[%a@])%s" SSA.pp lhs Exp.pp exp (Pp.seq ~sep:", " pp_call_arg) args
-          (if packed then " !packed" else "")
-    | CallMethod {lhs; call; args} ->
-        F.fprintf fmt "%a <- $CallMethod(%a, @[%a@])" SSA.pp lhs Exp.pp call
-          (Pp.seq ~sep:", " Exp.pp) args
-    | ImportName import_name ->
-        Exp.pp_import_name fmt import_name
-    | BuiltinCall {lhs; call; args} ->
+    | Let {lhs; rhs} ->
+        F.fprintf fmt "%a <- %a" SSA.pp lhs Exp.pp rhs
+    | SetAttr {lhs; attr; rhs} ->
+        F.fprintf fmt "%a.%a <- %a" Exp.pp lhs Ident.pp attr Exp.pp rhs
+    | Store {lhs; rhs} ->
+        F.fprintf fmt "%a <- %a" ScopedIdent.pp lhs Exp.pp rhs
+    | StoreSubscript {lhs; index; rhs} ->
+        F.fprintf fmt "%a[%a] <- %a" Exp.pp lhs Exp.pp index Exp.pp rhs
+    | Call {lhs; exp; args; arg_names} ->
+        F.fprintf fmt "%a <- $Call(@[%a@])" SSA.pp lhs (Pp.seq ~sep:", " pp_call_arg)
+          ((exp :: args) @ [arg_names])
+    | CallMethod {lhs; name; self_if_needed; args; arg_names} ->
+        F.fprintf fmt "%a <- $CallMethod[%a](@[%a@])" SSA.pp lhs Ident.pp name
+          (Pp.seq ~sep:", " Exp.pp)
+          ((self_if_needed :: args) @ [arg_names])
+    | BuiltinCall {lhs; call; args; arg_names} ->
         F.fprintf fmt "%a <- %s(@[%a@])" SSA.pp lhs (BuiltinCaller.show call)
-          (Pp.seq ~sep:", " Exp.pp) args
+          (Pp.seq ~sep:", " pp_call_arg) (args @ [arg_names])
+    | StoreDeref {name; slot; rhs} ->
+        F.fprintf fmt "$StoreDeref(%d,\"%a\", %a)" slot Ident.pp name Exp.pp rhs
+    | Delete ident ->
+        F.fprintf fmt "$Delete(%a)" ScopedIdent.pp ident
+    | DeleteDeref {name; slot} ->
+        F.fprintf fmt "$DeleteDeref[%d,\"%a\")" slot Ident.pp name
+    | DeleteAttr {exp; attr} ->
+        F.fprintf fmt "$DeleteAttr(%a, %a)" Exp.pp exp Ident.pp attr
     | SetupAnnotations ->
         F.pp_print_string fmt "$SETUP_ANNOTATIONS"
 end
 
+let cast_exp ~loc = function
+  | Exp.Exp exp ->
+      Ok exp
+  | exp ->
+      Error (L.InternalError, loc, Error.UnexpectedExpression exp)
+
+
+let cast_exps ~loc exps =
+  let open IResult.Let_syntax in
+  List.fold_result (List.rev exps) ~init:[] ~f:(fun l exp ->
+      let+ exp = cast_exp ~loc exp in
+      exp :: l )
+
+
 module Offset = struct
   type t = int
 
-  let pp fmt n = F.pp_print_int fmt n
-
-  let of_code instructions =
-    match instructions with FFI.Instruction.{offset} :: _ -> Some offset | _ -> None
-
-
   let get ~loc opt = Result.of_option ~error:(L.InternalError, loc, Error.NextOffsetMissing) opt
-end
-
-module Block = struct
-  (** The Python interpreter keeps a stack of "blocks" to store information about finally and except
-      handlers *)
-  type block_type = Normal | Except | Finally
-
-  let show_block_type = function Normal -> "N" | Except -> "E" | Finally -> "F"
-
-  type t = {block_type: block_type}
-
-  let show {block_type} = show_block_type block_type
-
-  let mk block_type = {block_type}
-
-  let is_except {block_type} = match block_type with Except -> true | _ -> false
 end
 
 module Stack = struct
@@ -633,358 +684,277 @@ module Stack = struct
         None
     | elt :: rest ->
         if Int.equal 0 n then Some elt else peek (n - 1) rest
+
+
+  let pp ~pp fmt list = F.fprintf fmt "[%a]" (Pp.semicolon_seq pp) (List.rev list)
+  [@@warning "-unused-value-declaration"]
 end
 
-module Label = struct
-  type name = string
+module TerminatorBuilder = struct
+  (** This is a terminator in a tempory state. We will cast the [ssa_args] when finalizing the
+      consrtruction *)
+  type node_call = {label: NodeName.t; ssa_args: Exp.opstack_symbol list}
 
-  let pp_name fmt name = F.pp_print_string fmt name
-
-  type handler_type = Label | Finally | Except
-
-  let pp_handler_type fmt = function
-    | Label ->
-        F.pp_print_string fmt ".label"
-    | Finally ->
-        F.pp_print_string fmt ".finally"
-    | Except ->
-        F.pp_print_string fmt ".except"
+  let pp_node_call fmt {label; ssa_args} =
+    NodeName.pp fmt label ;
+    if not (List.is_empty ssa_args) then
+      F.fprintf fmt "(@[%a@])" (Pp.seq ~sep:", " Exp.pp_opstack_symbol) ssa_args
 
 
-  (** A label is a position in the bytecode where the control-flow can jump. Think "if/then/else",
-      loops, ... Some Python opcode are quite involved in how the stack might be modified during
-      jumps. For example, [FOR_ITER] might leave a value on the stack at all time, popping it only
-      on exit.
-
-      To account for such complex scenario, each label has a [prelude] to modify the stack and the
-      state in non-trivial ways. To avoid a full-recursive type definition between [State] and
-      [Label], we generalize [prelude] to be ['a -> 'a] and we'll instantiate it with [State.t]
-      later on *)
-  type 'a t =
-    { name: name
-    ; ssa_parameters: SSA.t list
-    ; processed: bool
-    ; handler_type: handler_type
-    ; block_stack: Block.t Stack.t
-    ; prelude: ('a t -> 'a -> 'a) option }
-
-  let pp fmt {name; ssa_parameters; handler_type} =
-    F.fprintf fmt "#%s" name ;
-    if not (List.is_empty ssa_parameters) then
-      F.fprintf fmt "(%a)" (Pp.seq ~sep:", " SSA.pp) ssa_parameters ;
-    F.fprintf fmt " %a" pp_handler_type handler_type
-
-
-  let mk ?(handler_type = Label) ?prelude name ssa_parameters block_stack =
-    {name; ssa_parameters; processed= false; handler_type; prelude; block_stack}
-
-
-  let is_processed {processed} = processed
-
-  let is_except {handler_type} = match handler_type with Except -> true | _ -> false
-
-  let process label ssa_parameters = {label with processed= true; ssa_parameters}
-
-  let set_handler_type label handler_type = {label with handler_type}
-
-  let set_last_block_type ({block_stack} as label) handler_type =
-    let block_stack =
-      match Stack.pop block_stack with
-      | None ->
-          block_stack
-      | Some (_, block_stack) ->
-          Stack.push block_stack (Block.mk handler_type)
-    in
-    {label with block_stack}
-end
-
-module Jump = struct
-  type 'a info = {label: 'a Label.t; offset: Offset.t; ssa_args: Exp.t list}
-
-  let pp_info fmt {label; offset; ssa_args} =
-    F.fprintf fmt "JumpInfo(%a, %a, %d)" Label.pp label Offset.pp offset (List.length ssa_args)
-
-
-  type 'a t =
-    | Absolute of 'a info
-    | Label of 'a info
+  type t =
     | Return of Exp.t
-    | TwoWay of {condition: Exp.t; next_info: 'a info; other_info: 'a info}
+    | Jump of node_call
+    | If of {exp: Exp.t; then_: node_call; else_: node_call}
     | Throw of Exp.t
 
+  let mk_node_call label exps = {label; ssa_args= List.rev exps}
+
+  let mk_jump label exps = Jump (mk_node_call label exps)
+
   let pp fmt = function
-    | Absolute info ->
-        F.fprintf fmt "Absolute(%a)" pp_info info
-    | Label info ->
-        F.fprintf fmt "Label(%a)" pp_info info
-    | Return ret ->
-        F.fprintf fmt "Return(%a)" Exp.pp ret
-    | TwoWay {condition; next_info; other_info} ->
-        F.fprintf fmt "TwoWay(%a, %a, %a)" Exp.pp condition pp_info next_info pp_info other_info
+    | Return exp ->
+        F.fprintf fmt "return %a" Exp.pp exp
+    | Jump node_call ->
+        F.fprintf fmt "jmp %a" pp_node_call node_call
+    | If {exp; then_; else_} ->
+        F.fprintf fmt "if %a then jmp %a else jmp %a" Exp.pp exp pp_node_call then_ pp_node_call
+          else_
     | Throw exp ->
-        F.fprintf fmt "Throw(%a)" Exp.pp exp
+        F.fprintf fmt "throw %a" Exp.pp exp
   [@@warning "-unused-value-declaration"]
 end
 
 module Terminator = struct
-  type node_call = {label: Label.name; ssa_args: Exp.t list}
+  type node_call = {label: NodeName.t; ssa_args: Exp.t list}
 
   let pp_node_call fmt {label; ssa_args} =
-    Label.pp_name fmt label ;
+    NodeName.pp fmt label ;
     if not (List.is_empty ssa_args) then F.fprintf fmt "(@[%a@])" (Pp.seq ~sep:", " Exp.pp) ssa_args
 
 
   type t =
     | Return of Exp.t
-    | Jump of node_call list  (** non empty list *)
-    | If of {exp: Exp.t; then_: t; else_: t}
+    | Jump of node_call
+    | If of {exp: Exp.t; then_: node_call; else_: node_call}
     | Throw of Exp.t
 
-  let rec pp fmt = function
+  let pp fmt = function
     | Return exp ->
         F.fprintf fmt "return %a" Exp.pp exp
-    | Jump lst ->
-        F.fprintf fmt "jmp %a" (Pp.seq ~sep:", " pp_node_call) lst
+    | Jump node_call ->
+        F.fprintf fmt "jmp %a" pp_node_call node_call
     | If {exp; then_; else_} ->
-        F.fprintf fmt "if %a then @[%a@] else @[%a@]" Exp.pp exp pp then_ pp else_
+        F.fprintf fmt "if %a then jmp %a else jmp %a" Exp.pp exp pp_node_call then_ pp_node_call
+          else_
     | Throw exp ->
         F.fprintf fmt "throw %a" Exp.pp exp
 
 
-  let of_jump jump_info =
-    let node_info {Jump.label; ssa_args} =
-      let {Label.name} = label in
-      {label= name; ssa_args}
-    in
-    let jmp node = Jump [node_info node] in
-    match jump_info with
-    | `OneTarget info ->
-        jmp info
-    | `TwoTargets (exp, then_, else_) ->
-        let then_ = jmp then_ in
-        let else_ = jmp else_ in
+  let cast_node_call ~loc {TerminatorBuilder.label; ssa_args} =
+    let open IResult.Let_syntax in
+    let+ ssa_args = cast_exps ~loc ssa_args in
+    {label; ssa_args}
+
+
+  let of_builder ~loc terminator =
+    let open IResult.Let_syntax in
+    match (terminator : TerminatorBuilder.t) with
+    | Return exp ->
+        Ok (Return exp)
+    | Jump node_call ->
+        let+ node_call = cast_node_call ~loc node_call in
+        Jump node_call
+    | If {exp; then_; else_} ->
+        let* then_ = cast_node_call ~loc then_ in
+        let+ else_ = cast_node_call ~loc else_ in
         If {exp; then_; else_}
-end
-
-module CFG = struct
-  type 'a t = {labels: 'a Label.t IMap.t; fresh_label: int}
-
-  let empty = {labels= IMap.empty; fresh_label= 0}
-
-  let fresh_label ({fresh_label} as cfg) =
-    let fresh = sprintf "b%d" fresh_label in
-    let cfg = {cfg with fresh_label= fresh_label + 1} in
-    (fresh, cfg)
-
-
-  let lookup_label {labels} offset = IMap.find_opt offset labels
-
-  let process_label ({labels} as cfg) offset ssa_parameters =
-    match IMap.find_opt offset labels with
-    | None ->
-        cfg
-    | Some label ->
-        let label = Label.process label ssa_parameters in
-        let labels = IMap.add offset label labels in
-        {cfg with labels}
-
-
-  let set_handler_type ({labels} as cfg) offset handler_type =
-    match IMap.find_opt offset labels with
-    | None ->
-        cfg
-    | Some label ->
-        let label = Label.set_handler_type label handler_type in
-        let labels = IMap.add offset label labels in
-        {cfg with labels}
-
-
-  let set_last_block_type ({labels} as cfg) offset handler_type =
-    match IMap.find_opt offset labels with
-    | None ->
-        (None, cfg)
-    | Some label ->
-        let label = Label.set_last_block_type label handler_type in
-        let labels = IMap.add offset label labels in
-        (Some label, {cfg with labels})
-
-
-  (** Helper to fetch label info if there's already one registered at the specified [offset], or
-      create a fresh one. *)
-  let get_label cfg ?prelude ?handler_type offset ~ssa_parameters block_stack =
-    match lookup_label cfg offset with
-    | Some label ->
-        (false, label, cfg)
-    | None ->
-        let name, cfg = fresh_label cfg in
-        let label = Label.mk name ?prelude ?handler_type ssa_parameters block_stack in
-        (true, label, cfg)
-
-
-  let register_label ({labels} as cfg) ~offset label =
-    let labels = IMap.add offset label labels in
-    {cfg with labels}
+    | Throw exp ->
+        Ok (Throw exp)
 end
 
 module Node = struct
-  (** Linear block of code, without any jump. Starts with a label definition and ends with a
-      terminator (jump, return, ...) *)
-  type 'a t =
-    { label: 'a Label.t
-    ; label_loc: Location.t
+  type t =
+    { name: NodeName.t
+    ; first_loc: Location.t
     ; last_loc: Location.t
+    ; ssa_parameters: SSA.t list
     ; stmts: (Location.t * Stmt.t) list
     ; last: Terminator.t }
 
-  let pp fmt {label; stmts; last} =
-    F.fprintf fmt "@[<hv2>%a:@\n" Label.pp label ;
+  let pp fmt {name; ssa_parameters; stmts; last} =
+    F.fprintf fmt "@[<hv2>%a%t:@\n" NodeName.pp name (fun fmt ->
+        if List.is_empty ssa_parameters then F.pp_print_string fmt ""
+        else F.fprintf fmt "(%a)" (Pp.seq ~sep:", " SSA.pp) ssa_parameters ) ;
     List.iter stmts ~f:(fun (_, stmt) -> F.fprintf fmt "@[<hv2>%a@]@\n" Stmt.pp stmt) ;
     F.fprintf fmt "%a@\n" Terminator.pp last ;
     F.fprintf fmt "@]@\n"
 end
 
-module State = struct
-  (*
-  (** Bytecode offset of except/finally handlers *)
-  type exn_handler = {offset: int}
-     *)
+module CFGBuilder = struct
+  (** For each (node, terminator) pair, the terminator node.last is not finalized yet, terminator is
+      the ground truth instead *)
+  type t = {nodes: (Node.t * TerminatorBuilder.t) NodeName.Map.t; fresh_label: int}
 
+  let fresh_start = 0
+
+  let empty = {nodes= NodeName.Map.empty; fresh_label= fresh_start}
+
+  let label_of_int i = sprintf "b%d" i
+
+  let fresh_node_name ({fresh_label} as cfg) offset =
+    let fresh = label_of_int fresh_label in
+    let cfg = {cfg with fresh_label= fresh_label + 1} in
+    (NodeName.mk fresh ~offset, cfg)
+
+
+  let add name ~first_loc ~last_loc ssa_parameters stmts last {nodes; fresh_label} =
+    let node = {Node.name; first_loc; last_loc; ssa_parameters; stmts; last= Return Exp.none} in
+    {nodes= NodeName.Map.add name (node, last) nodes; fresh_label}
+end
+
+module CodeInfo = struct
+  type t =
+    { (* see https://docs.python.org/3.8/reference/datamodel.html#index-55 *)
+      co_name: Ident.t
+    ; co_nlocals: int
+    ; co_argcount: int
+    ; co_posonlyargcount: int
+    ; co_kwonlyargcount: int
+    ; co_cellvars: Ident.t array
+    ; co_freevars: Ident.t array
+    ; co_names: Ident.t array
+    ; co_varnames: Ident.t array
+    ; has_star_arguments: bool
+    ; has_star_keywords: bool
+    ; is_generator: bool }
+
+  let of_code
+      { FFI.Code.co_name
+      ; co_flags
+      ; co_nlocals
+      ; co_argcount
+      ; co_posonlyargcount
+      ; co_kwonlyargcount
+      ; co_cellvars
+      ; co_freevars
+      ; co_names
+      ; co_varnames } =
+    { co_name= Ident.mk co_name
+    ; has_star_arguments= co_flags land 0x04 <> 0
+    ; has_star_keywords= co_flags land 0x08 <> 0
+    ; is_generator= co_flags land 0x20 <> 0
+    ; co_nlocals
+    ; co_argcount
+    ; co_posonlyargcount
+    ; co_kwonlyargcount
+    ; co_cellvars= Array.map co_cellvars ~f:Ident.mk
+    ; co_freevars= Array.map co_freevars ~f:Ident.mk
+    ; co_names= Array.map co_names ~f:Ident.mk
+    ; co_varnames= Array.map co_varnames ~f:Ident.mk }
+end
+
+module CFG = struct
+  type t = {entry: NodeName.t; nodes: Node.t NodeName.Map.t; code_info: CodeInfo.t}
+
+  let pp ~name fmt {nodes; code_info= {co_varnames; co_argcount}} =
+    F.fprintf fmt "function %s(%a):@\n" name (Pp.seq ~sep:", " Ident.pp)
+      (Array.slice co_varnames 0 co_argcount |> Array.to_list) ;
+    NodeName.Map.iter (fun _ node -> Node.pp fmt node) nodes
+
+
+  let of_builder {CFGBuilder.nodes} code =
+    let open IResult.Let_syntax in
+    let offset = 0 in
+    let entry = CFGBuilder.label_of_int CFGBuilder.fresh_start |> NodeName.mk ~offset in
+    let+ nodes =
+      NodeName.Map.map_result nodes ~f:(fun _name (node, last) ->
+          let loc = node.Node.last_loc in
+          let+ last = Terminator.of_builder ~loc last in
+          {node with Node.last} )
+    in
+    {nodes; entry; code_info= CodeInfo.of_code code}
+end
+
+module State = struct
   (** Internal state of the Bytecode -> IR compiler *)
   type t =
-    { module_name: Ident.t
-    ; debug: bool
+    { debug: bool
+    ; code_qual_name: FFI.Code.t -> QualName.t option
+    ; get_node_name: Offset.t -> NodeName.t pyresult
     ; loc: Location.t
-    ; cfg: t CFG.t
-          (* TODO:
-             ; exn_handlers: exn_handler list
-                   (** Stack of except/finally handlers info. The data we store here will be used (TODO) to
-                       inform Textual about statements that can raise exceptions. *)
-          *)
-    ; global_names: Ident.t SMap.t  (** Translation cache for global names *)
-    ; stack: Exp.t Stack.t
-    ; block_stack: Block.t Stack.t
+    ; cfg: CFGBuilder.t
+    ; stack: Exp.opstack_symbol Stack.t
     ; stmts: (Location.t * Stmt.t) list
-    ; fresh_id: SSA.t
-    ; classes: SSet.t
-    ; functions: Ident.t SMap.t
-    ; names: Ident.t SMap.t  (** Translation cache for local names *) }
+    ; ssa_parameters: SSA.t list
+    ; stack_at_loop_headers: Exp.opstack_symbol Stack.t IMap.t
+    ; fresh_id: SSA.t }
 
-  let known_global_names =
-    let builtins =
-      [ "print"
-      ; "range"
-      ; "open"
-      ; "len"
-      ; "map"
-      ; "frozenset"
-      ; "type"
-      ; "str"
-      ; "int"
-      ; "float"
-      ; "bool"
-      ; "object"
-      ; "super"
-      ; "hasattr"
-      ; "__name__"
-      ; "__file__"
-      ; "AssertionError"
-      ; "AttributeError"
-      ; "KeyError"
-      ; "OverflowError"
-      ; "RuntimeError"
-      ; "ValueError" ]
+  let build_get_node_name loc cfg_skeleton =
+    let map, cfg =
+      IMap.fold
+        (fun offset _ (map, cfg) ->
+          let name, cfg = CFGBuilder.fresh_node_name cfg offset in
+          (IMap.add offset name map, cfg) )
+        cfg_skeleton (IMap.empty, CFGBuilder.empty)
     in
-    List.fold builtins ~init:SMap.empty ~f:(fun names name ->
-        SMap.add name (Ident.mk ~kind:Builtin name) names )
+    let get_node_name offset =
+      match IMap.find_opt offset map with
+      | Some name ->
+          Ok name
+      | None ->
+          Error (L.InternalError, loc, Error.MissingNodeInformation offset)
+    in
+    (cfg, get_node_name)
 
 
-  let known_local_names =
-    let locals = ["__name__"; "staticmethod"; "classmethod"] in
-    List.fold locals ~init:SMap.empty ~f:(fun names name ->
-        SMap.add name (Ident.mk ~kind:Builtin name) names )
-
-
-  let empty ~debug ~loc module_name =
-    let p = if debug then Debug.todo else Debug.p in
-    let block_stack = Stack.push Stack.empty (Block.mk Normal) in
-    p "State.empty@\n" ;
-    { module_name
-    ; debug
+  let empty ~debug ~code_qual_name ~loc ~cfg_skeleton =
+    let cfg, get_node_name = build_get_node_name loc cfg_skeleton in
+    { debug
+    ; code_qual_name
+    ; get_node_name
     ; loc
-    ; cfg= CFG.empty (* ; exn_handlers= [] *)
-    ; global_names= known_global_names
+    ; cfg
     ; stack= Stack.empty
-    ; block_stack
     ; stmts= []
-    ; fresh_id= 0
-    ; classes= SSet.empty
-    ; functions= SMap.empty
-    ; names= known_local_names }
+    ; ssa_parameters= []
+    ; stack_at_loop_headers= IMap.empty
+    ; fresh_id= 0 }
 
 
-  let debug {debug} = if debug then Debug.todo else Debug.p
+  let dummy_formatter = F.make_formatter (fun _ _ _ -> ()) (fun () -> ())
+
+  let debug {debug} =
+    if debug then F.kasprintf (fun s -> F.printf "%s" s) else F.ifprintf dummy_formatter
+
 
   (** Each time a new object is discovered (they can be heavily nested), we need to clear the state
       of temporary data like the SSA counter, but keep other parts of it, like global and local
       names *)
-  let enter {debug; global_names; names} ~loc module_name =
-    let st = empty ~debug ~loc module_name in
-    {st with global_names; names}
+  let enter ~debug:d ~code_qual_name ~loc ~cfg_skeleton qual_name =
+    let st = empty ~debug:d ~code_qual_name ~loc ~cfg_skeleton in
+    Option.iter qual_name ~f:(debug st "Translating %a...@\n" QualName.pp) ;
+    st
 
+
+  let get_node_name {get_node_name} offset = get_node_name offset
 
   let fresh_id ({fresh_id} as st) =
     let st = {st with fresh_id= SSA.next fresh_id} in
     (fresh_id, st)
 
 
-  let is_toplevel {module_name} = Int.equal 1 (Ident.length module_name)
+  let cast_exp st = cast_exp ~loc:st.loc
 
-  let resolve_local_name names global_names name =
-    match SMap.find_opt name names with
-    | Some id ->
-        Some id
-    | None ->
-        SMap.find_opt name global_names
-
-
-  (** Python can look up names in the current namespace, or directly in the global namespace, which
-      is why we keep them separated *)
-  let resolve_name ~global ({names; global_names} as st) name =
-    let global = global || is_toplevel st in
-    debug st "resolve_name global= %b name= %s" global name ;
-    let res =
-      if global then SMap.find_opt name global_names else resolve_local_name names global_names name
-    in
-    match res with
-    | Some id ->
-        debug st " -> %a@\n" Ident.pp id ;
-        id
-    | None ->
-        debug st " -> Not found@\n" ;
-        let prefix = Ident.mk "$unknown" in
-        Ident.extend prefix name
-
-
-  let register_name ~global ({names; global_names} as st) name id =
-    let global = global || is_toplevel st in
-    debug st "register_name global= %b name= %s id= %a@\n" global name Ident.pp id ;
-    if global then
-      let global_names = SMap.add name id global_names in
-      {st with global_names}
-    else
-      let names = SMap.add name id names in
-      {st with names}
-
+  let cast_exps st = cast_exps ~loc:st.loc
 
   let push ({stack} as st) exp =
-    let stack = Stack.push stack exp in
+    let stack = Stack.push stack (Exp.Exp exp) in
     {st with stack}
 
 
-  let push_block ({block_stack} as st) block =
-    debug st "push-block: %s@\n" (Block.show block) ;
-    let block_stack = Stack.push block_stack block in
-    {st with block_stack}
+  let push_symbol ({stack} as st) exp =
+    let stack = Stack.push stack exp in
+    {st with stack}
 
 
   let pop ({stack; loc} as st) =
@@ -996,14 +966,11 @@ module State = struct
         Ok (exp, st)
 
 
-  let pop_block ({block_stack; loc} as st) =
-    match Stack.pop block_stack with
-    | None ->
-        Error (L.InternalError, loc, Error.EmptyStack "pop (block)")
-    | Some (block, block_stack) ->
-        debug st "pop-block: %s@\n" (Block.show block) ;
-        let st = {st with block_stack} in
-        Ok (block, st)
+  let pop_and_cast st =
+    let open IResult.Let_syntax in
+    let* exp, st = pop st in
+    let+ exp = cast_exp st exp in
+    (exp, st)
 
 
   let peek ?(depth = 0) {stack; loc} =
@@ -1014,7 +981,8 @@ module State = struct
         Ok exp
 
 
-  let pop_n st n =
+  let pop_n_and_cast st n =
+    let open IResult.Let_syntax in
     let rec aux acc st n =
       let open IResult.Let_syntax in
       if n > 0 then
@@ -1022,23 +990,105 @@ module State = struct
         aux (hd :: acc) st (n - 1)
       else Ok (acc, st)
     in
-    aux [] st n
+    let* exps, st = aux [] st n in
+    let+ exps = cast_exps st exps in
+    (exps, st)
 
 
   (* TODO: use the [exn_handlers] info to mark statement that can possibly raise * something *)
   let push_stmt ({stmts; loc} as st) stmt = {st with stmts= (loc, stmt) :: stmts}
 
-  let register_class ({classes} as st) cls = {st with classes= SSet.add cls classes}
-
-  let register_function ({functions} as st) name fn = {st with functions= SMap.add name fn functions}
-
   let size {stack} = Stack.size stack
 
-  (** When reaching a jump instruction, turn the stack into ssa variables. We only turn the last
-      block into variables, as the current code shouldn't jump outside of its "block" *)
-  let to_ssa ({stack} as st) =
-    let st = {st with stack= Stack.empty} in
-    Ok (stack, st)
+  let add_new_node ({cfg} as st) name ~first_loc ~last_loc ssa_parameters stmts last =
+    {st with cfg= CFGBuilder.add name ~first_loc ~last_loc ssa_parameters stmts last cfg}
+
+
+  let record_stack_at_loop_header ({loc; stack; stack_at_loop_headers} as st) header_name =
+    let offset = NodeName.get_offset header_name in
+    if IMap.mem offset stack_at_loop_headers then
+      Error (L.InternalError, loc, Error.FixpointComputationHeaderReachedTwice offset)
+    else Ok {st with stack_at_loop_headers= IMap.add offset stack stack_at_loop_headers}
+
+
+  let check_stack_if_at_back_edge {loc; stack; stack_at_loop_headers} src
+      ({TerminatorBuilder.label} as dest_call_node) =
+    let dest = NodeName.get_offset label in
+    if IMap.mem dest stack_at_loop_headers then
+      (* [dest] is a loop header *)
+      if List.equal Exp.equal_opstack_symbol stack (IMap.find dest stack_at_loop_headers) then
+        Ok {TerminatorBuilder.label; ssa_args= []}
+      else Error (L.InternalError, loc, Error.FixpointComputationNotReached {src; dest})
+    else Ok dest_call_node
+
+
+  let check_terminator_if_back_edge st offset terminator =
+    let open IResult.Let_syntax in
+    let src = offset in
+    match (terminator : TerminatorBuilder.t) with
+    | Jump call_node ->
+        let+ new_call_node = check_stack_if_at_back_edge st src call_node in
+        if phys_equal call_node new_call_node then None
+        else Some (TerminatorBuilder.Jump new_call_node)
+    | If {exp; then_; else_} ->
+        let* new_then = check_stack_if_at_back_edge st src then_ in
+        let+ new_else = check_stack_if_at_back_edge st src else_ in
+        if (not (phys_equal then_ new_then)) || not (phys_equal else_ new_else) then
+          Some (TerminatorBuilder.If {exp; then_= new_then; else_= new_else})
+        else None
+    | _ ->
+        Ok None
+
+
+  let get_terminal_node ({cfg= {CFGBuilder.nodes}} as st) offset succ_name =
+    let open IResult.Let_syntax in
+    let+ name = get_node_name st offset in
+    match NodeName.Map.find_opt name nodes with
+    | Some (_, last) -> (
+      match last with
+      | Jump {ssa_args} ->
+          `AlreadyThere (name, ssa_args)
+      | If {then_= {label; ssa_args}} when NodeName.equal label succ_name ->
+          `AlreadyThere (name, ssa_args)
+      | If {else_= {label; ssa_args}} when NodeName.equal label succ_name ->
+          `AlreadyThere (name, ssa_args)
+      | Return _ | Throw _ | If _ ->
+          (* we should only call [get_terminal_node] from a successor, but we
+             can not find it there *)
+          L.die InternalError "invalid predecessor" )
+    | None ->
+        `NotYetThere name
+
+
+  let drop_first_args_terminal_node ({cfg} as st) ~pred_name ~succ_name k =
+    (* 0 <= k <= size *)
+    (* drop elements k, ..., size-1 *)
+    let nodes = cfg.CFGBuilder.nodes in
+    match NodeName.Map.find_opt pred_name nodes with
+    | Some (node, last) ->
+        let opt_new_last =
+          match last with
+          | Jump {label; ssa_args} ->
+              let ssa_args = List.drop ssa_args k in
+              let last = TerminatorBuilder.Jump {label; ssa_args} in
+              Some last
+          | If {exp; then_= {label; ssa_args}; else_} when NodeName.equal label succ_name ->
+              let ssa_args = List.drop ssa_args k in
+              let then_ = {TerminatorBuilder.label; ssa_args} in
+              Some (TerminatorBuilder.If {exp; then_; else_})
+          | If {exp; then_; else_= {label; ssa_args}} when NodeName.equal label succ_name ->
+              let ssa_args = List.drop ssa_args k in
+              let else_ = {TerminatorBuilder.label; ssa_args} in
+              Some (TerminatorBuilder.If {exp; then_; else_})
+          | _ ->
+              None
+        in
+        Option.value_map opt_new_last ~default:st ~f:(fun last ->
+            let nodes = NodeName.Map.add pred_name (node, last) nodes in
+            let cfg = {cfg with nodes} in
+            {st with cfg} )
+    | None ->
+        st
 
 
   let mk_ssa_parameters st arity =
@@ -1051,112 +1101,24 @@ module State = struct
     mk st [] arity
 
 
-  let register_label ({cfg} as st) ~offset label =
-    debug st "register_label %d %a@\n" offset Label.pp label ;
-    let cfg = CFG.register_label cfg ~offset label in
-    {st with cfg}
-
-
-  let lookup_label {cfg} offset = CFG.lookup_label cfg offset
-
-  let get_label ({cfg; block_stack} as st) ?prelude ?fix_type ?handler_type offset ~ssa_parameters =
-    debug st "get_label at offset %d BLOCK_LAYOUT %s@\n" offset
-      (String.concat ~sep:"" @@ List.map ~f:Block.show block_stack) ;
-    let block_stack =
-      match (handler_type : Label.handler_type option) with
-      | None | Some Label ->
-          block_stack
-      | Some Except ->
-          Stack.push block_stack (Block.mk Except)
-      | Some Finally ->
-          Stack.push block_stack (Block.mk Finally)
-    in
-    let new_label, label, cfg =
-      CFG.get_label cfg ?prelude ?handler_type offset ~ssa_parameters block_stack
-    in
-    let label, cfg =
-      match fix_type with
-      | None ->
-          (label, cfg)
-      | Some fix_type ->
-          let opt_label, cfg = CFG.set_last_block_type cfg offset fix_type in
-          let label = Option.value ~default:label opt_label in
-          (label, cfg)
-    in
-    let st = {st with cfg} in
-    let st = if new_label then register_label st ~offset label else st in
-    (label, st)
-
-
-  let process_label ({cfg} as st) offset ssa_parameters =
-    let cfg = CFG.process_label cfg offset ssa_parameters in
-    {st with cfg}
-
-
-  let set_handler_type ({cfg} as st) offset handler_type =
-    let cfg = CFG.set_handler_type cfg offset handler_type in
-    {st with cfg}
-
-
-  let fresh_label ({cfg} as st) =
-    let fresh_label, cfg = CFG.fresh_label cfg in
-    let st = {st with cfg} in
-    (fresh_label, st)
-
-
-  let instr_is_jump_target ({cfg; block_stack} as st) {FFI.Instruction.offset; is_jump_target} =
-    match CFG.lookup_label cfg offset with
-    | Some label ->
-        let info = if Label.is_processed label then None else Some (offset, label) in
-        (info, st)
-    | None ->
-        if is_jump_target then
-          (* Probably the target of a back edge. Let's register a target with the current stack
-             information. When we'll detect the jump to here, we'll make sure things are
-             compatible *)
-          let arity = size st in
-          let ssa_parameters, st = mk_ssa_parameters st arity in
-          let name, st = fresh_label st in
-          let label = Label.mk name ssa_parameters block_stack in
-          let st = register_label st ~offset label in
-          (Some (offset, label), st)
-        else (None, st)
-
-
-  let starts_with_jump_target st = function
-    | [] ->
-        (None, st)
-    | instr :: _ ->
-        instr_is_jump_target st instr
-
-
-  let enter_node st ({Label.ssa_parameters; prelude; block_stack} as label) =
-    debug st "enter-node: Label %a@\n" Label.pp label ;
-    debug st "stack size upon entry: %d\n" (size st) ;
-    (* Drain statements, stack and the current block *)
-    let st = {st with stmts= []; block_stack} in
-    let st =
-      if Label.is_except label then
-        let () = debug st "> is .except hander@\n" in
-        let block = Block.mk Except in
-        push_block st block
-      else
-        let () = debug st "> is not .except hander@\n" in
-        let st = {st with stack= []} in
-        st
-    in
-    (* If we have ssa_parameters, we need to push them on the stack to restore its right shape.
-       Doing a fold_right is important to keep the correct order. *)
+  let enter_node st ~offset ~arity bottom_stack =
+    let st = {st with stmts= []; stack= bottom_stack} in
+    let ssa_parameters, st = mk_ssa_parameters st (arity - List.length bottom_stack) in
     let st = List.fold_right ssa_parameters ~init:st ~f:(fun ssa st -> push st (Exp.Temp ssa)) in
-    (* Install the prelude before processing the instructions *)
-    let st = match prelude with None -> st | Some f -> f label st in
-    debug st "> current stack size: %d\n" (size st) ;
+    let st = {st with ssa_parameters} in
+    let pp_ssa_parameters fmt =
+      if List.is_empty ssa_parameters then F.fprintf fmt ""
+      else
+        F.fprintf fmt " with params (%a)" (Pp.comma_seq F.pp_print_string)
+          (List.map ssa_parameters ~f:(fun i -> sprintf "n%d" i))
+    in
+    debug st "Building a new node, starting from offset %d%t@\n" offset pp_ssa_parameters ;
     st
 
 
-  let drain_stmts ({stmts} as st) =
-    let st = {st with stmts= []} in
-    (List.rev stmts, st)
+  let get_ssa_parameters {ssa_parameters} = List.rev ssa_parameters
+
+  let get_stmts {stmts} = List.rev stmts
 end
 
 let error kind {State.loc} err = Error (kind, loc, err)
@@ -1165,17 +1127,44 @@ let external_error st err = error L.ExternalError st err
 
 let internal_error st err = error L.InternalError st err
 
-let call_function_with_unnamed_args st ?(packed = false) exp args =
+let read_code_qual_name st c =
+  match st.State.code_qual_name c with
+  | Some qual_name ->
+      Ok qual_name
+  | None ->
+      internal_error st (Error.CodeWithoutQualifiedName c)
+
+
+let call_function_with_unnamed_args st ?arg_names exp args =
+  let open IResult.Let_syntax in
   let args = Stmt.unnamed_call_args args in
   let lhs, st = State.fresh_id st in
-  let stmt = Stmt.Call {lhs; exp; args; packed} in
+  let arg_names = Option.value arg_names ~default:Exp.none in
+  let* stmt =
+    match exp with
+    | Exp.BuiltinCaller call ->
+        Ok (Stmt.BuiltinCall {lhs; call; args; arg_names})
+    | exp ->
+        let+ exp = State.cast_exp st exp in
+        Stmt.Call {lhs; exp; args; arg_names}
+  in
   let st = State.push_stmt st stmt in
-  (lhs, st)
+  Ok (lhs, st)
 
 
-let call_builtin_function st call args =
+let call_builtin_function st ?arg_names call args =
   let lhs, st = State.fresh_id st in
-  let stmt = Stmt.BuiltinCall {lhs; call; args} in
+  let args = Stmt.unnamed_call_args args in
+  let arg_names = Option.value arg_names ~default:Exp.none in
+  let stmt = Stmt.BuiltinCall {lhs; call; args; arg_names} in
+  let st = State.push_stmt st stmt in
+  Ok (lhs, st)
+
+
+let call_method st name ?arg_names self_if_needed args =
+  let lhs, st = State.fresh_id st in
+  let arg_names = Option.value arg_names ~default:Exp.none in
+  let stmt = Stmt.CallMethod {lhs; name; self_if_needed; args; arg_names} in
   let st = State.push_stmt st stmt in
   (lhs, st)
 
@@ -1183,245 +1172,75 @@ let call_builtin_function st call args =
 (** Helper to compile the binary/unary/... ops into IR *)
 let parse_op st call n =
   let open IResult.Let_syntax in
-  let* args, st = State.pop_n st n in
-  let lhs, st = call_builtin_function st call args in
+  let* args, st = State.pop_n_and_cast st n in
+  let* lhs, st = call_builtin_function st call args in
   let st = State.push st (Exp.Temp lhs) in
   Ok (st, None)
 
 
-(** Helper to compile the BUILD_ opcodes into IR *)
-let build_collection st kind count =
-  let open IResult.Let_syntax in
-  let* values, st = State.pop_n st count in
-  let exp = Exp.Collection {kind; values; packed= false} in
-  let st = State.push st exp in
-  Ok (st, None)
-
-
-(** In Python, named arguments are always "at the end":
-
-    - when a function call has named arguments, any positional argument must come first
-    - when a function definition has a default value for any argument, then all arguments on its
-      right must have a default value too. For this purpose, we implement a special "zip" function
-      that takes data and tags, and will correctly zip them depending on their "positional" vs
-      "named" status.
-
-    [argc] is the _total_ number of arguments (both positional and named). [f] is a function to
-    build the resulting type from the positional or named data. *)
-let named_argument_zip opname argc ~f ~init data tags =
-  let nr_positional = argc - List.length tags in
-  let rec zip pos data tags =
-    match (data, tags) with
-    | [], [] ->
-        init
-    | [], _ :: _ ->
-        L.die InternalError "%s: less data than tags" opname
-    | _ :: _, [] ->
-        L.die InternalError "%s: not enough tags" opname
-    | data :: remaining_data, tag :: remaining_tags ->
-        if pos < nr_positional then
-          let tl = zip (1 + pos) remaining_data tags in
-          f (`Positional data) tl
-        else
-          let tl = zip (1 + pos) remaining_data remaining_tags in
-          f (`Named (data, tag)) tl
-  in
-  zip 0 data tags
-
-
-(** Patch the name of a list/set/dict comprehension objects.
-
-    List comprehensions generate code blocks all named [<listcomp>], so we need to tell them apart.
-    We use their location to distinguish them. Same thing happens for [<setcomp>] and [<dictcomp>] *)
-let patch_comp_name {FFI.Code.co_name; co_firstlineno} id =
-  if String.equal "<listcomp>" co_name then
-    let name = sprintf "<listcomp-%d>" co_firstlineno in
-    match Ident.pop id with None -> (co_name, id) | Some id -> (name, Ident.extend id name)
-  else if String.equal "<setcomp>" co_name then
-    let name = sprintf "<setcomp-%d>" co_firstlineno in
-    match Ident.pop id with None -> (co_name, id) | Some id -> (name, Ident.extend id name)
-  else if String.equal "<dictcomp>" co_name then
-    let name = sprintf "<dictcomp-%d>" co_firstlineno in
-    match Ident.pop id with None -> (co_name, id) | Some id -> (name, Ident.extend id name)
-  else (co_name, id)
-
-
 let make_function st flags =
   let open IResult.Let_syntax in
-  let* qualname, st = State.pop st in
-  let* qualname =
-    (* In the toplevel, [qualname] is the short name / string from the source.
-       However in a nested context (e.g. in a class), [qualname] also prefixed
-       by the value stored in the [__qualname__] attribute.
-       We use this information along with our own [module_name] to generate a
-       non ambiguous identifier *)
-    match (qualname : Exp.t) with
-    | Const (String s) ->
-        let {State.module_name} = st in
-        let root = Ident.root module_name in
-        let lnames = String.split ~on:'.' s in
-        Ok (Ident.append root lnames)
-    | _ ->
-        internal_error st (Error.MakeFunction ("a qualified named", qualname))
-  in
+  let* _qual_name, st = State.pop st in
+  (* we use our own notion of qualified name *)
   let* codeobj, st = State.pop st in
   let* code =
-    match (codeobj : Exp.t) with
-    | Const (Code c) ->
+    match (codeobj : Exp.opstack_symbol) with
+    | Code c ->
         Ok c
     | _ ->
         internal_error st (Error.MakeFunction ("a code object", codeobj))
   in
-  let short_name, qualname = patch_comp_name code qualname in
-  let* st =
-    if flags land 0x08 <> 0 then
-      (* TODO: closure *)
-      let* _cells_for_closure, st = State.pop st in
-      Ok st
-    else Ok st
+  let* qual_name = read_code_qual_name st code in
+  let short_name = Ident.mk code.FFI.Code.co_name in
+  let* cells_for_closure, st =
+    if flags land 0x08 <> 0 then State.pop_and_cast st else Ok (Exp.none, st)
   in
   let* annotations, st =
-    if flags land 0x04 <> 0 then
-      let* annotations, st = State.pop st in
-      let* annotations =
-        match (annotations : Exp.t) with
-        | ConstMap map ->
-            Ok map
-        | _ ->
-            internal_error st (Error.MakeFunction ("some type annotations", annotations))
-      in
-      Ok (annotations, st)
-    else Ok (ConstMap.empty, st)
+    if flags land 0x04 <> 0 then State.pop_and_cast st else Ok (Exp.none, st)
   in
-  let* st =
-    if flags land 0x02 <> 0 then
-      (* TODO: kw defaults *)
-      let* _kw_defaults, st = State.pop st in
-      Ok st
-    else Ok st
+  let* default_values_kw, st =
+    if flags land 0x02 <> 0 then State.pop_and_cast st else Ok (Exp.none, st)
   in
   let* default_values, st =
-    if flags land 0x01 <> 0 then
-      let* defaults, st = State.pop st in
-      match (defaults : Exp.t) with
-      | Const (Tuple defaults) ->
-          let fn_args = FFI.Code.get_arguments code |> Array.to_list in
-          let argc = List.length fn_args in
-          let defaults =
-            named_argument_zip "MAKE_FUNCTION" argc ~init:SMap.empty
-              ~f:(fun hd tl ->
-                match hd with
-                | `Positional _ ->
-                    tl
-                | `Named (argname, const) ->
-                    SMap.add argname (Exp.Const const) tl )
-              fn_args defaults
-          in
-          Ok (defaults, st)
-      | Collection {kind= Tuple; values} ->
-          let fn_args = FFI.Code.get_arguments code |> Array.to_list in
-          let argc = List.length fn_args in
-          let defaults =
-            named_argument_zip "MAKE_FUNCTION" argc ~init:SMap.empty
-              ~f:(fun hd tl ->
-                match hd with
-                | `Positional _ ->
-                    tl
-                | `Named (argname, const) ->
-                    SMap.add argname const tl )
-              fn_args values
-          in
-          Ok (defaults, st)
-      | _ ->
-          external_error st (Error.MakeFunctionInvalidDefaults defaults)
-    else Ok (SMap.empty, st)
+    if flags land 0x01 <> 0 then State.pop_and_cast st else Ok (Exp.none, st)
   in
-  let exp = Exp.Function {annotations; short_name; default_values; qualname; code} in
-  let st = State.push st exp in
-  let st = State.register_function st short_name qualname in
+  let lhs, st = State.fresh_id st in
+  let rhs =
+    Exp.Function
+      {short_name; qual_name; default_values; default_values_kw; annotations; cells_for_closure}
+  in
+  let stmt = Stmt.Let {lhs; rhs} in
+  let st = State.push_stmt st stmt in
+  let st = State.push st (Exp.Temp lhs) in
   Ok (st, None)
 
 
 let call_function st arg =
   let open IResult.Let_syntax in
-  let* args, st = State.pop_n st arg in
+  let* args, st = State.pop_n_and_cast st arg in
   let* fun_exp, st = State.pop st in
-  match (fun_exp : Exp.t) with
-  | BuiltinCaller BuildClass ->
-      (* Building a class looks like
-          LOAD_BUILD_CLASS
-          LOAD_CONST               CODE_OBJ
-          LOAD_CONST               SHORT_NAME
-          ... more arguments ...
-          MAKE_FUNCTION            M
-          LOAD_CONST               SHORT_NAME
-          ... more arguments ...
-          CALL_FUNCTION            N
-
-         so we'll process it in a minimal way to extract the short name
-         which is the second argument (the first being the code object)
-      *)
-      let sz = List.length args in
-      let* () = if sz < 2 then external_error st (Error.LoadBuildClass args) else Ok () in
-      let* short_name =
-        match args with
-        | _code :: short_name :: _ ->
-            let {State.loc} = st in
-            Result.of_option
-              ~error:(L.InternalError, loc, Error.LoadBuildClassName short_name)
-              (Exp.as_short_string short_name)
-        | _ ->
-            external_error st (Error.LoadBuildClass args)
-      in
-      let st = State.register_class st short_name in
-      let exp = Exp.Class args in
-      let st = State.push st exp in
-      Ok (st, None)
-  | BuiltinCaller call ->
-      let id, st = call_builtin_function st call args in
-      let st = State.push st (Exp.Temp id) in
-      Ok (st, None)
-  | _ ->
-      let id, st = call_function_with_unnamed_args st fun_exp args in
-      let st = State.push st (Exp.Temp id) in
-      Ok (st, None)
+  let* id, st = call_function_with_unnamed_args st fun_exp args in
+  let st = State.push st (Exp.Temp id) in
+  Ok (st, None)
 
 
 let call_function_kw st argc =
   let open IResult.Let_syntax in
-  let extract_kw_names st arg_names =
-    match (arg_names : Exp.t) with
-    | Const (Tuple tuple) ->
-        (* kw names should be constant tuple of strings, so we directly access them *)
-        List.fold_right tuple ~init:(Ok []) ~f:(fun const acc ->
-            let* acc in
-            match Const.as_name const with
-            | Some name ->
-                Ok (name :: acc)
-            | None ->
-                external_error st (Error.CallKeywordNotString0 const) )
-    | _ ->
-        external_error st (Error.CallKeywordNotString1 arg_names)
-  in
-  let partial_zip args kwnames =
-    named_argument_zip "CALL_FUNCTION_KW" argc ~init:[]
-      ~f:(fun hd tl ->
-        match hd with
-        | `Positional value ->
-            let hd = Stmt.unnamed_call_arg value in
-            hd :: tl
-        | `Named (value, name) ->
-            let hd = {Stmt.name= Some name; value} in
-            hd :: tl )
-      args kwnames
-  in
-  let* arg_names, st = State.pop st in
-  let* arg_names = extract_kw_names st arg_names in
-  let* args, st = State.pop_n st argc in
-  let args = partial_zip args arg_names in
+  let* arg_names, st = State.pop_and_cast st in
+  let arg_names = Some arg_names in
+  (* a tuple containing the arguments names *)
+  let* args, st = State.pop_n_and_cast st argc in
   let* exp, st = State.pop st in
   let lhs, st = State.fresh_id st in
-  let stmt = Stmt.Call {lhs; exp; args; packed= false} in
+  let arg_names = Option.value arg_names ~default:Exp.none in
+  let* stmt =
+    match exp with
+    | Exp.BuiltinCaller call ->
+        Ok (Stmt.BuiltinCall {lhs; call; args; arg_names})
+    | exp ->
+        let+ exp = State.cast_exp st exp in
+        Stmt.Call {lhs; exp; args; arg_names}
+  in
   let st = State.push_stmt st stmt in
   let st = State.push st (Exp.Temp lhs) in
   Ok (st, None)
@@ -1429,123 +1248,26 @@ let call_function_kw st argc =
 
 let call_function_ex st flags =
   let open IResult.Let_syntax in
-  let* opt_args, st =
-    if flags land 1 <> 0 then
-      let* exp, st = State.pop st in
-      Ok ([Exp.Packed {exp; is_map= true}], st)
-    else Ok ([], st)
-  in
-  let* packed_arg, st = State.pop st in
-  let packed_arg =
-    match (packed_arg : Exp.t) with Packed _ -> packed_arg | exp -> Exp.Packed {is_map= false; exp}
-  in
-  let* call, st = State.pop st in
-  let id, st = call_function_with_unnamed_args st call ~packed:true (packed_arg :: opt_args) in
-  let st = State.push st (Exp.Temp id) in
-  Ok (st, None)
-
-
-let import_name st name =
-  let open IResult.Let_syntax in
-  let {State.module_name; loc} = st in
-  let* fromlist, st = State.pop st in
-  let* fromlist =
-    let error = (L.ExternalError, loc, Error.ImportNameFromList (name, fromlist)) in
-    match (fromlist : Exp.t) with
-    | Const c ->
-        Result.map_error ~f:(fun () -> error) (Const.as_names c)
-    | _ ->
-        Error error
-  in
-  let* level, st = State.pop st in
-  let* level =
-    match (level : Exp.t) with
-    | Const (Int z) -> (
-      try Ok (Z.to_int z)
-      with Z.Overflow -> external_error st (Error.ImportNameLevelOverflow (name, z)) )
-    | _ ->
-        external_error st (Error.ImportNameLevel (name, level))
-  in
-  let id = Ident.from_string ~kind:Imported ~on:'.' name in
-  let* import_path =
-    match level with
-    | 0 ->
-        (* Absolute path *)
-        Ok id
-    | _ -> (
-        (* Relative path *)
-        let rec pop_levels n id =
-          match (n, id) with
-          | 0, None ->
-              Some `Root
-          | 0, Some id ->
-              Some (`Path id)
-          | _, None ->
-              None
-          | _, Some id ->
-              let next_id = Ident.pop id in
-              pop_levels (n - 1) next_id
-        in
-        let prefix = pop_levels level (Some module_name) in
-        match prefix with
-        | Some `Root ->
-            Ok id
-        | Some (`Path prefix) ->
-            if String.is_empty name then Ok prefix else Ok (Ident.extend prefix name)
-        | None ->
-            external_error st (Error.ImportNameDepth (module_name, level)) )
-  in
-  let import_name = {Exp.id= import_path; fromlist} in
-  let exp = Exp.ImportName import_name in
-  let st = State.push st exp in
-  let stmt = Stmt.ImportName import_name in
-  (* Keeping them as a statement so IR -> Textual can correctly generate the toplevel/side-effect call *)
+  let with_keyword_args = flags land 1 <> 0 in
+  let call = BuiltinCaller.CallFunctionEx in
+  let* keyword_args, st = if with_keyword_args then State.pop_and_cast st else Ok (Exp.none, st) in
+  let* tuple, st = State.pop_and_cast st in
+  let* callee, st = State.pop_and_cast st in
+  let args = [callee; tuple; keyword_args] in
+  let lhs, st = State.fresh_id st in
+  let stmt = Stmt.BuiltinCall {lhs; call; args; arg_names= Exp.none} in
   let st = State.push_stmt st stmt in
+  let st = State.push st (Exp.Temp lhs) in
   Ok (st, None)
-
-
-let import_from st name =
-  let open IResult.Let_syntax in
-  (* Does not pop the top of stack, which should be the result of an IMPORT_NAME *)
-  let* from = State.peek st in
-  State.debug st "import_from(%s): %a@\n" name Exp.pp from ;
-  let* from, names =
-    match (from : Exp.t) with
-    | ImportName from ->
-        Ok (from, None)
-    | ImportFrom {from; names} ->
-        Ok (from, Some names)
-    | _ ->
-        external_error st (Error.ImportFrom (name, from))
-  in
-  let names =
-    match names with None -> Ident.mk ~kind:Imported name | Some id -> Ident.extend id name
-  in
-  let exp = Exp.ImportFrom {from; names} in
-  let st = State.push st exp in
-  Ok (st, None)
-
-
-let target_of_import ~default exp =
-  let target =
-    match (exp : Exp.t) with
-    | ImportName {id} ->
-        Some id
-    | ImportFrom {from= {id}; names} ->
-        Some (Ident.concat id names)
-    | _ ->
-        None
-  in
-  Option.value ~default target
 
 
 let unpack_sequence st count =
   let open IResult.Let_syntax in
-  let* tos, st = State.pop st in
+  let* tos, st = State.pop_and_cast st in
   let rec unpack st n =
     if n < 0 then Ok st
     else
-      let index = Exp.Const (Int (Z.of_int n)) in
+      let index = Exp.of_int n in
       let exp = Exp.Subscript {exp= tos; index} in
       let st = State.push st exp in
       unpack st (n - 1)
@@ -1563,68 +1285,54 @@ let format_value st flags =
     | 0x00 ->
         None
     | 0x01 ->
-        Some BuiltinCaller.Str
+        Some FormatFunction.Str
     | 0x02 ->
-        Some BuiltinCaller.Repr
+        Some FormatFunction.Repr
     | 0x03 ->
-        Some BuiltinCaller.Ascii
+        Some FormatFunction.Ascii
     | _ ->
         L.die InternalError "FORMAT_VALUE: unreachable"
   in
   let* fmt_spec, st =
     (* fmt_spec must be a concatenation of string literals *)
-    if has_fmt_spec flags then
-      let* fmt_spec, st = State.pop st in
-      match (fmt_spec : Exp.t) with
-      | Const (String _) ->
-          Ok (fmt_spec, st)
-      | Collection {kind= String; values= _} ->
-          Ok (fmt_spec, st)
-      | Temp _ ->
-          (* Usually it will be string literals, but it can also be the
-             return value of a format function, so we have to allow
-             temporaries too *)
-          Ok (fmt_spec, st)
-      | _ ->
-          external_error st (Error.FormatValueSpec fmt_spec)
-    else Ok (Exp.Const Null, st)
+    if has_fmt_spec flags then State.pop_and_cast st else Ok (Exp.none, st)
   in
-  let* exp, st = State.pop st in
+  let* exp, st = State.pop_and_cast st in
   let conv_fn = mk_conv flags in
-  let exp, st =
+  let* exp, st =
     match conv_fn with
     | None ->
-        (exp, st)
+        Ok (exp, st)
     | Some conv_fn ->
-        let id, st = call_builtin_function st (FormatFn conv_fn) [exp] in
+        let+ id, st = call_builtin_function st (FormatFn conv_fn) [exp] in
         (Exp.Temp id, st)
   in
-  let id, st = call_builtin_function st Format [exp; fmt_spec] in
+  let* id, st = call_builtin_function st Format [exp; fmt_spec] in
   let st = State.push st (Exp.Temp id) in
   Ok (st, None)
+
+
+let mk_if b exp then_ else_ =
+  if b then TerminatorBuilder.If {exp; then_; else_}
+  else TerminatorBuilder.If {exp; then_= else_; else_= then_}
 
 
 let pop_jump_if ~next_is st target next_offset_opt =
   let open IResult.Let_syntax in
   let {State.loc} = st in
-  let* condition, st = State.pop st in
+  let* condition, st = State.pop_and_cast st in
   (* Turn the stack into SSA parameters *)
-  let arity = State.size st in
-  let* ssa_args, st = State.to_ssa st in
-  let next_ssa, st = State.mk_ssa_parameters st arity in
-  let other_ssa, st = State.mk_ssa_parameters st arity in
   let* next_offset = Offset.get ~loc next_offset_opt in
-  let next_label, st = State.get_label st next_offset ~ssa_parameters:next_ssa in
-  let other_label, st = State.get_label st target ~ssa_parameters:other_ssa in
-  (* Compute the relevant pruning expressions *)
-  let condition = if next_is then condition else Exp.Not condition in
+  let* next_label = State.get_node_name st next_offset in
+  let* other_label = State.get_node_name st target in
+  let mk_if = mk_if next_is condition in
+  let {State.stack} = st in
   Ok
     ( st
     , Some
-        (Jump.TwoWay
-           { condition
-           ; next_info= {label= next_label; offset= next_offset; ssa_args}
-           ; other_info= {label= other_label; offset= target; ssa_args} } ) )
+        (mk_if
+           (TerminatorBuilder.mk_node_call next_label stack)
+           (TerminatorBuilder.mk_node_call other_label stack) ) )
 
 
 let jump_if_or_pop st ~jump_if target next_offset_opt =
@@ -1634,115 +1342,82 @@ let jump_if_or_pop st ~jump_if target next_offset_opt =
      the branch where "it stays". It will be restored as part of the stack restore logic when
      we process the "other" node. *)
   let* condition = State.peek st in
-  let condition = if jump_if then Exp.Not condition else condition in
-  let arity = State.size st in
-  let* ssa_args, st = State.to_ssa st in
-  let next_ssa, st = State.mk_ssa_parameters st arity in
-  let other_ssa, st = State.mk_ssa_parameters st arity in
+  let* condition = State.cast_exp st condition in
+  let mk_if = mk_if (not jump_if) condition in
+  let {State.stack} = st in
   let* next_offset = Offset.get ~loc next_offset_opt in
-  (* In the next branch, we make sure the top-of-stack is no longer in the ssa parameters
-     so it is not restored, effectively dropped as per the opcode description. *)
-  let next_label, st =
-    let ssa_parameters = List.tl next_ssa |> Option.value ~default:[] in
-    State.get_label st next_offset ~ssa_parameters
-  in
-  let next_ssa_args = List.tl ssa_args |> Option.value ~default:[] in
-  let other_label, st = State.get_label st target ~ssa_parameters:other_ssa in
+  (* In the next branch, we make sure the top-of-stack is no longer there. *)
+  let* next_label = State.get_node_name st next_offset in
+  let next_stack = List.tl stack |> Option.value ~default:[] in
+  let* other_label = State.get_node_name st target in
   Ok
     ( st
     , Some
-        (Jump.TwoWay
-           { condition
-           ; next_info= {label= next_label; offset= next_offset; ssa_args= next_ssa_args}
-           ; other_info= {label= other_label; offset= target; ssa_args} } ) )
+        (mk_if
+           (TerminatorBuilder.mk_node_call next_label next_stack)
+           (TerminatorBuilder.mk_node_call other_label stack) ) )
 
 
-(* TODO: maybe add pruning here ? *)
 let for_iter st delta next_offset_opt =
   let open IResult.Let_syntax in
   let {State.loc} = st in
-  let* iter, st = State.pop st in
-  let id, st = call_builtin_function st NextIter [iter] in
-  let has_item, st = call_builtin_function st HasNextIter [Exp.Temp id] in
+  let* iter, st = State.pop_and_cast st in
+  let {State.stack= other_stack} = st in
+  let* id, st = call_builtin_function st NextIter [iter] in
+  let* has_item, st = call_builtin_function st HasNextIter [iter] in
   let condition = Exp.Temp has_item in
-  let arity = State.size st in
-  let* ssa_args, st = State.to_ssa st in
-  let next_ssa, st = State.mk_ssa_parameters st arity in
-  let other_ssa, st = State.mk_ssa_parameters st arity in
   (* In the next branch, we know the iterator has an item available. Let's fetch it and
      push it on the stack. *)
-  let next_prelude _ st =
-    (* The iterator object stays on the stack while in the for loop, let's push it back *)
-    let st = State.push st iter in
-    (* The result of calling [__next__] is also pushed on the stack *)
-    let next, st = call_builtin_function st IterData [Exp.Temp id] in
-    State.push st (Exp.Temp next)
-  in
   let* next_offset = Offset.get ~loc next_offset_opt in
-  let next_label, st =
-    State.get_label st next_offset ~ssa_parameters:next_ssa ~prelude:next_prelude
-  in
+  (* The iterator object stays on the stack while in the for loop, let's push it back *)
+  let st = State.push st iter in
+  let st = State.push st (Exp.Temp id) in
+  let* next_label = State.get_node_name st next_offset in
+  let {State.stack= next_stack} = st in
   let other_offset = delta + next_offset in
-  let other_label, st = State.get_label st other_offset ~ssa_parameters:other_ssa in
+  let* other_label = State.get_node_name st other_offset in
   Ok
     ( st
     , Some
-        (Jump.TwoWay
-           { condition
-           ; next_info= {label= next_label; offset= next_offset; ssa_args}
-           ; other_info= {label= other_label; offset= other_offset; ssa_args} } ) )
+        (TerminatorBuilder.If
+           { exp= condition
+           ; then_= TerminatorBuilder.mk_node_call next_label next_stack
+           ; else_= TerminatorBuilder.mk_node_call other_label other_stack } ) )
 
 
-(** Extract from Python3.8 specification:
-
-    Starts cleaning up the stack when a with statement block exits. At the top of the stack are
-    either [NULL] (pushed by [BEGIN_FINALLY]) or 6 values pushed if an exception has been raised in
-    the with block. Below is the context manager’s [__exit__()] or [__aexit__()] bound method.
-
-    If top-of-stack is [NULL], calls [SECOND(None, None, None)], removes the function from the
-    stack, leaving top-of-stack, and pushes [NULL] to the stack. Otherwise calls
-    [SEVENTH(TOP, SECOND, THIRD)], shifts the bottom 3 values of the stack down, replaces the empty
-    spot with [NULL] and pushes top-of-stack. Finally pushes the result of the call.
-
-    vsiles notes:
-
-    - the doc is quite confusing. Here is my source of truth
-      https://github.com/python/cpython/blob/3.8/Python/ceval.c#L3300
-    - we only support the first case with [NULL]
-    - we only support [__exit__].
-    - TODO: learn how [__aexit__] works
-    - TODO: duplicate the handler to deal with the except case *)
+(* See https://github.com/python/cpython/blob/3.8/Python/ceval.c#L3300 *)
 let with_cleanup_start st =
   let open IResult.Let_syntax in
-  let* context_manager_exit, st = State.pop st in
-  let lhs, st =
-    call_function_with_unnamed_args st context_manager_exit [Const Null; Const Null; Const Null]
+  let* tos, st = State.pop_and_cast st in
+  let* () =
+    match (tos : Exp.t) with
+    | Const None ->
+        Ok ()
+    | _ ->
+        internal_error st (Error.WithCleanupStart (Exp tos))
   in
-  let st = State.push st (Const Null) in
-  let st = State.push st (Exp.Temp lhs) in
+  let* context_manager_exit, st = State.pop st in
+  let* context_manager =
+    match context_manager_exit with
+    | Exp.ContextManagerExit exp ->
+        Ok exp
+    | exp ->
+        internal_error st (Error.WithCleanupStart exp)
+  in
+  let id, st = call_method st Ident.Special.enter context_manager [Exp.none; Exp.none; Exp.none] in
+  let st = State.push st Exp.none in
+  let st = State.push st Exp.none in
+  let st = State.push st (Temp id) in
   Ok (st, None)
 
 
-(** Extract from Python3.8 specification:
-
-    Finishes cleaning up the stack when a with statement block exits. top-of-stack is result of
-    [__exit__()] or [__aexit__()] function call pushed by [WITH_CLEANUP_START]. [SECOND] is [None]
-    or an exception type (pushed when an exception has been raised).
-
-    Pops two values from the stack. If [SECOND] is not [NULL] and top-of-stack is true unwinds the
-    [EXCEPT_HANDLER] block which was created when the exception was caught and pushes [NULL] to the
-    stack.
-
-    Note: we only support the [None] case for the moment. See
-    https://github.com/python/cpython/blob/3.8/Python/ceval.c#L3373.
-
-    TODO: duplicate the node and deal with the EXCEPT_HANDLER case *)
+(** See https://github.com/python/cpython/blob/3.8/Python/ceval.c#L3373 *)
 let with_cleanup_finish st =
   let open IResult.Let_syntax in
   let* _exit_res, st = State.pop st in
   let* tos, st = State.pop st in
-  match (tos : Exp.t) with
-  | Const Null ->
+  match (tos : Exp.opstack_symbol) with
+  | Exp (Const None) ->
       Ok (st, None)
   | _ ->
       internal_error st (Error.WithCleanupFinish tos)
@@ -1756,15 +1431,19 @@ let raise_varargs st argc =
          point, leftovers from the 6 values pushed on the exception entry
          point. We should use them to compute the right "previous" exception,
          but this logic is left TODO *)
-      let id, st = call_builtin_function st GetPreviousException [] in
-      let throw = Jump.Throw (Exp.Temp id) in
+      let* id, st = call_builtin_function st GetPreviousException [] in
+      let throw = TerminatorBuilder.Throw (Exp.Temp id) in
       Ok (st, Some throw)
   | 1 ->
-      let* tos, st = State.pop st in
-      let throw = Jump.Throw tos in
+      let* tos, st = State.pop_and_cast st in
+      let throw = TerminatorBuilder.Throw tos in
       Ok (st, Some throw)
   | 2 ->
-      internal_error st (Error.RaiseException argc)
+      let* rhs, st = State.pop_and_cast st in
+      let* lhs, st = State.pop_and_cast st in
+      let st = State.push_stmt st (Stmt.SetAttr {lhs; attr= Ident.Special.cause; rhs}) in
+      let throw = TerminatorBuilder.Throw lhs in
+      Ok (st, Some throw)
   | _ ->
       external_error st (Error.RaiseExceptionInvalid argc)
 
@@ -1774,29 +1453,11 @@ let get_cell_name {FFI.Code.co_cellvars; co_freevars} arg =
   if arg < sz then co_cellvars.(arg) else co_freevars.(arg - sz)
 
 
-let deref code arg =
-  let cell = get_cell_name code arg in
-  let target = Ident.mk cell in
-  Exp.Deref target
-
-
-let build_collection_unpack st count collection =
+let build_collection st count ~f =
   let open IResult.Let_syntax in
-  let* values, st = State.pop_n st count in
-  let values = List.map ~f:(fun exp -> Exp.Packed {exp; is_map= false}) values in
-  let exp = Exp.Collection {kind= collection; values; packed= true} in
+  let* values, st = State.pop_n_and_cast st count in
+  let exp = f values in
   let st = State.push st exp in
-  Ok (st, None)
-
-
-let get_name st co_names arg ~global =
-  let name = co_names.(arg) in
-  let target = State.resolve_name ~global st name in
-  Exp.Var target
-
-
-let delete st exp =
-  let _id, st = call_builtin_function st Delete [exp] in
   Ok (st, None)
 
 
@@ -1816,121 +1477,146 @@ let collection_add st opname arg ?(map = false) builtin =
   if arg < 1 then L.die ExternalError "%s with %d" opname arg ;
   let* args, st =
     if map then
-      let* value, st = State.pop st in
-      let* key, st = State.pop st in
+      let* value, st = State.pop_and_cast st in
+      let* key, st = State.pop_and_cast st in
       Ok ([key; value], st)
     else
-      let* elt, st = State.pop st in
+      let* elt, st = State.pop_and_cast st in
       Ok ([elt], st)
   in
   let* tos1 = State.peek st ~depth:(arg - 1) in
-  let _id, st = call_builtin_function st builtin (tos1 :: args) in
+  let* tos1 = State.cast_exp st tos1 in
+  let* _id, st = call_builtin_function st builtin (tos1 :: args) in
   Ok (st, None)
 
 
-let parse_bytecode st ({FFI.Code.co_consts; co_names; co_varnames} as code)
-    {FFI.Instruction.opname; starts_line; arg; offset= instr_offset} next_offset_opt =
+let assign_to_temp_and_push st rhs =
+  let id, st = State.fresh_id st in
+  let exp = Exp.Temp id in
+  let stmt = Stmt.Let {lhs= id; rhs} in
+  let st = State.push_stmt st stmt in
+  let st = State.push st exp in
+  Ok (st, None)
+
+
+let load st scope name =
+  let rhs = Exp.Var {scope; ident= Ident.mk name} in
+  assign_to_temp_and_push st rhs
+
+
+let store st scope name =
   let open IResult.Let_syntax in
-  let st =
-    if Option.is_some starts_line then (
-      State.debug st "@\n" ;
-      State.debug st ".line %d@\n" (Option.value_exn starts_line) ;
-      {st with State.loc= starts_line} )
-    else st
-  in
-  State.debug st "%a: %s %d (0x%x) - STACK_SIZE %d - BLOCK_LAYOUT %s@\n" Offset.pp instr_offset
-    opname arg arg (State.size st)
-    (String.concat ~sep:"" @@ List.map ~f:Block.show st.State.block_stack) ;
+  let lhs = {ScopedIdent.scope; ident= Ident.mk name} in
+  let* rhs, st = State.pop_and_cast st in
+  let stmt = Stmt.Store {lhs; rhs} in
+  let st = State.push_stmt st stmt in
+  Ok (st, None)
+
+
+let rec convert_ffi_const st (const : FFI.Constant.t) : Exp.opstack_symbol pyresult =
+  let open IResult.Let_syntax in
+  match const with
+  | PYCBool b ->
+      Ok (Exp (Const (Bool b)))
+  | PYCInt i ->
+      Ok (Exp (Const (Int i)))
+  | PYCFloat f ->
+      Ok (Exp (Const (Float f)))
+  | PYCComplex {real; imag} ->
+      Ok (Exp (Const (Complex {real; imag})))
+  | PYCString s ->
+      Ok (Exp (Const (String s)))
+  | PYCInvalidUnicode arg ->
+      Ok (Exp (Const (InvalidUnicode arg)))
+  | PYCBytes bytes ->
+      Ok (Exp (Const (Bytes bytes)))
+  | PYCTuple array ->
+      let+ values = Array.to_list array |> map_convert_ffi_const st in
+      Exp.Exp (Collection {kind= Tuple; values; unpack= false})
+  | PYCFrozenSet list ->
+      let+ values = map_convert_ffi_const st list in
+      Exp.Exp (BuildFrozenSet values)
+  | PYCCode c ->
+      Ok (Code c)
+  | PYCNone ->
+      Ok (Exp Exp.none)
+
+
+and map_convert_ffi_const st values =
+  let open IResult.Let_syntax in
+  List.fold_result (List.rev values) ~init:[] ~f:(fun values cst ->
+      let* exp = convert_ffi_const st cst in
+      let+ exp = State.cast_exp st exp in
+      exp :: values )
+
+
+let parse_bytecode st ({FFI.Code.co_consts; co_names; co_varnames} as code)
+    ({FFI.Instruction.opname; starts_line; arg} as instr) next_offset_opt =
+  let open IResult.Let_syntax in
+  let st = if Option.is_some starts_line then {st with State.loc= starts_line} else st in
+  State.debug st "%a@\n" (FFI.Instruction.pp ~code) instr ;
   match opname with
   | "LOAD_CONST" ->
-      let c = co_consts.(arg) in
-      let c = Const.from_const c in
-      let exp = Exp.Const c in
-      let st = State.push st exp in
+      let* exp = convert_ffi_const st co_consts.(arg) in
+      let st = State.push_symbol st exp in
       Ok (st, None)
   | "LOAD_NAME" ->
-      let exp = get_name st co_names arg ~global:false in
-      let st = State.push st exp in
-      Ok (st, None)
+      load st Name co_names.(arg)
   | "LOAD_GLOBAL" ->
-      let exp = get_name st co_names arg ~global:true in
-      let st = State.push st exp in
-      Ok (st, None)
+      load st Global co_names.(arg)
   | "LOAD_FAST" ->
-      let name = co_varnames.(arg) in
-      let exp = Exp.LocalVar name in
-      let st = State.push st exp in
-      Ok (st, None)
+      load st Fast co_varnames.(arg)
   | "LOAD_ATTR" ->
-      let name = co_names.(arg) in
-      let* tos, st = State.pop st in
-      let exp = Exp.GetAttr (tos, name) in
-      let st = State.push st exp in
+      let attr = co_names.(arg) |> Ident.mk in
+      let* exp, st = State.pop_and_cast st in
+      let exp = Exp.GetAttr {exp; attr} in
+      assign_to_temp_and_push st exp
+  | "LOAD_DEREF" ->
+      let name = get_cell_name code arg |> Ident.mk in
+      let rhs = Exp.LoadDeref {slot= arg; name} in
+      let lhs, st = State.fresh_id st in
+      let stmt = Stmt.Let {lhs; rhs} in
+      let st = State.push_stmt st stmt in
+      let st = State.push st (Exp.Temp lhs) in
       Ok (st, None)
-  | "LOAD_CLASSDEREF" | "LOAD_DEREF" ->
-      (* It is unclear if extra information needs to be stored for * [LOAD_CLASSDEREF] vs
-         [LOAD_DEREF]. Our tests so far suggests our name lookup strategy is compatible with both.
-         I'm leaving this comment in case some ["$unknwon"] strings start to appear in Textual
-         code *)
-      let exp = deref code arg in
-      let st = State.push st exp in
+  | "LOAD_CLASSDEREF" ->
+      let name = get_cell_name code arg |> Ident.mk in
+      let rhs = Exp.LoadClassDeref {slot= arg; name} in
+      let lhs, st = State.fresh_id st in
+      let stmt = Stmt.Let {lhs; rhs} in
+      let st = State.push_stmt st stmt in
+      let st = State.push st (Exp.Temp lhs) in
       Ok (st, None)
   | "STORE_NAME" ->
-      let name = co_names.(arg) in
-      let {State.module_name} = st in
-      let target = Ident.extend module_name name in
-      let lhs = Exp.Var target in
-      let* rhs, st = State.pop st in
-      let stmt = Stmt.Assign {lhs; rhs} in
-      let target = target_of_import rhs ~default:target in
-      let st = State.register_name ~global:false st name target in
-      let st = State.push_stmt st stmt in
-      Ok (st, None)
+      store st Name co_names.(arg)
   | "STORE_GLOBAL" ->
-      let name = co_names.(arg) in
-      let {State.module_name} = st in
-      let root = Ident.root module_name in
-      let target = Ident.extend root name in
-      let lhs = Exp.Var target in
-      let* rhs, st = State.pop st in
-      let stmt = Stmt.Assign {lhs; rhs} in
-      let target = target_of_import rhs ~default:target in
-      let st = State.register_name ~global:true st name target in
-      let st = State.push_stmt st stmt in
-      Ok (st, None)
+      store st Global co_names.(arg)
   | "STORE_FAST" ->
-      let name = co_varnames.(arg) in
-      let lhs = Exp.LocalVar name in
-      let* rhs, st = State.pop st in
-      let stmt = Stmt.Assign {lhs; rhs} in
-      let st = State.push_stmt st stmt in
-      Ok (st, None)
+      store st Fast co_varnames.(arg)
   | "STORE_ATTR" ->
-      let name = co_names.(arg) in
-      let* root, st = State.pop st in
-      let* rhs, st = State.pop st in
-      let lhs = Exp.GetAttr (root, name) in
-      let stmt = Stmt.Assign {lhs; rhs} in
+      let attr = co_names.(arg) |> Ident.mk in
+      let* lhs, st = State.pop_and_cast st in
+      let* rhs, st = State.pop_and_cast st in
+      let stmt = Stmt.SetAttr {lhs; attr; rhs} in
       let st = State.push_stmt st stmt in
       Ok (st, None)
   | "STORE_SUBSCR" ->
       (* Implements TOS1[TOS] = TOS2.  *)
-      let* index, st = State.pop st in
-      let* exp, st = State.pop st in
-      let* rhs, st = State.pop st in
-      let lhs = Exp.Subscript {exp; index} in
-      let stmt = Stmt.Assign {lhs; rhs} in
+      let* index, st = State.pop_and_cast st in
+      let* lhs, st = State.pop_and_cast st in
+      let* rhs, st = State.pop_and_cast st in
+      let stmt = Stmt.StoreSubscript {lhs; index; rhs} in
       let st = State.push_stmt st stmt in
       Ok (st, None)
   | "STORE_DEREF" ->
-      let lhs = deref code arg in
-      let* rhs, st = State.pop st in
-      let stmt = Stmt.Assign {lhs; rhs} in
+      let name = get_cell_name code arg |> Ident.mk in
+      let* rhs, st = State.pop_and_cast st in
+      let stmt = Stmt.StoreDeref {name; slot= arg; rhs} in
       let st = State.push_stmt st stmt in
       Ok (st, None)
   | "RETURN_VALUE" ->
-      let* ret, st = State.pop st in
-      Ok (st, Some (Jump.Return ret))
+      let* ret, st = State.pop_and_cast st in
+      Ok (st, Some (TerminatorBuilder.Return ret))
   | "CALL_FUNCTION" ->
       call_function st arg
   | "CALL_FUNCTION_KW" ->
@@ -1939,20 +1625,17 @@ let parse_bytecode st ({FFI.Code.co_consts; co_names; co_varnames} as code)
       call_function_ex st arg
   | "POP_TOP" -> (
       (* TODO: rethink this in the future.
-         Keep the popped values around in case their construction involves side effects *)
+         Keep the popped values around in case their construction involves side effects.
+         dpichardie: I don't see any raison to keep the popped value, except special care
+         with the YIELD operations. *)
       let* rhs, st = State.pop st in
-      State.debug st "popping %a@\n" Exp.pp rhs ;
-      match (rhs : Exp.t) with
-      | ImportName _
-      | ImportFrom _
-      (* IMPORT_NAME/IMPORT_FROM are kept around for multiple 'from' statement and
-         then popped. The translation to textual will use the statement
-         version do deal with their side effect at the right location *)
-      | Temp _ ->
+      match (rhs : Exp.opstack_symbol) with
+      | Exp (Temp _) ->
           Ok (st, None)
       | _ ->
           let id, st = State.fresh_id st in
-          let stmt = Stmt.Assign {lhs= Exp.Temp id; rhs} in
+          let* rhs = State.cast_exp st rhs in
+          let stmt = Stmt.Let {lhs= id; rhs} in
           let st = State.push_stmt st stmt in
           Ok (st, None) )
   | "BINARY_ADD" ->
@@ -2018,94 +1701,104 @@ let parse_bytecode st ({FFI.Code.co_consts; co_names; co_varnames} as code)
   | "MAKE_FUNCTION" ->
       make_function st arg
   | "BUILD_CONST_KEY_MAP" ->
-      let* keys, st = State.pop st in
-      let* keys =
-        match (keys : Exp.t) with
-        | Const (Tuple keys) ->
-            Ok keys
-        | _ ->
-            internal_error st (Error.BuildConstKeyMapKeys keys)
-      in
-      let nr_keys = List.length keys in
-      let* tys, st = State.pop_n st arg in
-      let* () =
-        if Int.equal nr_keys arg then Ok ()
-        else internal_error st (Error.BuildConstKeyMapLength (arg, nr_keys))
-      in
-      let map =
-        List.fold2_exn ~init:ConstMap.empty ~f:(fun map key ty -> ConstMap.add key ty map) keys tys
-      in
-      let st = State.push st (Exp.ConstMap map) in
+      let* keys, st = State.pop_and_cast st in
+      let* tys, st = State.pop_n_and_cast st arg in
+      let* id, st = call_builtin_function st BuildConstKeyMap (keys :: tys) in
+      let st = State.push st (Exp.Temp id) in
       Ok (st, None)
   | "BUILD_LIST" ->
-      build_collection st List arg
+      build_collection st arg ~f:(fun values -> Exp.Collection {kind= List; values; unpack= false})
   | "BUILD_SET" ->
-      build_collection st Set arg
+      build_collection st arg ~f:(fun values -> Exp.Collection {kind= Set; values; unpack= false})
   | "BUILD_TUPLE" ->
-      build_collection st Tuple arg
+      build_collection st arg ~f:(fun values ->
+          Exp.Collection {kind= Tuple; values; unpack= false} )
   | "BUILD_SLICE" ->
-      build_collection st Slice arg
+      build_collection st arg ~f:(fun values -> Exp.BuildSlice values)
   | "BUILD_STRING" ->
-      build_collection st String arg
+      build_collection st arg ~f:(fun values -> Exp.BuildString values)
   | "BUILD_MAP" ->
-      build_collection st Map (2 * arg)
+      build_collection st (2 * arg) ~f:(fun values ->
+          Exp.Collection {kind= Map; values; unpack= false} )
   | "BINARY_SUBSCR" ->
-      let* index, st = State.pop st in
-      let* exp, st = State.pop st in
+      let* index, st = State.pop_and_cast st in
+      let* exp, st = State.pop_and_cast st in
       let exp = Exp.Subscript {exp; index} in
-      let st = State.push st exp in
-      Ok (st, None)
+      assign_to_temp_and_push st exp
   | "LOAD_BUILD_CLASS" ->
-      let st = State.push st (BuiltinCaller BuildClass) in
+      let st = State.push_symbol st (BuiltinCaller BuildClass) in
       Ok (st, None)
   | "LOAD_METHOD" ->
-      let name = co_names.(arg) in
-      let* tos, st = State.pop st in
+      let name = co_names.(arg) |> Ident.mk in
+      let* tos, st = State.pop_and_cast st in
       let exp = Exp.LoadMethod (tos, name) in
-      let st = State.push st exp in
+      let st = State.push_symbol st exp in
       Ok (st, None)
   | "CALL_METHOD" ->
-      let* args, st = State.pop_n st arg in
+      let* args, st = State.pop_n_and_cast st arg in
       let* call, st = State.pop st in
-      let lhs, st = State.fresh_id st in
-      let stmt = Stmt.CallMethod {lhs; call; args} in
-      let st = State.push_stmt st stmt in
-      let st = State.push st (Exp.Temp lhs) in
+      let* self_if_needed, name =
+        match call with
+        | Exp.LoadMethod (self_if_needed, name) ->
+            Ok (self_if_needed, name)
+        | _ ->
+            internal_error st (Error.LoadMethodExpected call)
+      in
+      let id, st = call_method st name self_if_needed args in
+      let st = State.push st (Exp.Temp id) in
       Ok (st, None)
   | "SETUP_ANNOTATIONS" ->
-      let {State.module_name} = st in
-      let annotations = Ident.extend module_name PyCommon.annotations in
-      let st = State.register_name ~global:false st PyCommon.annotations annotations in
       let st = State.push_stmt st SetupAnnotations in
       Ok (st, None)
   | "IMPORT_NAME" ->
-      let name = co_names.(arg) in
-      import_name st name
+      let name = co_names.(arg) |> Ident.mk in
+      let* fromlist, st = State.pop_and_cast st in
+      let* level, st = State.pop_and_cast st in
+      let lhs, st = State.fresh_id st in
+      let rhs = Exp.ImportName {name; fromlist; level} in
+      let stmt = Stmt.Let {lhs; rhs} in
+      let st = State.push_stmt st stmt in
+      let st = State.push st (Exp.Temp lhs) in
+      Ok (st, None)
+  | "IMPORT_STAR" ->
+      let* module_object, st = State.pop_and_cast st in
+      let* id, st = call_builtin_function st ImportStar [module_object] in
+      let st = State.push st (Exp.Temp id) in
+      Ok (st, None)
   | "IMPORT_FROM" ->
-      let name = co_names.(arg) in
-      import_from st name
+      let name = co_names.(arg) |> Ident.mk in
+      let* exp = State.peek st in
+      let* exp = State.cast_exp st exp in
+      let lhs, st = State.fresh_id st in
+      let rhs = Exp.ImportFrom {name; exp} in
+      let stmt = Stmt.Let {lhs; rhs} in
+      let st = State.push_stmt st stmt in
+      let st = State.push st (Exp.Temp lhs) in
+      Ok (st, None)
   | "COMPARE_OP" ->
       let* cmp_op =
-        match List.nth Builtin.Compare.all arg with
+        match List.nth CompareOp.all arg with
         | Some op ->
             Ok op
         | None ->
             external_error st (Error.CompareOp arg)
       in
-      let* rhs, st = State.pop st in
-      let* lhs, st = State.pop st in
-      let id, st = call_builtin_function st (Compare cmp_op) [lhs; rhs] in
+      let* rhs, st = State.pop_and_cast st in
+      let* lhs, st = State.pop_and_cast st in
+      let* id, st = call_builtin_function st (Compare cmp_op) [lhs; rhs] in
       let st = State.push st (Exp.Temp id) in
       Ok (st, None)
   | "LOAD_CLOSURE" ->
-      let cell = get_cell_name code arg in
-      (* We currently do nothing. It will be up to the IR -> Textual step to deal with these *)
-      let exp = Exp.Ref cell in
-      let st = State.push st exp in
+      let name = get_cell_name code arg |> Ident.mk in
+      let rhs = Exp.LoadClosure {slot= arg; name} in
+      let lhs, st = State.fresh_id st in
+      let stmt = Stmt.Let {lhs; rhs} in
+      let st = State.push_stmt st stmt in
+      let st = State.push st (Exp.Temp lhs) in
       Ok (st, None)
   | "DUP_TOP" ->
       let* tos = State.peek st in
-      let st = State.push st tos in
+      let st = State.push_symbol st tos in
       Ok (st, None)
   | "UNPACK_SEQUENCE" ->
       unpack_sequence st arg
@@ -2121,37 +1814,25 @@ let parse_bytecode st ({FFI.Code.co_consts; co_names; co_varnames} as code)
          absolute offset right away *)
       let* next_offset = Offset.get ~loc next_offset_opt in
       let offset = next_offset + arg in
-      let arity = State.size st in
-      let* ssa_args, st = State.to_ssa st in
-      let ssa_parameters, st = State.mk_ssa_parameters st arity in
-      let label, st = State.get_label st offset ~ssa_parameters in
-      let jump = Jump.Absolute {ssa_args; label; offset} in
+      let* label = State.get_node_name st offset in
+      let {State.stack} = st in
+      let jump = TerminatorBuilder.mk_jump label stack in
       Ok (st, Some jump)
   | "JUMP_ABSOLUTE" ->
-      let arity = State.size st in
-      let* ssa_args, st = State.to_ssa st in
-      let ssa_parameters, st = State.mk_ssa_parameters st arity in
-      (* sanity check: we should already have allocated a label for this jump, if it is a backward
-         edge. *)
-      let* () =
-        if arg < instr_offset then
-          match State.lookup_label st arg with
-          | None ->
-              external_error st (Error.MissingBackEdge (instr_offset, arg))
-          | Some {Label.name; ssa_parameters} ->
-              let sz = List.length ssa_parameters in
-              if sz <> arity then internal_error st (Error.InvalidBackEdgeArity (name, arity, sz))
-              else Ok ()
-        else Ok ()
-      in
-      let label, st = State.get_label st arg ~ssa_parameters in
-      let jump = Jump.Absolute {ssa_args; label; offset= arg} in
+      let* label = State.get_node_name st arg in
+      let {State.stack} = st in
+      let jump = TerminatorBuilder.mk_jump label stack in
       Ok (st, Some jump)
   | "GET_ITER" ->
-      let* tos, st = State.pop st in
-      let id, st = call_builtin_function st GetIter [tos] in
+      let* tos, st = State.pop_and_cast st in
+      let* id, st = call_builtin_function st GetIter [tos] in
       let exp = Exp.Temp id in
       let st = State.push st exp in
+      Ok (st, None)
+  | "GET_AITER" ->
+      let* tos, st = State.pop_and_cast st in
+      let id, st = call_method st Ident.Special.aiter tos [] in
+      let st = State.push st (Exp.Temp id) in
       Ok (st, None)
   | "FOR_ITER" ->
       for_iter st arg next_offset_opt
@@ -2162,165 +1843,87 @@ let parse_bytecode st ({FFI.Code.co_consts; co_names; co_varnames} as code)
   | "DUP_TOP_TWO" ->
       let* tos0, st = State.pop st in
       let* tos1, st = State.pop st in
-      let st = State.push st tos1 in
-      let st = State.push st tos0 in
-      let st = State.push st tos1 in
-      let st = State.push st tos0 in
+      let st = State.push_symbol st tos1 in
+      let st = State.push_symbol st tos0 in
+      let st = State.push_symbol st tos1 in
+      let st = State.push_symbol st tos0 in
       Ok (st, None)
   | "EXTENDED_ARG" ->
       (* The FFI.Instruction framework already did the magic and this opcode can be ignored. *)
       Ok (st, None)
   | "POP_BLOCK" ->
-      let* _block, st = State.pop_block st in
       Ok (st, None)
   | "ROT_TWO" ->
       let* tos0, st = State.pop st in
       let* tos1, st = State.pop st in
-      let st = State.push st tos0 in
-      let st = State.push st tos1 in
+      let st = State.push_symbol st tos0 in
+      let st = State.push_symbol st tos1 in
       Ok (st, None)
   | "ROT_THREE" ->
       let* tos0, st = State.pop st in
       let* tos1, st = State.pop st in
       let* tos2, st = State.pop st in
-      let st = State.push st tos0 in
-      let st = State.push st tos2 in
-      let st = State.push st tos1 in
+      let st = State.push_symbol st tos0 in
+      let st = State.push_symbol st tos2 in
+      let st = State.push_symbol st tos1 in
       Ok (st, None)
   | "ROT_FOUR" ->
       let* tos0, st = State.pop st in
       let* tos1, st = State.pop st in
       let* tos2, st = State.pop st in
       let* tos3, st = State.pop st in
-      let st = State.push st tos0 in
-      let st = State.push st tos3 in
-      let st = State.push st tos2 in
-      let st = State.push st tos1 in
+      let st = State.push_symbol st tos0 in
+      let st = State.push_symbol st tos3 in
+      let st = State.push_symbol st tos2 in
+      let st = State.push_symbol st tos1 in
       Ok (st, None)
   | "SETUP_WITH" ->
-      (* TODO: share code with SETUP_FINALLY ? *)
-      let {State.loc} = st in
-      (* This instruction gives us a relative delta w.r.t the next offset, so we turn it into an
-         absolute offset right away *)
-      let* next_offset = Offset.get ~loc next_offset_opt in
-      let offset = next_offset + arg in
-      let* context_manager, st = State.pop st in
-      let st = State.push st (ContextManagerExit context_manager) in
-      let exp = Exp.LoadMethod (context_manager, PyCommon.enter) in
-      let lhs, st = call_function_with_unnamed_args st exp [] in
-      State.debug st "setup-with: current block size: %d@\n" (State.size st) ;
-      let arity = State.size st in
-      let ssa_parameters, st = State.mk_ssa_parameters st arity in
-      (* The "finally" block will have WITH_CLEANUP_START/FINISH that expect the Context Manager
-         to be on the stack *)
-      let _label, st = State.get_label st ~handler_type:Finally offset ~ssa_parameters in
-      let block = Block.mk Normal in
-      let st = State.push_block st block in
-      let st = State.push st (Exp.Temp lhs) in
+      let* context_manager, st = State.pop_and_cast st in
+      let st = State.push_symbol st (ContextManagerExit context_manager) in
+      let id, st = call_method st Ident.Special.enter context_manager [] in
+      let st = State.push st (Exp.Temp id) in
       Ok (st, None)
   | "BEGIN_FINALLY" ->
-      (* TODO: this is not fully correct, as BEGIN_FINALLY can be inserted by
-         the compiler in exception handlers with code like
-
-         ```
-         def f():
-             ...
-
-         try:
-             f()
-         except C as c:
-             print(c)
-         ```
-
-         To solve this, we need to think of a way to encode the push/pop of
-         the NULL this instruction inserts in the stack in a more precise way.
-         Using only the kind of block is not enough *)
       let {State.loc} = st in
-      (* BEGIN_FINALLY is used as a terminator to detect the beginning of "finally" blocks, as
-         they are not always the target of a SETUP_WITH opcode.
-         We create a jump to the next instruction.
-         We don't push anything on the stack as this path is not any expecting information *)
-      let* offset = Offset.get ~loc next_offset_opt in
-      let arity = State.size st in
-      let ssa_parameters, st = State.mk_ssa_parameters st arity in
-      (* Because we can't decide in SETUP_FINALLY if the block will be a finally vs except block,
-         we overwrite its type here. We also change the type of the current block to reflect this
-         decision *)
-      let label, st =
-        State.get_label st offset ~handler_type:Finally ~fix_type:Finally ~ssa_parameters
-      in
-      let st = State.set_handler_type st offset Finally in
-      let* ssa_args, st = State.to_ssa st in
-      let info = {Jump.label; offset; ssa_args} in
-      Ok (st, Some (Jump.Label info))
-  | "SETUP_FINALLY" ->
-      let {State.loc} = st in
-      (* This instruction gives us a relative delta w.r.t the next offset, so we turn it into an
-         absolute offset right away *)
       let* next_offset = Offset.get ~loc next_offset_opt in
-      let offset = next_offset + arg in
-      let arity = State.size st in
-      (* TODO:
-         this won't work correctly with Textual at the moment, because it will
-         create an except node with more than the (6) exception items the
-         runtime pust on the stack. We currently preserves the stack shape as
-         ssa parameters, which enable us to correctly track everything.
-
-         Once we decide to actively deal with exception in the frontend, we
-         should save the stack (internally, or as specially named variables)
-         and only leave the exception items as input argument of the except
-         node *)
-      let ssa_parameters, st = State.mk_ssa_parameters st arity in
-      State.debug st "setup-finally: current block size: %d@\n" (State.size st) ;
-      (* There's two possible targets during this block:
-         - the [finally] block which expects a [NULL] on the stack
-         - the [except] block which expects 3 values on the stack
-
-         Note that we don't know yet if the handler is a finally or an except.
-         So we do two things:
-         - we use [Except] as an handler type, and replace it with [Finally] in BEGIN_FINALLY if necessary
-         - we set the stack like a [Finally] handler, and we'll throw it away if enter an [Except] block
-         We'll make this decision if we have a BEGIN_FINALLY on the path *)
-      let _label, st = State.get_label st ~handler_type:Except offset ~ssa_parameters in
-      (* Fall-through to the rest of the "normal" code *)
-      let block = Block.mk Normal in
-      let st = State.push_block st block in
+      let* label = State.get_node_name st next_offset in
+      let st = State.push st Exp.none in
+      let {State.stack} = st in
+      let jump = TerminatorBuilder.mk_jump label stack in
+      Ok (st, Some jump)
+  | "SETUP_FINALLY" ->
       Ok (st, None)
   | "END_FINALLY" ->
-      (* See doc for [END_FINALLY]. *)
-      let* block, st = State.pop_block st in
-      let is_except = Block.is_except block in
-      let* st =
-        if is_except then
-          (* TODO: handle the re-raise case *)
-          (* pop the block and 6 values from the stack *)
-          let* _, st = State.pop_block st in
-          let* st =
-            let l = List.init 6 ~f:(fun x -> x) in
-            List.fold_result l ~init:st ~f:(fun st _ ->
-                let* _, st = State.pop st in
-                Ok st )
-          in
-          Ok st
-        else Ok st
+      let {State.loc} = st in
+      let* next_offset = Offset.get ~loc next_offset_opt in
+      let* ret, st = State.pop st in
+      let {State.stack} = st in
+      let label_offset =
+        match ret with Exp.CallFinallyReturn {offset} -> offset | _ -> next_offset
       in
-      Ok (st, None)
+      let* label = State.get_node_name st label_offset in
+      let jump = TerminatorBuilder.mk_jump label stack in
+      Ok (st, Some jump)
+  | "CALL_FINALLY" ->
+      let {State.loc} = st in
+      let* next_offset = Offset.get ~loc next_offset_opt in
+      let jump_offset = next_offset + arg in
+      let st = State.push_symbol st (Exp.CallFinallyReturn {offset= next_offset}) in
+      let* label = State.get_node_name st jump_offset in
+      let {State.stack} = st in
+      Ok (st, Some (TerminatorBuilder.mk_jump label stack))
   | "POP_FINALLY" ->
-      (* TODO: like [END_FINALLY], see official doc. We only support the "no exception" case for
-         now. Supporting exceptions will require duplicating some nodes.
-         We could just do nothing, but I wanted to have the 'return' logic in place for the
-         future *)
-      let* return_value, st =
+      (* see https://github.com/python/cpython/blob/3.8/Python/ceval.c#L2129 *)
+      let* st =
         if arg <> 0 then
           let* ret, st = State.pop st in
-          Ok (Some ret, st)
-        else Ok (None, st)
+          let* _, st = State.pop st in
+          let st = State.push_symbol st ret in
+          Ok st
+        else
+          let* _, st = State.pop st in
+          Ok st
       in
-      let* _, st = State.pop_block st in
-      (* MUST BE FINALLY BLOCK *)
-      (* TODO: insert popping of tos when CALL_FINALLY is supported. Right now
-         we didn't push anything on the stack so we don't pop anything *)
-      let st = match return_value with Some ret -> State.push st ret | None -> st in
       Ok (st, None)
   | "WITH_CLEANUP_START" ->
       with_cleanup_start st
@@ -2329,64 +1932,49 @@ let parse_bytecode st ({FFI.Code.co_consts; co_names; co_varnames} as code)
   | "RAISE_VARARGS" ->
       raise_varargs st arg
   | "POP_EXCEPT" ->
-      let {State.loc} = st in
-      (* From the doc: "The popped block must be an exception handler block, as implicitly created
-         when entering an except handler".
-         TODO: We do not check this for the momemt *)
-      let* _block, st = State.pop_block st in
-      (* POP the 3 remaining exceptions inputs *)
-      let* _, st = State.pop st in
-      let* _, st = State.pop st in
-      let* _, st = State.pop st in
-      (* Introduce a custom jump to the next instruction to exit the "except" node *)
-      let* offset = Offset.get ~loc next_offset_opt in
-      let arity = State.size st in
-      let* ssa_args, st = State.to_ssa st in
-      let ssa_parameters, st = State.mk_ssa_parameters st arity in
-      let label, st = State.get_label st offset ~ssa_parameters in
-      let jump = Jump.Absolute {ssa_args; label; offset} in
-      Ok (st, Some jump)
+      internal_error st (Error.UnsupportedOpcode opname)
   | "BUILD_TUPLE_UNPACK_WITH_CALL"
     (* No real difference betwen the two but in case of an error, which shouldn't happen since
        the code is known to compile *)
   | "BUILD_TUPLE_UNPACK" ->
-      build_collection_unpack st arg Tuple
+      build_collection st arg ~f:(fun values -> Exp.Collection {kind= Tuple; values; unpack= true})
   | "BUILD_LIST_UNPACK" ->
-      build_collection_unpack st arg List
+      build_collection st arg ~f:(fun values -> Exp.Collection {kind= List; values; unpack= true})
   | "BUILD_SET_UNPACK" ->
-      build_collection_unpack st arg Set
+      build_collection st arg ~f:(fun values -> Exp.Collection {kind= Set; values; unpack= true})
   | "BUILD_MAP_UNPACK_WITH_CALL" | "BUILD_MAP_UNPACK" ->
       (* No real difference betwen the two but in case of an error, which shouldn't happen since
          the code is known to compile *)
-      build_collection_unpack st arg Map
+      build_collection st arg ~f:(fun values -> Exp.Collection {kind= Map; values; unpack= true})
   | "YIELD_VALUE" ->
       (* TODO: it is quite uncertain how we'll deal with these in textual.
          At the moment this seems to correctly model the stack life-cycle, so
          I'm happy. We might change/improve things in the future *)
-      let* tos, st = State.pop st in
+      let* tos, st = State.pop_and_cast st in
       let st = State.push st (Exp.Yield tos) in
       Ok (st, None)
   | "YIELD_FROM" ->
       (* TODO: it is quite uncertain how we'll deal with these in textual.
          At the moment this seems to correctly model the stack life-cycle, so
          I'm happy. We might change/improve things in the future *)
-      let* exp, st = State.pop st in
+      let* exp, st = State.pop_and_cast st in
       (* TODO: learn more about this construct. My understanding is that the
                receiver stays on the stack if there's a value to yield.
                we probably should do some encoding like GET_ITER/FOR_ITER.
 
                For now, we leave it as is until it becomes a problem :D *)
       let* receiver = State.peek st in
+      let* receiver = State.cast_exp st receiver in
       (* TODO: it seems that sometimes the TOS is changed from receiver to exp
          at this point. Check C code and try to understand it better *)
-      let _, st = call_builtin_function st YieldFrom [receiver; exp] in
+      let* _, st = call_builtin_function st YieldFrom [receiver; exp] in
       Ok (st, None)
   | "GET_YIELD_FROM_ITER" ->
       (* TODO: it is quite uncertain how we'll deal with these in textual.
          At the moment this seems to correctly model the stack life-cycle, so
          I'm happy. We might change/improve things in the future *)
-      let* tos, st = State.pop st in
-      let id, st = call_builtin_function st GetYieldFromIter [tos] in
+      let* tos, st = State.pop_and_cast st in
+      let* id, st = call_builtin_function st GetYieldFromIter [tos] in
       let st = State.push st (Exp.Temp id) in
       Ok (st, None)
   | "LIST_APPEND" ->
@@ -2396,46 +1984,84 @@ let parse_bytecode st ({FFI.Code.co_consts; co_names; co_varnames} as code)
   | "MAP_ADD" ->
       collection_add st opname arg ~map:true DictSetItem
   | "DELETE_NAME" ->
-      let exp = get_name st co_names arg ~global:false in
-      delete st exp
+      let ident = Ident.mk co_names.(arg) in
+      let stmt = Stmt.Delete {scope= Name; ident} in
+      let st = State.push_stmt st stmt in
+      Ok (st, None)
   | "DELETE_GLOBAL" ->
-      let exp = get_name st co_names arg ~global:true in
-      delete st exp
+      let ident = Ident.mk co_names.(arg) in
+      let stmt = Stmt.Delete {scope= Global; ident} in
+      let st = State.push_stmt st stmt in
+      Ok (st, None)
   | "DELETE_FAST" ->
-      let name = co_varnames.(arg) in
-      delete st (Exp.LocalVar name)
+      let ident = Ident.mk co_varnames.(arg) in
+      let stmt = Stmt.Delete {scope= Fast; ident} in
+      let st = State.push_stmt st stmt in
+      Ok (st, None)
   | "DELETE_ATTR" ->
-      let name = co_names.(arg) in
-      let* tos, st = State.pop st in
-      let exp = Exp.GetAttr (tos, name) in
-      delete st exp
+      let attr = co_names.(arg) |> Ident.mk in
+      let* exp, st = State.pop_and_cast st in
+      let stmt = Stmt.DeleteAttr {exp; attr} in
+      let st = State.push_stmt st stmt in
+      Ok (st, None)
   | "DELETE_DEREF" ->
-      let exp = deref code arg in
-      delete st exp
+      let name = get_cell_name code arg |> Ident.mk in
+      let stmt = Stmt.DeleteDeref {name; slot= arg} in
+      let st = State.push_stmt st stmt in
+      Ok (st, None)
   | "DELETE_SUBSCR" ->
-      let* index, st = State.pop st in
-      let* exp, st = State.pop st in
-      let exp = Exp.Subscript {exp; index} in
-      delete st exp
+      let* index, st = State.pop_and_cast st in
+      let* exp, st = State.pop_and_cast st in
+      let* _id, st = call_builtin_function st DeleteSubscr [exp; index] in
+      Ok (st, None)
   | "GET_AWAITABLE" ->
-      let* tos, st = State.pop st in
-      let id, st = call_builtin_function st GetAwaitable [tos] in
+      let* tos, st = State.pop_and_cast st in
+      let* id, st = call_builtin_function st GetAwaitable [tos] in
       let st = State.push st (Exp.Temp id) in
       Ok (st, None)
+  | "GET_ANEXT" ->
+      let* tos = State.peek st in
+      let* tos = State.cast_exp st tos in
+      let id, st = call_method st Ident.Special.anext tos [] in
+      let* id, st = call_builtin_function st GetAwaitable [Exp.Temp id] in
+      let st = State.push st (Exp.Temp id) in
+      Ok (st, None)
+  | "BEFORE_ASYNC_WITH" ->
+      (* See https://github.com/python/cpython/blob/3.8/Python/ceval.c#L3237 *)
+      let* tos, st = State.pop_and_cast st in
+      let st = State.push_symbol st (ContextManagerExit tos) in
+      let id, st = call_method st Ident.Special.enter tos [] in
+      let st = State.push st (Exp.Temp id) in
+      Ok (st, None)
+  | "SETUP_ASYNC_WITH" ->
+      (* See https://github.com/python/cpython/blob/3.8/Python/ceval.c#L3261 *)
+      (* This is nope operation until we translate exceptino throwing *)
+      Ok (st, None)
+  | "END_ASYNC_FOR" ->
+      (* This instructions designates the end of an async for loop. Such a loop
+         always ends with an exception.
+         https://quentin.pradet.me/blog/using-asynchronous-for-loops-in-python.html
+         https://superfastpython.com/asyncio-async-for/
+         We model it like a throwing exception for now. This offset will not be reached
+         by our DFS anyway since we don't model exceptionnal edges yet.
+      *)
+      Ok (st, Some (TerminatorBuilder.Throw Exp.none))
   | "UNPACK_EX" ->
       (* The low byte of counts is the number of values before the list value, the high byte of
          counts the number of values after it. *)
-      let to_int i = Exp.Const (Int (Z.of_int i)) in
+      let to_int i = Exp.of_int i in
       let nr_before = arg land 0xff in
       let nr_after = (arg lsr 8) land 0xff in
-      let* tos, st = State.pop st in
+      let* tos, st = State.pop_and_cast st in
       (* [UnpackEx m n exp] should unpack the [exp] collection into
          - [m] single values which are the first items in [exp]
          - [n] single values which are the latest items in [exp]
          - the rest stays into an iterable collection.
          We'll consider it returns a tuple of the right size that we can index
          to populate the stack *)
-      let res_id, st = call_builtin_function st UnpackEx [to_int nr_before; to_int nr_after; tos] in
+      let* res_id, st =
+        call_builtin_function st UnpackEx [to_int nr_before; to_int nr_after; tos]
+      in
       let res = Exp.Temp res_id in
       let rec push st nr =
         if nr > 0 then
@@ -2450,235 +2076,625 @@ let parse_bytecode st ({FFI.Code.co_consts; co_names; co_varnames} as code)
       internal_error st (Error.UnsupportedOpcode opname)
 
 
-let rec parse_bytecode_until_terminator ({State.loc} as st) code instructions =
+let get_successors_offset {FFI.Instruction.opname; arg} =
+  match opname with
+  | "LOAD_CONST"
+  | "LOAD_NAME"
+  | "LOAD_GLOBAL"
+  | "LOAD_FAST"
+  | "LOAD_ATTR"
+  | "LOAD_CLASSDEREF"
+  | "LOAD_DEREF"
+  | "STORE_NAME"
+  | "STORE_GLOBAL"
+  | "STORE_FAST"
+  | "STORE_ATTR"
+  | "STORE_SUBSCR"
+  | "STORE_DEREF"
+  | "CALL_FUNCTION"
+  | "CALL_FUNCTION_KW"
+  | "CALL_FUNCTION_EX"
+  | "POP_TOP"
+  | "BINARY_ADD"
+  | "BINARY_SUBTRACT"
+  | "BINARY_AND"
+  | "BINARY_FLOOR_DIVIDE"
+  | "BINARY_LSHIFT"
+  | "BINARY_MATRIX_MULTIPLY"
+  | "BINARY_MODULO"
+  | "BINARY_MULTIPLY"
+  | "BINARY_OR"
+  | "BINARY_POWER"
+  | "BINARY_RSHIFT"
+  | "BINARY_TRUE_DIVIDE"
+  | "BINARY_XOR"
+  | "INPLACE_ADD"
+  | "INPLACE_SUBTRACT"
+  | "INPLACE_AND"
+  | "INPLACE_FLOOR_DIVIDE"
+  | "INPLACE_LSHIFT"
+  | "INPLACE_MATRIX_MULTIPLY"
+  | "INPLACE_MODULO"
+  | "INPLACE_MULTIPLY"
+  | "INPLACE_OR"
+  | "INPLACE_POWER"
+  | "INPLACE_RSHIFT"
+  | "INPLACE_TRUE_DIVIDE"
+  | "INPLACE_XOR"
+  | "UNARY_POSITIVE"
+  | "UNARY_NEGATIVE"
+  | "UNARY_NOT"
+  | "UNARY_INVERT"
+  | "MAKE_FUNCTION"
+  | "BUILD_CONST_KEY_MAP"
+  | "BUILD_LIST"
+  | "BUILD_SET"
+  | "BUILD_TUPLE"
+  | "BUILD_SLICE"
+  | "BUILD_STRING"
+  | "BUILD_MAP"
+  | "BINARY_SUBSCR"
+  | "LOAD_BUILD_CLASS"
+  | "LOAD_METHOD"
+  | "CALL_METHOD"
+  | "SETUP_ANNOTATIONS"
+  | "IMPORT_NAME"
+  | "IMPORT_FROM"
+  | "IMPORT_STAR"
+  | "COMPARE_OP"
+  | "LOAD_CLOSURE"
+  | "DUP_TOP"
+  | "UNPACK_SEQUENCE"
+  | "FORMAT_VALUE"
+  | "GET_AITER"
+  | "GET_ANEXT"
+  | "GET_ITER"
+  | "DUP_TOP_TWO"
+  | "EXTENDED_ARG"
+  | "POP_BLOCK"
+  | "ROT_TWO"
+  | "ROT_THREE"
+  | "ROT_FOUR"
+  | "SETUP_WITH"
+  | "SETUP_FINALLY"
+  | "POP_FINALLY"
+  | "WITH_CLEANUP_START"
+  | "WITH_CLEANUP_FINISH"
+  | "POP_EXCEPT"
+  | "BUILD_TUPLE_UNPACK_WITH_CALL"
+  | "BUILD_TUPLE_UNPACK"
+  | "BUILD_LIST_UNPACK"
+  | "BUILD_SET_UNPACK"
+  | "BUILD_MAP_UNPACK_WITH_CALL"
+  | "BUILD_MAP_UNPACK"
+  | "YIELD_VALUE"
+  | "YIELD_FROM"
+  | "GET_YIELD_FROM_ITER"
+  | "LIST_APPEND"
+  | "SET_ADD"
+  | "MAP_ADD"
+  | "DELETE_NAME"
+  | "DELETE_GLOBAL"
+  | "DELETE_FAST"
+  | "DELETE_ATTR"
+  | "DELETE_DEREF"
+  | "DELETE_SUBSCR"
+  | "GET_AWAITABLE"
+  | "BEFORE_ASYNC_WITH"
+  | "SETUP_ASYNC_WITH"
+  | "UNPACK_EX" ->
+      `NextInstrOnly
+  | "RETURN_VALUE" ->
+      `Return
+  | "POP_JUMP_IF_TRUE" | "POP_JUMP_IF_FALSE" ->
+      `NextInstrOrAbsolute arg
+  | "JUMP_IF_TRUE_OR_POP" | "JUMP_IF_FALSE_OR_POP" ->
+      `NextInstrWithPopOrAbsolute arg
+  | "FOR_ITER" ->
+      `NextInstrOrRelativeWith2Pop arg
+  | "JUMP_FORWARD" ->
+      `Relative arg
+  | "CALL_FINALLY" ->
+      `CallFinallyRelative arg
+  | "BEGIN_FINALLY" ->
+      `BeginFinally
+  | "END_FINALLY" ->
+      `EndFinally
+  | "JUMP_ABSOLUTE" ->
+      `Absolute arg
+  | "END_ASYNC_FOR" | "RAISE_VARARGS" ->
+      `Throw
+  | _ ->
+      `UnsupportedOpcode
+
+
+let lookup_remaining = function
+  | [] ->
+      (None, false)
+  | {FFI.Instruction.offset; is_jump_target} :: _ ->
+      (Some offset, is_jump_target)
+
+
+module Subroutine = struct
+  (* We keep track of the subroutine call stack during CFG dfs.
+     Then, we hit a END_FINALLY, the current frame is either [None]
+     or [Some offset] and we can make a decision.
+     This approach is rather fragile because a the order of return
+     adresses in the real operand stack could **in theory** be messed
+     up by some stack operaion like ROT_TWO, ROT_THREE and so one.
+     We do not try to detect such a strange situation for now.
+  *)
+
+  type call_stack = int option list (* stack of return offsets *)
+
+  type edge =
+    | Call of {return: int}  (** CALL_FINALLY *)
+    | Tailcall  (** BEGIN_FINALLY *)
+    | Return of {from: int}  (** END_FINALLY *)
+    | Nop  (** No action on subroutines *)
+
+  let exec dest stack edge =
+    match edge with
+    | Call {return} ->
+        Ok (None, Some return :: stack)
+    | Tailcall ->
+        Ok (None, None :: stack)
+    | Return {from} -> (
+      match stack with
+      | [] ->
+          Error (L.InternalError, None, Error.SubroutineEmptyStack dest)
+      | None :: stack ->
+          Ok (None, stack)
+      | Some return_offset :: stack ->
+          Ok (Some (from, return_offset), stack) )
+    | Nop ->
+        Ok (None, stack)
+end
+
+type cfg_info =
+  { successors: (Offset.t * int * Subroutine.edge) list
+  ; predecessors: Offset.t list
+  ; instructions: FFI.Instruction.t list }
+
+let dummy_cfg_info = {successors= []; predecessors= []; instructions= []}
+
+let build_cfg_skeleton_without_predecessors {FFI.Code.instructions} :
+    (cfg_info IMap.t, Error.t) result =
   let open IResult.Let_syntax in
-  let label_info, st = State.starts_with_jump_target st instructions in
-  match label_info with
-  | Some (offset, label) ->
-      State.debug st "At offset %d, label spotted: %a@\n" offset Label.pp label ;
-      (* If the analysis reached a known jump target, stop processing the node. *)
-      let* ssa_args, st = State.to_ssa st in
-      let* offset = Offset.of_code instructions |> Offset.get ~loc in
-      let info = {Jump.label; offset; ssa_args} in
-      Ok (st, Some (Jump.Label info), instructions)
-  | None -> (
-    (* Otherwise, continue the analysis of the bytecode *)
+  let process_instr map action next_offset_opt next_is_jump_target
+      ({FFI.Instruction.opname; starts_line; offset} as instr) instructions =
+    let get_next_offset () =
+      Result.of_option
+        ~error:(L.InternalError, starts_line, Error.NextOffsetMissing)
+        next_offset_opt
+    in
+    let current_node_offset, current_instructions, action =
+      match action with
+      | `StartNewOne ->
+          (offset, instructions, `InNodeStartingAt (offset, instructions))
+      | `InNodeStartingAt (current_node_offset, current_instructions) ->
+          (current_node_offset, current_instructions, action)
+    in
+    let register_current_node successors =
+      let predecessors = [] in
+      (* we will update this field lated after a first pass *)
+      Ok
+        ( IMap.add current_node_offset
+            {successors; predecessors; instructions= current_instructions}
+            map
+        , `StartNewOne )
+    in
+    match get_successors_offset instr with
+    | `NextInstrOnly when not next_is_jump_target ->
+        Ok (map, action)
+    | `NextInstrOnly ->
+        let* next_offset = get_next_offset () in
+        register_current_node [(next_offset, 0, Nop)]
+    | `Throw | `Return ->
+        register_current_node []
+    | `NextInstrWithPopOrAbsolute other_offset ->
+        let* next_offset = get_next_offset () in
+        register_current_node [(next_offset, -1, Nop); (other_offset, 0, Nop)]
+    | `NextInstrOrAbsolute other_offset ->
+        let* next_offset = get_next_offset () in
+        register_current_node [(next_offset, 0, Nop); (other_offset, 0, Nop)]
+    | `NextInstrOrRelativeWith2Pop delta ->
+        let* next_offset = get_next_offset () in
+        register_current_node [(next_offset, 0, Nop); (next_offset + delta, -2, Nop)]
+    | `Relative delta ->
+        let* next_offset = get_next_offset () in
+        register_current_node [(next_offset + delta, 0, Nop)]
+    | `BeginFinally ->
+        let* next_offset = get_next_offset () in
+        register_current_node [(next_offset, 0, Tailcall)]
+    | `CallFinallyRelative delta ->
+        let* next_offset = get_next_offset () in
+        let absolute_target = next_offset + delta in
+        register_current_node [(absolute_target, 0, Call {return= next_offset})]
+    | `EndFinally ->
+        let* next_offset = get_next_offset () in
+        (* we may modify these successors later *)
+        register_current_node [(next_offset, 0, Return {from= current_node_offset})]
+    | `Absolute offset ->
+        register_current_node [(offset, 0, Nop)]
+    | `UnsupportedOpcode ->
+        Error (L.InternalError, starts_line, Error.UnsupportedOpcode opname)
+  in
+  let rec loop map action instructions =
     match instructions with
     | [] ->
-        Ok (st, None, [])
+        Ok map
     | instr :: remaining ->
-        let next_offset_opt = Offset.of_code remaining in
-        let* st, terminator = parse_bytecode st code instr next_offset_opt in
-        if Option.is_some terminator then Ok (st, terminator, remaining)
-        else parse_bytecode_until_terminator st code remaining )
-
-
-let mk_node st label code instructions =
-  let open IResult.Let_syntax in
-  let label_loc = Location.of_instructions instructions in
-  let st = State.enter_node st label in
-  let* st, jump_op, instructions = parse_bytecode_until_terminator st code instructions in
-  (* Collect all the statements to be added to the node *)
-  let stmts, st = State.drain_stmts st in
-  let {State.loc= last_loc} = st in
-  let jump_op =
-    match jump_op with
-    | None ->
-        (* Unreachable: Python inserts [return None] at the end of any block
-           without an explicit returns *)
-        L.die ExternalError "mk_node: reached the EOF without a terminator"
-    | Some jump_op ->
-        jump_op
+        let next_offset_opt, next_is_jump_target = lookup_remaining remaining in
+        let* map, action =
+          process_instr map action next_offset_opt next_is_jump_target instr instructions
+        in
+        loop map action remaining
   in
-  match (jump_op : _ Jump.t) with
-  | Absolute info ->
-      let last = Terminator.of_jump (`OneTarget info) in
-      let node = {Node.label; last; stmts; last_loc; label_loc} in
-      Ok (st, instructions, node)
-  | Return ret ->
-      let last = Terminator.Return ret in
-      let node = {Node.label; last; stmts; last_loc; label_loc} in
-      Ok (st, instructions, node)
-  | Label ({offset} as info) ->
-      (* Current invariant, might/will change with the introduction of * back-edges *)
-      let opt = State.lookup_label st offset in
-      if Option.is_none opt then L.die InternalError "stumbled upon unregistered label" ;
-      (* A label was spotted after a non Terminator instruction. Insert a jump to this label to
-         create a proper node, and resume the processing. *)
-      let last = Terminator.of_jump (`OneTarget info) in
-      let node = {Node.label; last; stmts; last_loc; label_loc} in
-      Ok (st, instructions, node)
-  | TwoWay {condition; next_info; other_info} ->
-      (* The current node ended up with a two-way jump. Either continue to the "next"
-         (fall-through) part of the code, or jump to the "other" section of the code. For this
-         purpose, register a fresh label for the jump. *)
-      (* Register the jump target *)
-      let last = Terminator.of_jump (`TwoTargets (condition, next_info, other_info)) in
-      let node = {Node.label; last; stmts; last_loc; label_loc} in
-      Ok (st, instructions, node)
-  | Throw exp ->
-      (* TODO: Track exceptions *)
-      let node = {Node.label; last= Throw exp; stmts; last_loc; label_loc} in
-      Ok (st, instructions, node)
+  loop IMap.empty `StartNewOne instructions
 
 
-let rec mk_nodes st label code instructions =
+module ISet = IInt.Set
+
+let set_predecessor ~pred ~succ map =
+  let ({predecessors} as info) = IMap.find_opt succ map |> Option.value ~default:dummy_cfg_info in
+  IMap.add succ {info with predecessors= pred :: predecessors} map
+
+
+let optionally_set_predecessor ~from ~offset map =
+  Option.value_map from ~default:map ~f:(fun from -> set_predecessor ~pred:from ~succ:offset map)
+
+
+let change_successors_because_of_subroutine_return ~from ~return map =
+  IMap.find_opt from map
+  |> Option.value_map ~default:map ~f:(fun {instructions} ->
+         IMap.add from {successors= [(return, 0, Nop)]; instructions; predecessors= []} map )
+
+
+let build_topological_order cfg_skeleton_without_predecessors =
+  (* weakly topological order *)
   let open IResult.Let_syntax in
-  let* st, instructions, node = mk_node st label code instructions in
-  (* Python bytecode has deadcode. From what we can see for now:
-     - the compiler inserts [return None] at the end of every function, even if all execution path
-       have returned. For example in
-       ```
-       if foo:
-         return X
-       else:
-         return Y
-       ```
-       the compiler will insert an addition [return None] after everything.
-       This one is not a real problem.
+  let rec visit ?from (call_stack : Subroutine.call_stack) (seen, map, post_visited)
+      (offset, _, subroutine_edge) =
+    if ISet.mem offset seen then
+      let map = optionally_set_predecessor ~from ~offset map in
+      Ok (seen, map, post_visited)
+    else
+      let* opt_succ, call_stack = Subroutine.exec offset call_stack subroutine_edge in
+      match opt_succ with
+      | None ->
+          (* regular case *)
+          let {successors} =
+            IMap.find_opt offset cfg_skeleton_without_predecessors
+            |> Option.value ~default:dummy_cfg_info
+          in
+          let seen = ISet.add offset seen in
+          let* seen, map, post_visited =
+            List.fold_result successors ~f:(visit ~from:offset call_stack)
+              ~init:(seen, map, post_visited)
+          in
+          let map = optionally_set_predecessor ~from ~offset map in
+          let post_visited = offset :: post_visited in
+          Ok (seen, map, post_visited)
+      | Some (from, return) ->
+          (* this a subroutine indirect return edge: we need to change route *)
+          let map = change_successors_because_of_subroutine_return ~from ~return map in
+          visit ~from call_stack (seen, map, post_visited) (return, 0, Subroutine.Nop)
+  in
+  let+ _, cfg, post_visited =
+    visit [] (ISet.empty, cfg_skeleton_without_predecessors, []) (0, 0, Nop)
+  in
+  (post_visited, cfg)
 
-     - return/throw in loops are followed by a "jump back to the start of the loop".
-       This is more problematic because this jump doesn't have a stack compatible with the one at
-       the start of the loop: it is often empty (especially after a return) when the start of the
-       loop usually have at least the iterator stacked.
 
-     For these reason, we are also draining the stack here, and skipping all opcodes until we
-     reach a label where to resume processing. *)
-  let rec find_next_label st = function
+let constant_folding_ssa_params st succ_name {predecessors} =
+  let open IResult.Let_syntax in
+  let* predecessors_stacks =
+    List.fold_result predecessors ~init:(st, `AllAvailable, [], [])
+      ~f:(fun ((st, status, predecessors, stacks) as acc) predecessor ->
+        match status with
+        | `AllAvailable -> (
+            let* last_of_predecessor = State.get_terminal_node st predecessor succ_name in
+            match last_of_predecessor with
+            | `NotYetThere _predecessor_name ->
+                (* Because we use a topological order, if we reach a node with a predecessor
+                   that has not been reached yet, it implies we are considering a back edge
+                   in the DFS *)
+                let* st = State.record_stack_at_loop_header st succ_name in
+                Ok (st, `AtLeastOneNotAvailable, predecessors, stacks)
+            | `AlreadyThere (predecessor_name, args) ->
+                Ok (st, `AllAvailable, predecessor_name :: predecessors, args :: stacks) )
+        | _ ->
+            Ok acc )
+  in
+  let st, bottom_stack =
+    let st, status, predecessors, stacks = predecessors_stacks in
+    match status with
+    | `AtLeastOneNotAvailable ->
+        let {State.stack} = st in
+        let arity = List.length stack in
+        let st =
+          List.fold predecessors ~init:st ~f:(fun st pred_name ->
+              State.drop_first_args_terminal_node st ~pred_name ~succ_name arity )
+        in
+        (st, stack)
+    | `AllAvailable when List.length predecessors <= 0 ->
+        (st, [])
+    | `AllAvailable ->
+        let stack0 =
+          match stacks with
+          | [] ->
+              L.die InternalError "there should be at least one predecessor"
+          | stack :: _ ->
+              stack
+        in
+        let k = IList.k_first_columns_same_cell ~equal:Exp.equal_opstack_symbol stacks in
+        (* for all 0 <= i < k-1, forall 0 < j < n_preds, stacks[j][i]=stacks[0][i]
+           with n_preds = List.length stacks *)
+        let st =
+          List.fold predecessors ~init:st ~f:(fun st pred_name ->
+              State.drop_first_args_terminal_node st ~pred_name ~succ_name k )
+        in
+        let bottom_stack = List.take stack0 k |> List.rev in
+        (st, bottom_stack)
+  in
+  Ok (st, bottom_stack)
+
+
+let process_node st code ~offset ~arity ({instructions; successors} as info) =
+  let open IResult.Let_syntax in
+  let* name = State.get_node_name st offset in
+  let* st, bottom_stack = constant_folding_ssa_params st name info in
+  let ({State.loc= first_loc} as st) = State.enter_node st ~offset ~arity bottom_stack in
+  let ssa_parameters = State.get_ssa_parameters st in
+  let {State.stack} = st in
+  State.debug st "              %a@\n" (Stack.pp ~pp:Exp.pp_opstack_symbol) stack ;
+  let show_completion () =
+    State.debug st "Successors: %a@\n" (Pp.comma_seq F.pp_print_int) (List.map successors ~f:fst3) ;
+    State.debug st "@\n"
+  in
+  let rec loop st = function
     | [] ->
-        Ok (None, st)
-    | instr :: remaining_instructions as instructions -> (
-        (* If the next instruction has a label, use it, otherwise pick a fresh one. *)
-        let label_info, st = State.instr_is_jump_target st instr in
-        match label_info with
-        | Some (offset, label) ->
-            State.debug st "mk_nodes: spotted label %a at offset %a@\n" Label.pp label Offset.pp
-              offset ;
-            let {Label.ssa_parameters} = label in
-            (* When an except label is created, we can't decide yet if it will
-               be an except or finally. Here, we know, so we can fix the arity
-               of the "except" entry block to match the 3 exception inputs pushed by
-               the Python runtime and pushed them on a newly added exception block *)
-            let ssa_parameters, st =
-              if Label.is_except label then
-                let l = List.init 6 ~f:(fun x -> x) in
-                let st, ssa_ids =
-                  List.fold_left ~init:(st, ssa_parameters) l ~f:(fun (st, ssa_ids) _ ->
-                      let id, st = State.fresh_id st in
-                      (st, id :: ssa_ids) )
-                in
-                (ssa_ids, st)
-              else (ssa_parameters, st)
-            in
-            let st = State.process_label st offset ssa_parameters in
-            (* TODO: Fix this API *)
-            let label = {label with Label.ssa_parameters} in
-            (* Don't forget to keep [instr] here *)
-            Ok (Some (label, instructions), st)
+        let {State.loc} = st in
+        Error (L.InternalError, loc, Error.NextOffsetMissing)
+    | instr :: remaining -> (
+        let next_offset_opt, next_is_jump_target = lookup_remaining remaining in
+        let* st, opt_terminator = parse_bytecode st code instr next_offset_opt in
+        let {State.stack} = st in
+        State.debug st "              %a@\n" (Stack.pp ~pp:Exp.pp_opstack_symbol) stack ;
+        match opt_terminator with
+        | Some last ->
+            let {FFI.Instruction.offset} = instr in
+            let* new_last = State.check_terminator_if_back_edge st offset last in
+            let last = Option.value new_last ~default:last in
+            let {State.loc= last_loc} = st in
+            let stmts = State.get_stmts st in
+            let st = State.add_new_node st name ~first_loc ~last_loc ssa_parameters stmts last in
+            show_completion () ;
+            Ok st
+        | None when next_is_jump_target ->
+            let {State.loc= last_loc; stack} = st in
+            let stmts = State.get_stmts st in
+            let* next_offset = Offset.get ~loc:last_loc next_offset_opt in
+            let* next_name = State.get_node_name st next_offset in
+            let last = TerminatorBuilder.mk_jump next_name stack in
+            let st = State.add_new_node st name ~first_loc ~last_loc ssa_parameters stmts last in
+            show_completion () ;
+            Ok st
         | None ->
-            State.debug st "mk_nodes: skipping dead instruction %a@\n" FFI.Instruction.pp instr ;
-            find_next_label st remaining_instructions )
+            loop st remaining )
   in
-  let* label_info, st = find_next_label st instructions in
-  match label_info with
-  | None ->
-      Ok (st, [node])
-  | Some (label, instructions) ->
-      let* st, nodes = mk_nodes st label code instructions in
-      Ok (st, node :: nodes)
+  loop st instructions
 
 
-module Object = struct
-  (** Everything in Python is an [Object]. A function is an [Object], a class is an [Object]. We
-      will refine these into functions, classes and closures during the translation to Textual. *)
+let build_cfg ~debug ~code_qual_name code =
+  let open IResult.Let_syntax in
+  let loc = Location.of_code code in
+  let* cfg_skeleton_without_predecessors = build_cfg_skeleton_without_predecessors code in
+  let* topological_order, cfg_skeleton =
+    build_topological_order cfg_skeleton_without_predecessors
+  in
+  let get_info offset =
+    match IMap.find_opt offset cfg_skeleton with
+    | None ->
+        Error (L.InternalError, loc, Error.MissingNodeInformation offset)
+    | Some l ->
+        Ok l
+  in
+  let visit (st, arity_map) offset =
+    let* ({successors} as info) = get_info offset in
+    let* arity =
+      match IMap.find_opt offset arity_map with
+      | Some arity ->
+          Ok arity
+      | None ->
+          internal_error st (Error.MissingNodeInformation offset)
+    in
+    let* st = process_node st code ~offset ~arity info in
+    let arity = State.size st in
+    let* arity_map =
+      List.fold_result successors ~init:arity_map ~f:(fun arity_map (succ, delta, _) ->
+          let succ_arity = arity + delta in
+          if IMap.mem succ arity_map then
+            let current_succ_arity = IMap.find succ arity_map in
+            if not (Int.equal current_succ_arity succ_arity) then
+              internal_error st (Error.IllFormedOpstack succ)
+            else Ok arity_map
+          else Ok (IMap.add succ succ_arity arity_map) )
+    in
+    Ok (st, arity_map)
+  in
+  let qual_name = code_qual_name code in
+  let st = State.enter ~debug ~code_qual_name ~loc ~cfg_skeleton qual_name in
+  let* st, _ = List.fold_result topological_order ~init:(st, IMap.add 0 0 IMap.empty) ~f:visit in
+  let* cfg = CFG.of_builder st.State.cfg code in
+  Ok cfg
 
-  type node = State.t Node.t
-
-  type t =
-    { name: Ident.t
-    ; toplevel: node list
-    ; objects: (Location.t * t) list (* TODO: maybe turn this into a map using classes/functions *)
-    ; classes: SSet.t
-    ; functions: Ident.t SMap.t }
-
-  let rec pp fmt {name; toplevel; objects; classes; functions} =
-    F.fprintf fmt "@[<hv2>object %a:@\n" Ident.pp name ;
-    if not (List.is_empty toplevel) then (
-      F.fprintf fmt "@[<hv2>code:@\n" ;
-      List.iter toplevel ~f:(F.fprintf fmt "@[<hv2>%a@]@\n" Node.pp) ;
-      F.fprintf fmt "@]@\n" ) ;
-    if not (List.is_empty objects) then (
-      F.fprintf fmt "@[<hv2>objects:@\n" ;
-      List.iter objects ~f:(fun (_, obj) -> F.fprintf fmt "@[%a@]@\n" pp obj) ;
-      F.fprintf fmt "@]@\n" ) ;
-    if not (SSet.is_empty classes) then (
-      F.fprintf fmt "@[<hv2>classes:@\n" ;
-      SSet.iter (F.fprintf fmt "@[%a@]@\n" F.pp_print_string) classes ;
-      F.fprintf fmt "@]@\n" ) ;
-    if not (SMap.is_empty functions) then (
-      F.fprintf fmt "@[<hv2>functions:@\n" ;
-      SMap.iter (fun short long -> F.fprintf fmt "@[%s -> %a@]@\n" short Ident.pp long) functions ;
-      F.fprintf fmt "@]" )
-end
 
 module Module = struct
-  (** A module is just the "main" [Object] of a Python file, often called toplevel too *)
-  type t = Object.t
+  type t = {name: Ident.t; toplevel: CFG.t; functions: CFG.t QualName.Map.t}
 
-  let pp fmt obj = F.fprintf fmt "module@\n%a@\n@\n" Object.pp obj
+  let pp fmt {name; toplevel; functions} =
+    F.fprintf fmt "@[<hv2>module %a:@\n@\n" Ident.pp name ;
+    F.fprintf fmt "@[<hv2>%a@]@\n" (CFG.pp ~name:"toplevel") toplevel ;
+    QualName.Map.iter
+      (fun qual_name cfg ->
+        let name = F.asprintf "%a" QualName.pp qual_name in
+        F.fprintf fmt "@[<hv2>%a@]@\n" (CFG.pp ~name) cfg )
+      functions ;
+    F.fprintf fmt "@]@\n"
 end
 
-(** Patch the name of a list/set/dict comprehension objects.
+module CodeMap : Caml.Map.S with type key = FFI.Code.t = Caml.Map.Make (FFI.Code)
 
-    List comprehensions generate code blocks all named [<listcomp>], so we need to tell them apart.
-    We use their location to distinguish them. Also, their [code] object might not have the
-    [<local>] prefix we see during the process of [MAKE_FUNCTION].
-
-    Same things happen for [<setcomp>] and [<dictcomp>] *)
-let patch_comp_object_name st {FFI.Code.co_name; co_firstlineno} =
-  if String.equal "<listcomp>" co_name then
-    sprintf "%s<listcomp-%d>" (if State.is_toplevel st then "" else "<locals>.") co_firstlineno
-  else if String.equal "<setcomp>" co_name then
-    sprintf "%s<setcomp-%d>" (if State.is_toplevel st then "" else "<locals>.") co_firstlineno
-  else if String.equal "<dictcomp>" co_name then
-    sprintf "%s<dictcomp-%d>" (if State.is_toplevel st then "" else "<locals>.") co_firstlineno
-  else co_name
-
-
-let rec mk_object st ({FFI.Code.instructions; co_consts} as code) =
-  let open IResult.Let_syntax in
-  let {State.module_name; loc} = st in
-  let label, st = State.get_label st 0 ~ssa_parameters:[] in
-  let st = State.process_label st 0 [] in
-  let* ({State.classes; functions} as st), nodes = mk_nodes st label code instructions in
-  let* objects =
-    Array.fold_result co_consts ~init:[] ~f:(fun objects constant ->
-        match constant with
-        | FFI.Constant.PYCCode code ->
-            let name = patch_comp_object_name st code in
-            let module_name = Ident.extend module_name name in
-            let loc = Location.of_code code in
-            let st = State.enter st ~loc module_name in
-            let* obj = mk_object st code in
-            Ok (obj :: objects)
-        | _ ->
-            Ok objects )
+let build_code_object_unique_name file_path code =
+  let rec visit map outer_name ({FFI.Code.co_consts} as code) =
+    if CodeMap.mem code map then map
+    else
+      let map = CodeMap.add code outer_name map in
+      Array.fold co_consts ~init:map ~f:(fun map constant ->
+          match constant with
+          | FFI.Constant.PYCCode code ->
+              let outer_name = QualName.extend outer_name code.FFI.Code.co_name in
+              visit map outer_name code
+          | _ ->
+              map )
   in
-  let objects = List.rev objects in
-  Ok (loc, {Object.name= module_name; toplevel= nodes; objects; classes; functions})
+  let map = visit CodeMap.empty (QualName.from_qualified_string ~sep:'/' file_path) code in
+  fun code -> CodeMap.find_opt code map
 
 
-let mk ~debug ({FFI.Code.co_filename} as code) =
+let fold_all_inner_codes_and_build_map ~code_qual_name ~(f : FFI.Code.t -> 'a pyresult) code :
+    'a QualName.Map.t pyresult =
   let open IResult.Let_syntax in
+  let read_code_qual_name code =
+    let loc = Location.of_code code in
+    match code_qual_name code with
+    | Some qual_name ->
+        Ok qual_name
+    | None ->
+        Error (L.InternalError, loc, Error.CodeWithoutQualifiedName code)
+  in
+  let fold_codes map co_consts =
+    let rec visit map = function
+      | FFI.Constant.PYCCode ({FFI.Code.co_consts} as code) ->
+          let* qual_name = read_code_qual_name code in
+          let* elt = f code in
+          let map = QualName.Map.add qual_name elt map in
+          Array.fold_result co_consts ~init:map ~f:visit
+      | _ ->
+          Ok map
+    in
+    Array.fold_result co_consts ~init:map ~f:visit
+  in
+  fold_codes QualName.Map.empty code.FFI.Code.co_consts
+
+
+let test_cfg_skeleton ~code_qual_name code =
+  let test =
+    let open IResult.Let_syntax in
+    let* map = build_cfg_skeleton_without_predecessors code in
+    build_topological_order map
+  in
+  match test with
+  | Error (_, _, err) ->
+      L.internal_error "IR error: %a@\n" Error.pp_kind err
+  | Ok (topological_order, map) ->
+      let qual_name = code_qual_name code |> Option.value_exn in
+      F.printf "%a@\n" QualName.pp qual_name ;
+      List.iter code.FFI.Code.instructions ~f:(F.printf "%a@\n" (FFI.Instruction.pp ~code)) ;
+      let pp_succ_and_delta fmt (succ, delta, _) =
+        if Int.equal delta 0 then F.pp_print_int fmt succ else F.fprintf fmt "%d(%d)" succ delta
+      in
+      F.printf "CFG successors:@\n" ;
+      IMap.iter
+        (fun offset {successors} ->
+          F.printf "%4d: %a@\n" offset (Pp.seq ~sep:" " pp_succ_and_delta) successors )
+        map ;
+      F.printf "CFG predecessors:@\n" ;
+      IMap.iter
+        (fun offset {predecessors} ->
+          F.printf "%4d: %a@\n" offset (Pp.seq ~sep:" " F.pp_print_int) predecessors )
+        map ;
+      F.printf "topological order: %a@\n@\n" (Pp.seq ~sep:" " F.pp_print_int) topological_order
+
+
+let file_path {FFI.Code.co_filename} =
+  let sz = String.length co_filename in
   let file_path =
-    let sz = String.length co_filename in
     if sz >= 2 && String.equal "./" (String.sub co_filename ~pos:0 ~len:2) then
       String.sub co_filename ~pos:2 ~len:(sz - 2)
     else co_filename
   in
-  let file_path = Stdlib.Filename.remove_extension file_path in
-  let module_name = Ident.from_string ~on:'/' file_path in
-  let loc = Location.of_code code in
-  let empty = State.empty ~debug ~loc module_name in
-  let* _, obj = mk_object empty code in
-  Ok obj
+  Stdlib.Filename.remove_extension file_path |> String.substr_replace_all ~pattern:"/" ~with_:"::"
+
+
+let mk ~debug code =
+  let open IResult.Let_syntax in
+  let file_path = file_path code in
+  let code_qual_name = build_code_object_unique_name file_path code in
+  let name = Ident.mk file_path in
+  let f = build_cfg ~debug ~code_qual_name in
+  let* toplevel = f code in
+  let* functions = fold_all_inner_codes_and_build_map code ~code_qual_name ~f in
+  Ok {Module.name; toplevel; functions}
+
+
+let test_generator ~filename ~f source =
+  if not (Py.is_initialized ()) then Py.initialize ~interpreter:Version.python_exe () ;
+  let code =
+    match FFI.from_string ~source ~filename with
+    | Error (kind, err) ->
+        L.die kind "FFI error: %a@\n" FFI.Error.pp_kind err
+    | Ok code ->
+        code
+  in
+  Py.finalize () ;
+  match f code with
+  | Error (kind, _loc, err) -> (
+    match kind with
+    | L.InternalError ->
+        L.internal_error "IR error: %a@\n" Error.pp_kind err
+    | L.UserError ->
+        L.user_error "IR error: %a@\n" Error.pp_kind err
+    | L.ExternalError ->
+        L.external_error "IR error: %a@\n" Error.pp_kind err )
+  | Ok () ->
+      ()
+  | exception (Py.E _ as e) ->
+      L.die ExternalError "Pyml exception: %s@\n" (Exn.to_string e)
+
+
+let test ?(filename = "dummy.py") ?(debug = false) ?run source =
+  let open IResult.Let_syntax in
+  let f code =
+    let+ module_ = mk ~debug code in
+    let run = Option.value run ~default:(F.printf "%a" Module.pp) in
+    run module_
+  in
+  test_generator ~filename ~f source
+
+
+let test_files ?(debug = false) ?run list =
+  let open IResult.Let_syntax in
+  let units = ref [] in
+  let f code =
+    let+ module_ = mk ~debug code in
+    units := module_ :: !units
+  in
+  List.iter list ~f:(fun (filename, source) -> test_generator ~filename ~f source) ;
+  let run = Option.value run ~default:(List.iter ~f:(F.printf "%a" Module.pp)) in
+  run (List.rev !units)
+
+
+let test_cfg_skeleton ?(filename = "dummy.py") source =
+  let open IResult.Let_syntax in
+  let f code =
+    let file_path = file_path code in
+    let code_qual_name = build_code_object_unique_name file_path code in
+    test_cfg_skeleton ~code_qual_name code ;
+    let f code = Ok (test_cfg_skeleton ~code_qual_name code) in
+    let* _ = fold_all_inner_codes_and_build_map code ~code_qual_name ~f in
+    Ok ()
+  in
+  test_generator ~filename ~f source

@@ -21,33 +21,46 @@ type summary = {pre_post_list: pre_post_list; non_disj: (NonDisjDomain.Summary.t
 type t = {main: summary; specialized: (summary Specialization.Pulse.Map.t[@yojson.opaque])}
 [@@deriving yojson_of]
 
-let pp_pre_post_list fmt ~pp_kind pre_posts =
+let pp_pre_post_list print_kind fmt ~pp_specialized_name pre_posts =
   F.open_vbox 0 ;
-  F.fprintf fmt "%d%t pre/post(s)@;" (List.length pre_posts) pp_kind ;
+  F.fprintf fmt "%d%t pre/post(s)@;" (List.length pre_posts) pp_specialized_name ;
   List.iteri pre_posts ~f:(fun i (pre_post : ExecutionDomain.summary) ->
-      F.fprintf fmt "#%d: @[%a@]@;" i ExecutionDomain.pp_summary pre_post ) ;
+      F.fprintf fmt "#%d: @[%a@]@;" i (ExecutionDomain.pp_summary print_kind) pre_post ) ;
   F.close_box ()
 
 
-let pp_summary fmt ~pp_kind {pre_post_list; non_disj} =
-  F.fprintf fmt "@[<hov>pre/posts:%a@\nnon_disj:%a@]" (pp_pre_post_list ~pp_kind) pre_post_list
-    NonDisjDomain.Summary.pp non_disj
+let pp_summary print_kind fmt ~pp_specialized_name {pre_post_list; non_disj} =
+  F.fprintf fmt "%a%a"
+    (pp_pre_post_list print_kind ~pp_specialized_name)
+    pre_post_list
+    (Pp.html_collapsible_block ~name:"Non-disjunctive state" print_kind NonDisjDomain.Summary.pp)
+    non_disj
 
 
-let pp fmt {main; specialized} =
+let pp_proc_name_sexp print_kind fmt specialized_proc_name =
+  Pp.html_collapsible_block ~name:"s-exp for --procs-to-analyze" print_kind Sexp.pp_hum fmt
+    (SpecializedProcname.sexp_of_t specialized_proc_name)
+
+
+let pp {Pp.kind= print_kind} proc_name fmt {main; specialized} =
   if Specialization.Pulse.Map.is_empty specialized then
-    pp_summary fmt ~pp_kind:(fun _fmt -> ()) main
+    pp_summary print_kind ~pp_specialized_name:(fun _fmt -> ()) fmt main
   else
-    let pp_kind fmt = F.pp_print_string fmt " main" in
+    let pp_specialized_name fmt = F.pp_print_string fmt " main" in
     F.open_hvbox 0 ;
-    pp_summary fmt ~pp_kind main ;
+    F.fprintf fmt "%a@\n%a"
+      (pp_summary print_kind ~pp_specialized_name)
+      main (pp_proc_name_sexp print_kind)
+      {SpecializedProcname.proc_name; specialization= None} ;
     Specialization.Pulse.Map.iter
       (fun specialization pre_posts ->
-        F.fprintf fmt "@\n" ;
-        let pp_kind fmt =
+        let pp_specialized_name fmt =
           F.fprintf fmt " specialized with %a" Specialization.Pulse.pp specialization
         in
-        pp_summary fmt ~pp_kind pre_posts )
+        F.fprintf fmt "@\n%a@\n%a"
+          (pp_summary print_kind ~pp_specialized_name)
+          pre_posts (pp_proc_name_sexp print_kind)
+          {SpecializedProcname.proc_name; specialization= Some (Pulse specialization)} )
       specialized ;
     F.close_box ()
 
@@ -395,36 +408,3 @@ let merge x y =
   if !merged_is_same_to_x then x
   else if !merged_is_same_to_y then y
   else {x with specialized= merged}
-
-
-let get_missed_captures ~get_summary procnames =
-  let module MissedCaptures = TransitiveInfo.MissedCaptures in
-  let from_execution = function
-    | ExecutionDomain.ContinueProgram summary
-    | ExceptionRaised summary
-    | ExitProgram summary
-    | InfiniteProgram summary
-    | AbortProgram summary ->
-        AbductiveDomain.Summary.get_transitive_info summary
-    | LatentAbortProgram {astate}
-    | LatentInvalidAccess {astate}
-    | LatentSpecializedTypeIssue {astate} ->
-        AbductiveDomain.Summary.get_transitive_info astate
-  in
-  let from_pre_post_list pre_post_list =
-    List.map pre_post_list ~f:(fun exec ->
-        (from_execution exec).PulseTransitiveInfo.missed_captures )
-    |> List.reduce ~f:MissedCaptures.join
-    |> Option.value ~default:MissedCaptures.bottom
-  in
-  let from_simple_summary {pre_post_list} = from_pre_post_list pre_post_list in
-  let from_summary summary =
-    Specialization.Pulse.Map.fold
-      (fun _ summary -> MissedCaptures.join (from_simple_summary summary))
-      summary.specialized
-      (from_simple_summary summary.main)
-  in
-  List.map procnames ~f:(fun procname ->
-      get_summary procname |> Option.value_map ~default:MissedCaptures.bottom ~f:from_summary )
-  |> List.reduce ~f:MissedCaptures.join
-  |> Option.value ~default:MissedCaptures.bottom

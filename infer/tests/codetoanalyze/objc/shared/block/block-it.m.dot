@@ -8,19 +8,19 @@ digraph cfg {
 "objc_block_block-it.m:19_f23ed576.5dc8a189a72094b9_2" [label="2: Exit objc_block_block-it.m:19 \n  " color=yellow style=filled]
 	
 
-"objc_block_block-it.m:19_f23ed576.5dc8a189a72094b9_3" [label="3: + \n   END_BRANCHES\n " ]
+"objc_block_block-it.m:19_f23ed576.5dc8a189a72094b9_3" [label="3: + \n  " ]
 	
 
 	 "objc_block_block-it.m:19_f23ed576.5dc8a189a72094b9_3" -> "objc_block_block-it.m:19_f23ed576.5dc8a189a72094b9_4" ;
-"objc_block_block-it.m:19_f23ed576.5dc8a189a72094b9_4" [label="4:  between_join_and_exit \n   END_BRANCHES\n " shape="box"]
+"objc_block_block-it.m:19_f23ed576.5dc8a189a72094b9_4" [label="4:  between_join_and_exit \n  " shape="box"]
 	
 
 	 "objc_block_block-it.m:19_f23ed576.5dc8a189a72094b9_4" -> "objc_block_block-it.m:19_f23ed576.5dc8a189a72094b9_2" ;
-"objc_block_block-it.m:19_f23ed576.5dc8a189a72094b9_5" [label="5: Prune (true branch, if (terminated)) \n   n$1=*&ShouldStop:int [line 24, column 9]\n  PRUNE(n$1, true); [line 24, column 9]\n " shape="invhouse"]
+"objc_block_block-it.m:19_f23ed576.5dc8a189a72094b9_5" [label="5: Prune (true branch, if) \n   n$1=*&ShouldStop:int [line 24, column 9]\n  PRUNE(n$1, true); [line 24, column 9]\n " shape="invhouse"]
 	
 
 	 "objc_block_block-it.m:19_f23ed576.5dc8a189a72094b9_5" -> "objc_block_block-it.m:19_f23ed576.5dc8a189a72094b9_7" ;
-"objc_block_block-it.m:19_f23ed576.5dc8a189a72094b9_6" [label="6: Prune (false branch, if (terminated)) \n   n$1=*&ShouldStop:int [line 24, column 9]\n  PRUNE(!n$1, false); [line 24, column 9]\n " shape="invhouse"]
+"objc_block_block-it.m:19_f23ed576.5dc8a189a72094b9_6" [label="6: Prune (false branch, if) \n   n$1=*&ShouldStop:int [line 24, column 9]\n  PRUNE(!n$1, false); [line 24, column 9]\n " shape="invhouse"]
 	
 
 	 "objc_block_block-it.m:19_f23ed576.5dc8a189a72094b9_6" -> "objc_block_block-it.m:19_f23ed576.5dc8a189a72094b9_3" ;
@@ -36,19 +36,19 @@ digraph cfg {
 "objc_block_block-it.m:38_e78cce36.a61a86173a48d6f9_2" [label="2: Exit objc_block_block-it.m:38 \n  " color=yellow style=filled]
 	
 
-"objc_block_block-it.m:38_e78cce36.a61a86173a48d6f9_3" [label="3: + \n   END_BRANCHES\n " ]
+"objc_block_block-it.m:38_e78cce36.a61a86173a48d6f9_3" [label="3: + \n  " ]
 	
 
 	 "objc_block_block-it.m:38_e78cce36.a61a86173a48d6f9_3" -> "objc_block_block-it.m:38_e78cce36.a61a86173a48d6f9_4" ;
-"objc_block_block-it.m:38_e78cce36.a61a86173a48d6f9_4" [label="4:  between_join_and_exit \n   END_BRANCHES\n " shape="box"]
+"objc_block_block-it.m:38_e78cce36.a61a86173a48d6f9_4" [label="4:  between_join_and_exit \n  " shape="box"]
 	
 
 	 "objc_block_block-it.m:38_e78cce36.a61a86173a48d6f9_4" -> "objc_block_block-it.m:38_e78cce36.a61a86173a48d6f9_2" ;
-"objc_block_block-it.m:38_e78cce36.a61a86173a48d6f9_5" [label="5: Prune (true branch, if (terminated)) \n   n$32=*&ShouldStop:int [line 41, column 13]\n  PRUNE(n$32, true); [line 41, column 13]\n " shape="invhouse"]
+"objc_block_block-it.m:38_e78cce36.a61a86173a48d6f9_5" [label="5: Prune (true branch, if) \n   n$32=*&ShouldStop:int [line 41, column 13]\n  PRUNE(n$32, true); [line 41, column 13]\n " shape="invhouse"]
 	
 
 	 "objc_block_block-it.m:38_e78cce36.a61a86173a48d6f9_5" -> "objc_block_block-it.m:38_e78cce36.a61a86173a48d6f9_7" ;
-"objc_block_block-it.m:38_e78cce36.a61a86173a48d6f9_6" [label="6: Prune (false branch, if (terminated)) \n   n$32=*&ShouldStop:int [line 41, column 13]\n  PRUNE(!n$32, false); [line 41, column 13]\n " shape="invhouse"]
+"objc_block_block-it.m:38_e78cce36.a61a86173a48d6f9_6" [label="6: Prune (false branch, if) \n   n$32=*&ShouldStop:int [line 41, column 13]\n  PRUNE(!n$32, false); [line 41, column 13]\n " shape="invhouse"]
 	
 
 	 "objc_block_block-it.m:38_e78cce36.a61a86173a48d6f9_6" -> "objc_block_block-it.m:38_e78cce36.a61a86173a48d6f9_3" ;
@@ -63,7 +63,7 @@ digraph cfg {
 "array#MyBlock#[instance].452aa168203e40bd_2" [label="2: Exit MyBlock.array \n  " color=yellow style=filled]
 	
 
-"array#MyBlock#[instance].452aa168203e40bd_3" [label="3:  Message Call: enumerateObjectsUsingBlock: \n   n$5=*&a:NSArray* [line 19, column 4]\n  n$6=_fun_NSArray.enumerateObjectsUsingBlock:(n$5:NSArray*,(_fun_objc_block_block-it.m:19):_fn_(*)) virtual [line 19, column 3]\n " shape="box"]
+"array#MyBlock#[instance].452aa168203e40bd_3" [label="3:  Message Call: enumerateObjectsUsingBlock: \n   n$5=*&a:NSArray* [line 19, column 4]\n  n$6=_fun_NSArray.enumerateObjectsUsingBlock:(n$5:NSArray*,(_fun_objc_block_block-it.m:19):(_fn_ [objc_object*,unsigned long,_Bool*] -> void)(*)) virtual [line 19, column 3]\n " shape="box"]
 	
 
 	 "array#MyBlock#[instance].452aa168203e40bd_3" -> "array#MyBlock#[instance].452aa168203e40bd_2" ;
@@ -71,7 +71,7 @@ digraph cfg {
 	
 
 	 "array#MyBlock#[instance].452aa168203e40bd_4" -> "array#MyBlock#[instance].452aa168203e40bd_3" ;
-"array_trans#MyBlock#[instance].92a91a5a6c07d842_1" [label="1: Start MyBlock.array_trans\nFormals:  self:MyBlock*\nLocals:  idx:unsigned long object:objc_object* stop:_Bool* enumerateObjectsUsingBlock:_fn_(*) objects:NSArray* a:NSArray* \n  " color=yellow style=filled]
+"array_trans#MyBlock#[instance].92a91a5a6c07d842_1" [label="1: Start MyBlock.array_trans\nFormals:  self:MyBlock*\nLocals:  idx:unsigned long object:objc_object* stop:_Bool* enumerateObjectsUsingBlock:(_fn_ [objc_object*,unsigned long,_Bool*] -> void)(*) objects:NSArray* a:NSArray* \n  " color=yellow style=filled]
 	
 
 	 "array_trans#MyBlock#[instance].92a91a5a6c07d842_1" -> "array_trans#MyBlock#[instance].92a91a5a6c07d842_20" ;
@@ -107,7 +107,7 @@ digraph cfg {
 	
 
 	 "array_trans#MyBlock#[instance].92a91a5a6c07d842_9" -> "array_trans#MyBlock#[instance].92a91a5a6c07d842_3" ;
-"array_trans#MyBlock#[instance].92a91a5a6c07d842_10" [label="10: + \n   END_BRANCHES\n " ]
+"array_trans#MyBlock#[instance].92a91a5a6c07d842_10" [label="10: + \n  " ]
 	
 
 	 "array_trans#MyBlock#[instance].92a91a5a6c07d842_10" -> "array_trans#MyBlock#[instance].92a91a5a6c07d842_6" ;
@@ -116,15 +116,15 @@ digraph cfg {
 
 	 "array_trans#MyBlock#[instance].92a91a5a6c07d842_11" -> "array_trans#MyBlock#[instance].92a91a5a6c07d842_12" ;
 	 "array_trans#MyBlock#[instance].92a91a5a6c07d842_11" -> "array_trans#MyBlock#[instance].92a91a5a6c07d842_13" ;
-"array_trans#MyBlock#[instance].92a91a5a6c07d842_12" [label="12: Prune (true branch, if (terminated)) \n   PRUNE((n$16 == 1), true); [line 52, column 9]\n " shape="invhouse"]
+"array_trans#MyBlock#[instance].92a91a5a6c07d842_12" [label="12: Prune (true branch, if) \n   PRUNE((n$16 == 1), true); [line 52, column 9]\n " shape="invhouse"]
 	
 
 	 "array_trans#MyBlock#[instance].92a91a5a6c07d842_12" -> "array_trans#MyBlock#[instance].92a91a5a6c07d842_3" ;
-"array_trans#MyBlock#[instance].92a91a5a6c07d842_13" [label="13: Prune (false branch, if (terminated)) \n   PRUNE(!(n$16 == 1), false); [line 52, column 9]\n " shape="invhouse"]
+"array_trans#MyBlock#[instance].92a91a5a6c07d842_13" [label="13: Prune (false branch, if) \n   PRUNE(!(n$16 == 1), false); [line 52, column 9]\n " shape="invhouse"]
 	
 
 	 "array_trans#MyBlock#[instance].92a91a5a6c07d842_13" -> "array_trans#MyBlock#[instance].92a91a5a6c07d842_10" ;
-"array_trans#MyBlock#[instance].92a91a5a6c07d842_14" [label="14:  Call n$20 \n   n$20=*&enumerateObjectsUsingBlock:_fn_(*) [line 51, column 5]\n  n$21=*&object:objc_object* [line 51, column 32]\n  n$22=*&idx:unsigned long [line 51, column 40]\n  n$23=*&stop:_Bool* [line 51, column 45]\n  n$24=_fun___call_objc_block(n$20:_fn_,n$21:objc_object*,n$22:unsigned long,n$23:_Bool*) objc_block [line 51, column 5]\n " shape="box"]
+"array_trans#MyBlock#[instance].92a91a5a6c07d842_14" [label="14:  Call n$20 \n   n$20=*&enumerateObjectsUsingBlock:(_fn_ [objc_object*,unsigned long,_Bool*] -> void)(*) [line 51, column 5]\n  n$21=*&object:objc_object* [line 51, column 32]\n  n$22=*&idx:unsigned long [line 51, column 40]\n  n$23=*&stop:_Bool* [line 51, column 45]\n  n$24=_fun___call_objc_block(n$20:_fn_,n$21:objc_object*,n$22:unsigned long,n$23:_Bool*) objc_block [line 51, column 5]\n " shape="box"]
 	
 
 	 "array_trans#MyBlock#[instance].92a91a5a6c07d842_14" -> "array_trans#MyBlock#[instance].92a91a5a6c07d842_11" ;
@@ -140,7 +140,7 @@ digraph cfg {
 	
 
 	 "array_trans#MyBlock#[instance].92a91a5a6c07d842_17" -> "array_trans#MyBlock#[instance].92a91a5a6c07d842_16" ;
-"array_trans#MyBlock#[instance].92a91a5a6c07d842_18" [label="18:  DeclStmt \n   VARIABLE_DECLARED(enumerateObjectsUsingBlock:_fn_(*)); [line 37, column 3]\n  *&enumerateObjectsUsingBlock:_fn_(*)=(_fun_objc_block_block-it.m:38) [line 37, column 3]\n " shape="box"]
+"array_trans#MyBlock#[instance].92a91a5a6c07d842_18" [label="18:  DeclStmt \n   VARIABLE_DECLARED(enumerateObjectsUsingBlock:(_fn_ [objc_object*,unsigned long,_Bool*] -> void)(*)); [line 37, column 3]\n  *&enumerateObjectsUsingBlock:(_fn_ [objc_object*,unsigned long,_Bool*] -> void)(*)=(_fun_objc_block_block-it.m:38) [line 37, column 3]\n " shape="box"]
 	
 
 	 "array_trans#MyBlock#[instance].92a91a5a6c07d842_18" -> "array_trans#MyBlock#[instance].92a91a5a6c07d842_17" ;

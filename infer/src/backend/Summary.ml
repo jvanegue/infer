@@ -16,13 +16,13 @@ module Stats = struct
     { failure_kind: Exception.failure_kind option
           (** what type of failure stopped the analysis (if any) *)
     ; symops: int  (** Number of SymOp's throughout the whole analysis of the function *)
-    ; mutable nodes_visited: IntSet.t  (** Nodes visited *) }
+    ; mutable nodes_visited: IInt.Set.t  (** Nodes visited *) }
 
-  let empty = {failure_kind= None; symops= 0; nodes_visited= IntSet.empty}
+  let empty = {failure_kind= None; symops= 0; nodes_visited= IInt.Set.empty}
 
-  let is_visited stats node_id = IntSet.mem node_id stats.nodes_visited
+  let is_visited stats node_id = IInt.Set.mem node_id stats.nodes_visited
 
-  let add_visited stats node_id = stats.nodes_visited <- IntSet.add node_id stats.nodes_visited
+  let add_visited stats node_id = stats.nodes_visited <- IInt.Set.add node_id stats.nodes_visited
 
   let update ?(add_symops = 0) ?failure_kind stats =
     let symops = stats.symops + add_symops in
@@ -69,22 +69,24 @@ let pp_signature fmt {proc_name} =
 
 let pp_no_stats_specs fmt summary = F.fprintf fmt "%a@\n" pp_signature summary
 
-let pp_text fmt ({err_log; payloads; stats; dependencies} as summary) =
+let pp_text fmt ({proc_name; err_log; payloads; stats; dependencies} as summary) =
   pp_no_stats_specs fmt summary ;
-  F.fprintf fmt "%a@\n%a%a%a" pp_errlog err_log Stats.pp stats (Payloads.pp Pp.text) payloads
-    Dependencies.pp dependencies
+  F.fprintf fmt "%a@\n%a%a%a" pp_errlog err_log Stats.pp stats (Payloads.pp Pp.text proc_name)
+    payloads Dependencies.pp dependencies
 
 
-let pp_html source fmt ({err_log; payloads; stats} as summary) =
+let pp_html source fmt ({proc_name; err_log; payloads; stats} as summary) =
   let pp_escaped pp fmt x = F.fprintf fmt "%s" (Escape.escape_xml (F.asprintf "%a" pp x)) in
   F.pp_force_newline fmt () ;
   Pp.html_with_color Black (pp_escaped pp_no_stats_specs) fmt summary ;
   F.fprintf fmt "<br />%a<br />@\n" Stats.pp stats ;
   Errlog.pp_html source [] fmt err_log ;
   Io_infer.Html.pp_hline fmt () ;
-  F.fprintf fmt "<LISTING>@\n" ;
-  pp_escaped (Payloads.pp (Pp.html Black)) fmt payloads ;
-  F.fprintf fmt "</LISTING>@\n"
+  F.fprintf fmt "<button type='button' onclick='toggleDetailsBlock()'>Toggle details</button>" ;
+  F.fprintf fmt "<div class='state code'>@\n" ;
+  Payloads.pp (Pp.html Black) proc_name fmt payloads ;
+  F.fprintf fmt "</div>@\n" ;
+  ()
 
 
 module ReportSummary = struct

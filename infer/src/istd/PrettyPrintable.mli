@@ -30,6 +30,16 @@ module type PrintableOrderedType = sig
   include PrintableType with type t := t
 end
 
+module type HashableSexpablePrintableOrderedType = sig
+  include Caml.Set.OrderedType
+
+  include PrintableType with type t := t
+
+  include Sexpable with type t := t
+
+  val hash_fold_t : Base_internalhash_types.state -> t -> Base_internalhash_types.state
+end
+
 module type PrintableEquatableOrderedType = sig
   include Caml.Set.OrderedType
 
@@ -46,6 +56,14 @@ module type PPSet = sig
   val pp_hov : F.formatter -> t -> unit
 
   val pp_element : F.formatter -> elt -> unit
+end
+
+module type HashSexpPPSet = sig
+  include PPSet
+
+  include Sexpable with type t := t
+
+  val hash_fold_t : Base_internalhash_types.state -> t -> Base_internalhash_types.state
 end
 
 module type MonoMap = sig
@@ -150,6 +168,20 @@ module type PPMap = sig
   val pp : pp_value:(F.formatter -> 'a -> unit) -> F.formatter -> 'a t -> unit
 end
 
+module type HashSexpPPMap = sig
+  include PPMap
+
+  val sexp_of_t : ('a -> Sexplib.Sexp.t) -> 'a t -> Sexplib.Sexp.t
+
+  val t_of_sexp : (Sexplib.Sexp.t -> 'a) -> Sexplib.Sexp.t -> 'a t
+
+  val hash_fold_t :
+       (Base_internalhash_types.state -> 'a -> Base_internalhash_types.state)
+    -> Base_internalhash_types.state
+    -> 'a t
+    -> Base_internalhash_types.state
+end
+
 module type PPMonoMap = sig
   include MonoMap
 
@@ -160,7 +192,13 @@ end
 
 module MakePPSet (Ord : PrintableOrderedType) : PPSet with type elt = Ord.t
 
+module MakeHashSexpPPSet (Ord : HashableSexpablePrintableOrderedType) :
+  HashSexpPPSet with type elt = Ord.t
+
 module MakePPMap (Ord : PrintableOrderedType) : PPMap with type key = Ord.t
+
+module MakeHashSexpPPMap (Ord : HashableSexpablePrintableOrderedType) :
+  HashSexpPPMap with type key = Ord.t
 
 module PPMonoMapOfPPMap (M : PPMap) (Val : PrintableType) :
   PPMonoMap with type key = M.key and type value = Val.t and type t = Val.t M.t

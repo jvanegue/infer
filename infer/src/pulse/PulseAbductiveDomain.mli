@@ -172,9 +172,10 @@ module AddressAttributes : sig
   val set_uninitialized :
        Tenv.t
     -> PathContext.t
-    -> [ `LocalDecl of Pvar.t * AbstractValue.t option
+    -> [ `LocalDecl of Pvar.t * (AbstractValue.t * ValueHistory.t) option
          (** the second optional parameter is for the address of the variable *)
-       | `Malloc of AbstractValue.t  (** the address parameter is a newly allocated address *) ]
+       | `Malloc of AbstractValue.t * ValueHistory.t
+         (** the address parameter is a newly allocated address *) ]
     -> Typ.t
     -> Location.t
     -> t
@@ -276,7 +277,7 @@ module AddressAttributes : sig
 
   val has_unknown_effect : AbstractValue.t -> t -> bool
 
-  val is_hack_sinit_called : AbstractValue.t -> t -> bool
+  val is_hack_constinit_called : AbstractValue.t -> t -> bool
 end
 
 val should_havoc_if_unknown : unit -> [> `ShouldHavoc | `ShouldOnlyHavocResources]
@@ -316,9 +317,11 @@ val reachable_addresses_from :
 val get_unreachable_attributes : t -> AbstractValue.t list
 (** collect the addresses that have attributes but are unreachable in the current post-condition *)
 
+val finalize_all_hack_builders : t -> t
+
 val mark_potential_leaks : Location.t -> dead_roots:Var.t list -> t -> t
 
-val add_recursive_call : Location.t -> Procname.t -> t -> t * PulseMutualRecursion.t
+val add_recursive_call : Location.t -> Procname.t -> t -> t
 
 val add_recursive_calls : PulseMutualRecursion.Set.t -> t -> t
 
@@ -356,6 +359,21 @@ val set_post_edges : AbstractValue.t -> PulseBaseMemory.Edges.t -> t -> t
 val set_post_cell :
   PathContext.t -> AbstractValue.t * ValueHistory.t -> BaseDomain.cell -> Location.t -> t -> t
 (** directly set the edges and attributes for the given address, bypassing abduction altogether *)
+
+val fold_pointer_targets :
+     Tenv.t
+  -> PathContext.t
+  -> [ `LocalDecl of Pvar.t * (AbstractValue.t * ValueHistory.t) option
+     | `Malloc of AbstractValue.t * ValueHistory.t ]
+  -> Typ.t
+  -> Location.t
+  -> f:(AbstractValue.t * ValueHistory.t -> t -> t)
+  -> t
+  -> t
+(** Call the provided [f] on each address in memory corresponding to a field in the struct (or
+    primitive value) starting at the provided address. Also deals with nested struct values. Each
+    address is generated fresh and placed in the heap (or stack if the address comes from a
+    [`LocalDecl]) before calling [f]. *)
 
 val incorporate_new_eqs :
      Formula.new_eqs

@@ -53,7 +53,7 @@ function toggleListingOnTop() {
 }
        
 function toggleListingVisibility() {
-  var listing = document.querySelector("#node_listing > listing");
+  var listing = document.querySelector("#node_listing > code");
   if (listing.style.display == "none") {
   listing.style.display = "";
   } else {
@@ -68,7 +68,7 @@ function toggleListingVisibility() {
 <style type="text/css">
 body { background-color:#fff; color:#000; font-family:Helvetica, sans-serif; font-size:10pt }
 h1 { font-size:14pt }
-.code { border-collapse:collapse; width:100%; font-family: "Andale Mono", monospace; font-size:10pt; line-height: 1.2em }
+.code { border-collapse:collapse; width:100%; font-family: "Andale Mono", monospace; font-size:10pt; line-height: 1.2em; white-space: pre }
 .color_black { color: black }
 .color_blue { color: blue }
 .color_green { color: green }
@@ -89,6 +89,7 @@ summary { margin-left: -20pt; }
 .d_with_indent { padding-left: 20pt; }
 .d_with_indent_name { margin-left: -20pt; }
 .has_hover:hover { background-color:LemonChiffon; }
+.state { white-space: pre; }
 .pulse_invalid { color:red; }
 </style>
 |}

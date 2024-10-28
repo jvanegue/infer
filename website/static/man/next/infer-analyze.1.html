@@ -273,12 +273,11 @@ specified).</p>
 <p style="margin-left:17%;">Deactivates:
 <i>fragment-retains-view</i> checker: Detects when Android
 fragments are not explicitly nullified before becoming
-unreachable.</p>
+unreachable. (Conversely:
+<b>--fragment-retains-view</b>)</p>
 
-<p style="margin-left:11%;"><b>DEPRECATED</b>: Unmaintained
-due to poor precision. <br>
-(Conversely: <b>--fragment-retains-view</b>) <b><br>
---fragment-retains-view-only</b></p>
+
+<p style="margin-left:11%;"><b>--fragment-retains-view-only</b></p>
 
 <p style="margin-left:17%;">Activates: Enable
 <i>fragment-retains-view</i> and disable all other checkers
@@ -473,6 +472,22 @@ Matcher or list of matchers for functions that never return
 <i>null</i>.</p>
 
 
+<p style="margin-left:11%;"><b>--noescaping-function-list</b>
+<i>+string</i></p>
+
+<p style="margin-left:17%;">Useful for the check
+CXX_REF_CAPTURED_IN_BLOCK. It declares a list of functions
+that take blocks as arguments that are no escaping but we
+cannot annotate them accordingly.</p>
+
+
+<p style="margin-left:11%;"><b>--objc-block-execution-macro</b>
+<i>string</i></p>
+
+<p style="margin-left:17%;">Macro for executing Objective-C
+blocks safely.</p>
+
+
 <p style="margin-left:11%;"><b>--no-parameter-not-null-checked</b></p>
 
 <p style="margin-left:17%;">Deactivates:
@@ -501,23 +516,14 @@ checkers before starting the analysis (Conversely:
 <p style="margin-left:17%;">Activates: Also log messages to
 stdout and stderr (Conversely: <b>--no-print-logs</b>)</p>
 
-<p style="margin-left:11%;"><b>--printf-args</b></p>
 
-<p style="margin-left:17%;">Activates: <i>printf-args</i>
-checker: Detect mismatches between the Java
-&lsquo;printf&lsquo; format strings and the argument types
-For example, this checker will warn about the type error in
-&lsquo;printf(&quot;Hello %d&quot;,
-&quot;world&quot;)&lsquo;</p>
+<p style="margin-left:11%;"><b>--procs-to-analyze-index</b>
+<i>file</i></p>
 
-<p style="margin-left:11%;"><b>DEPRECATED</b>:
-Unmaintained. <br>
-(Conversely: <b>--no-printf-args</b>) <b><br>
---printf-args-only</b></p>
-
-<p style="margin-left:17%;">Activates: Enable
-<i>printf-args</i> and disable all other checkers
-(Conversely: <b>--no-printf-args-only</b>)</p>
+<p style="margin-left:17%;">Specify the file containing an
+Sexp representing a list of pairs of procedures and
+specializations to analyze. Only works with the restart
+scheduler.</p>
 
 <p style="margin-left:11%;"><b>--progress-bar-style</b>
 <i>{ auto | plain | multiline }</i></p>
@@ -984,7 +990,13 @@ included in infer): <br>
 
 [{&quot;lock&quot;:[&quot;pthread_mutex_lock&quot;],&quot;unlock&quot;:[&quot;pthread_mutex_unlock&quot;]}]
 <b><br>
---pulse-unsafe-malloc</b></p>
+--pulse-model-unreachable</b> <i>+string</i></p>
+
+<p style="margin-left:17%;">Methods to be modeled as
+unreachable.</p>
+
+
+<p style="margin-left:11%;"><b>--pulse-unsafe-malloc</b></p>
 
 <p style="margin-left:17%;">Activates: Assume that
 malloc(3) never returns null. (Conversely:
@@ -1026,6 +1038,13 @@ that are not overridden from the superclass or interface.
 <b>--annotation-reachability-apply-superclass-annotations</b>)</p>
 
 
+<p style="margin-left:11%;"><b>--annotation-reachability-check-loops</b></p>
+
+<p style="margin-left:17%;">Activates: Highlights callsites
+in the trace that are nested in some loop. (Conversely:
+<b>--no-annotation-reachability-check-loops</b>)</p>
+
+
 <p style="margin-left:11%;"><b>--annotation-reachability-custom-models</b>
 <i>json</i></p>
 
@@ -1056,6 +1075,16 @@ annotated with @PerformanceCritical can call expensive
 methods (annotated @Expensive or modeled, with annotation
 reachability checker) (Conversely:
 <b>--no-annotation-reachability-expensive</b>)</p>
+
+
+<p style="margin-left:11%;"><b>--no-annotation-reachability-minimize-sinks</b></p>
+
+<p style="margin-left:17%;">Deactivates: do not report
+paths where a prefix is also a source to sink path. For
+example if there is a source() -&gt; sink1() -&gt; sink2()
+path then only source() -&gt; sink1() will be reported.
+(Conversely:
+<b>--annotation-reachability-minimize-sinks</b>)</p>
 
 
 <p style="margin-left:11%;"><b>--annotation-reachability-minimize-sources</b></p>
@@ -1343,6 +1372,13 @@ C, Objective-C</p>
 modelled as returning non-null in Pulse</p>
 
 
+<p style="margin-left:11%;"><b>--pulse-model-return-nonnull-list</b>
+<i>+string</i></p>
+
+<p style="margin-left:17%;">Regex of methods that should be
+modelled as returning non-null in Pulse</p>
+
+
 <p style="margin-left:11%;"><b>--pulse-model-return-this</b>
 <i>string</i></p>
 
@@ -1473,16 +1509,6 @@ summary specialization at each call site.</p>
 <p style="margin-left:17%;">Maximum number of summary
 specialization by procedure.</p>
 
-
-<p style="margin-left:11%;"><b>--no-pulse-taint-check-history</b></p>
-
-<p style="margin-left:17%;">Deactivates: Check values
-histories for taint events before reporting a taint issue.
-This is a temporary flag while the taint analysis
-transitions from being mainly attribute-based to being
-history-based. (Conversely:
-<b>--pulse-taint-check-history</b>)</p>
-
 <p style="margin-left:11%;"><b>--pulse-taint-config</b>
 <i>+path</i></p>
 
@@ -1508,6 +1534,23 @@ should be used for data flow reporting only. If a source has
 such a kind, only data flows to sinks which originate at the
 source will be reported. If a sink has such a kind, only
 sensitive data flows to the sink will be reported.</p>
+
+
+<p style="margin-left:11%;"><b>--no-pulse-taint-follow-field-accesses</b></p>
+
+<p style="margin-left:17%;">Deactivates: Specify if taint
+analysis should follow field accesses when propagating
+taints. (Conversely:
+<b>--pulse-taint-follow-field-accesses</b>)</p>
+
+
+<p style="margin-left:11%;"><b>--pulse-taint-opaque-files</b>
+<i>+path</i></p>
+
+<p style="margin-left:17%;">Specify files that should be
+treated as opaque for taint analysis to make sure that
+procedure's belonging to these files are always free of any
+potential taint flows.</p>
 
 <p style="margin-left:11%;"><b>--pulse-taint-policies</b>
 <i>json</i></p>

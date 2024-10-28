@@ -169,6 +169,8 @@ val pulse_const_refable : t
 
 val constant_address_dereference : latent:bool -> t
 
+val cxx_string_captured_in_block : t
+
 val cxx_ref_captured_in_block : t
 
 val dangling_pointer_dereference : t
@@ -314,6 +316,8 @@ val pulse_unfinished_builder : t
 
 val pulse_uninitialized_const : t
 
+val pulse_uninitialized_method : t
+
 val pure_function : t
 
 val readonly_shared_ptr_param : t
@@ -373,6 +377,8 @@ val unnecessary_copy_optional_pulse : t
 val unnecessary_copy_optional_const_pulse : t
 
 val unnecessary_copy_return_pulse : t
+
+val unnecessary_copy_thrift_assignment_pulse : t
 
 val unreachable_code_after : t
 

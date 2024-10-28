@@ -137,10 +137,11 @@ let report {InterproceduralAnalysis.tenv; proc_desc; err_log} ~is_suppressed ~la
     in
     let issue_type = get_issue_type tenv ~latent diagnostic proc_desc in
     let message, suggestion = get_message_and_suggestion diagnostic in
+    let autofix = get_autofix proc_desc diagnostic in
     L.d_printfln ~color:Red "Reporting issue: %a: %s" IssueType.pp issue_type message ;
     Reporting.log_issue proc_desc err_log ~loc:(get_location diagnostic) ?loc_instantiated
       ~ltr:(extra_trace @ get_trace diagnostic)
-      ~extras ?suggestion Pulse issue_type message
+      ~extras ?autofix ?suggestion Pulse issue_type message
 
 
 let report_latent_issue analysis_data latent_issue ~is_suppressed =
@@ -157,7 +158,7 @@ let is_constant_deref_without_invalidation (invalidation : Invalidation.t) acces
     match invalidation with
     | ConstantDereference _ | ComparedToNullInThisProcedure _ ->
         not
-          (Trace.exists_main access_trace ~f:(function
+          (Trace.exists access_trace ~f:(function
             | Invalidated (trace_invalidation, _, _)
               when Invalidation.is_same_type trace_invalidation invalidation ->
                 true
@@ -167,6 +168,7 @@ let is_constant_deref_without_invalidation (invalidation : Invalidation.t) acces
     | CppDelete
     | CppDeleteArray
     | EndIterator
+    | FClose
     | GoneOutOfScope _
     | OptionalEmpty
     | StdVector _
@@ -196,6 +198,7 @@ let is_constant_deref_without_invalidation_diagnostic (diagnostic : Diagnostic.t
   | StackVariableAddressEscape _
   | TaintFlow _
   | TransitiveAccess _
+  | UninitMethod _
   | UnnecessaryCopy _ ->
       false
   | AccessToInvalidAddress {invalidation; access_trace} ->

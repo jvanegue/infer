@@ -16,6 +16,7 @@ type copy_spec_t =
   | Copied of
       { source_typ: Typ.t option
       ; source_opt: DecompilerExpr.source_expr option
+      ; node: Procdesc.Node.t
       ; location: Location.t (* the location to report the issue *)
       ; copied_location: (Procname.t * Location.t) option
             (* [copied_location] has a value when the copied location is different to where to
@@ -26,6 +27,7 @@ type copy_spec_t =
   | Modified of
       { source_typ: Typ.t option
       ; source_opt: DecompilerExpr.source_expr option
+      ; node: Procdesc.Node.t
       ; location: Location.t
       ; copied_location: (Procname.t * Location.t) option
       ; from: Attribute.CopyOrigin.t
@@ -77,6 +79,7 @@ val get_copied :
   -> ( Attribute.CopiedInto.t
      * Typ.t option
      * DecompilerExpr.source_expr option
+     * Procdesc.Node.t
      * Location.t
      * (Procname.t * Location.t) option
      * Attribute.CopyOrigin.t )
@@ -103,6 +106,8 @@ val set_passed_to : Location.t -> Timestamp.t -> Exp.t -> (Exp.t * Typ.t) list -
 val is_lifetime_extended : Var.t -> t -> bool
 
 val remember_dropped_disjuncts : (ExecutionDomain.t * PathContext.t) list -> t -> t
+
+val add_specialized_direct_callee : Procname.t -> Specialization.Pulse.t -> Location.t -> t -> t
 
 val apply_summary :
      callee_pname:Procname.t

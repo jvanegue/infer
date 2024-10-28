@@ -1,0 +1,478 @@
+[1271110][      debug] Opening a new database connection Primary CaptureDatabase
+[1271110][      debug] Opening a new database connection Primary AnalysisDatabase
+[1271110][      debug] Sqlite write daemon: starting up
+[1271110][      debug] Sqlite write daemon: set up complete, waiting for connections
+[1271111][      debug] Opening a new database connection Primary CaptureDatabase
+[1271111][      debug] Closing an existing database connection Primary CaptureDatabase
+[1271111][      debug] Opening a new database connection Primary AnalysisDatabase
+[1271111][      debug] Closing an existing database connection Primary AnalysisDatabase
+[1271111][      debug] Sqlite write daemon: process starting, pid= 1271111
+[1271110][environment] CWD = /huge/jvanegue/PUBLIC_GITHUB/infer/infer/tests/codetoanalyze/c/pulse
+[1271110][environment] Read configuration in /huge/jvanegue/PUBLIC_GITHUB/infer/infer/tests/codetoanalyze/c/pulse/.inferconfig
+[1271110][environment] Project root = /huge/jvanegue/PUBLIC_GITHUB/infer/infer/tests/codetoanalyze/c/pulse
+[1271110][environment] INFER_ARGS =   @/tmp/args.tmp.a2ef35 --progress-bar-style plain  ++Contents of '/tmp/args.tmp.a2ef35':
+[1271110][environment]                                                                    run
+[1271110][environment]                                                                    --pulse-only
+[1271110][environment]                                                                    --debug-level=2
+[1271110][environment]                                                                    --print-logs
+[1271110][environment]                                                                    -g
+[1271110][environment]                                                                  
+[1271110][environment] 
+[1271110][environment] command line arguments:   /huge/jvanegue/PUBLIC_GITHUB/infer/infer/bin/infer
+[1271110][environment]                           run --pulse-only --debug-level=2 --print-logs -g --
+[1271110][environment]                           clang++ -c pulseinf/simple_loop_not_terminate.cpp
+[1271110][environment] Available memory at startup: 504193 MB
+[1271110][environment] Active checkers: pulse (C/C++/ObjC, C#/.Net, Erlang, Hack, Java, Python)
+[1271110][   progress] Logs in /huge/jvanegue/PUBLIC_GITHUB/infer/infer/tests/codetoanalyze/c/pulse/infer-out/logs
+[1271110][environment] Scheduler: restart
+[1271110][environment] Cores used: 40
+[1271110][environment] Infer version v1.2.0-78b6969e75
+[1271110][environment] Copyright 2009 - present Facebook. All Rights Reserved.
+[1271110][environment] Driver mode:
+[1271110][environment] Clang driver mode:
+[1271110][environment] prog = 'clang++'
+[1271110][environment] args =   -c pulseinf/simple_loop_not_terminate.cpp
+[1271110][   progress] Capturing in make/cc mode...
+[1271110][      debug] Clang options stored in file /huge/jvanegue/PUBLIC_GITHUB/infer/infer/tests/codetoanalyze/c/pulse/infer-out/tmp/clang_command_.tmp.3ca55e.txt
+[1271110][      debug] clang -### invocation: '/huge/jvanegue/PUBLIC_GITHUB/infer/infer/bin/../../facebook-clang-plugins/clang/install/bin/clang++' '@/huge/jvanegue/PUBLIC_GITHUB/infer/infer/tests/codetoanalyze/c/pulse/infer-out/tmp/clang_command_.tmp.3ca55e.txt' 2>&1
+[1271110][      debug] 
+[1271110][      debug] *** Beginning capture of file /huge/jvanegue/PUBLIC_GITHUB/infer/infer/tests/codetoanalyze/c/pulse/pulseinf/simple_loop_not_terminate.cpp ***
+[1271110][      debug] Clang options stored in file /huge/jvanegue/PUBLIC_GITHUB/infer/infer/tests/codetoanalyze/c/pulse/infer-out/tmp/clang_command_.tmp.c46347.txt
+[1271110][      debug] Clang options stored in file /huge/jvanegue/PUBLIC_GITHUB/infer/infer/tests/codetoanalyze/c/pulse/infer-out/tmp/clang_command_.tmp.440763.txt
+[1271110][      debug] Processing simple_loop_not_terminate.cppStart translating the AST of stdin of pulseinf/simple_loop_not_terminate.cpp
+[1271110][      debug] 
+[1271110][      debug]  Start building call/cfg graph for 'pulseinf/simple_loop_not_terminate.cpp'....
+[1271110][      debug] 
+[1271110][      debug]  Start creating icfg
+[1271110][      debug] 
+[1271110][      debug] Creating a new procdesc for function: 'simple_loop_not_terminate'
+[1271110][      debug] 
+[1271110][      debug] 
+[1271110][      debug] ms = Method simple_loop_not_terminate [y, int (is_no_escape_block=false)]->void ({"file":"/huge/jvanegue/PUBLIC_GITHUB/infer/infer/tests/codetoanalyze/c/pulse/pulseinf/simple_loop_not_terminate.cpp","line":6,"column":1},{"file":"/huge/jvanegue/PUBLIC_GITHUB/infer/infer/tests/codetoanalyze/c/pulse/pulseinf/simple_loop_not_terminate.cpp","line":10,"column":1})(block_as_arg_attributes=[None])
+[1271110][      debug] 
+[1271110][      debug] 
+[1271110][      debug] 
+[1271110][      debug] >>---------- ADDING METHOD: 'simple_loop_not_terminate' ---------<<
+[1271110][      debug] 
+[1271110][      debug] 
+[1271110][      debug] 
+[1271110][      debug] >>---------- Start translating body of function: 'simple_loop_not_terminate' ---------<<
+[1271110][      debug] 
+[1271110][      debug] CompoundStmt{}
+[1271110][      debug] <Compound|
+[1271110][      debug]    
+[1271110][      debug]    DeclStmt{}
+[1271110][      debug]    
+[1271110][      debug]    <IntegerLiteral|
+[1271110][      debug]    /IntegerLiteral>
+[1271110][      debug]    +x
+[1271110][      debug]    
+[1271110][      debug]    WhileStmt{x}
+[1271110][      debug]    <Compound|
+[1271110][      debug]       
+[1271110][      debug]       BinaryOperator{}
+[1271110][      debug]       
+[1271110][      debug]       ImplicitCastExpr{}
+[1271110][      debug]       
+[1271110][      debug]       DeclRefExpr{}
+[1271110][      debug]       
+[1271110][      debug]       IntegerLiteral{}
+[1271110][      debug]       <Breakable|
+[1271110][      debug]          
+[1271110][      debug]          UnaryOperator{}
+[1271110][      debug]          
+[1271110][      debug]          DeclRefExpr{}
+[1271110][      debug]          
+[1271110][      debug]       /Breakable>~[21:skip]
+[1271110][      debug]    /Compound>~[15:]
+[1271110][      debug] /Compound>~[11:x]
+[1271110][      debug] Translating statement 'CompoundStmt' (pointer= '11')
+[1271110][      debug]   trans_state={succ_nodes=[2]; continuation=[None] priority=Free;
+[1271110][      debug]                var_exp_typ=[None]; opaque_exp=[None];
+[1271110][      debug]                is_fst_arg_objc_instance_method_call=false;
+[1271110][      debug]                passed_as_noescape_block_to=[None]}
+[1271110][      debug]   Priority is free. Locking priority node in -1
+[1271110][      debug]   Destroying pointer 11
+[1271110][      debug]   Translating statement 'WhileStmt' (pointer= '15')
+[1271110][      debug]     trans_state={succ_nodes=[2]; continuation=[None] priority=Free;
+[1271110][      debug]                  var_exp_typ=[None]; opaque_exp=[None];
+[1271110][      debug]                  is_fst_arg_objc_instance_method_call=false;
+[1271110][      debug]                  passed_as_noescape_block_to=[None]}
+[1271110][      debug]     cond_trans trans_state: {succ_nodes=[]; continuation=[Some empty]
+[1271110][      debug]                              priority=Free; var_exp_typ=[None];
+[1271110][      debug]                              opaque_exp=[None];
+[1271110][      debug]                              is_fst_arg_objc_instance_method_call=false;
+[1271110][      debug]                              passed_as_noescape_block_to=[None]}
+[1271110][      debug]     Translating Condition for If-then-else/Loop/Conditional Operator
+[1271110][      debug]     No short-circuit condition
+[1271110][      debug]       BinaryOperator '<"NE">' Priority is free. Locking priority node in 16
+[1271110][      debug]     Translating statement 'ImplicitCastExpr' (pointer= '17')
+[1271110][      debug]       trans_state={succ_nodes=[]; continuation=[Some empty]
+[1271110][      debug]                    priority=Busy(16); var_exp_typ=[None]; opaque_exp=[None];
+[1271110][      debug]                    is_fst_arg_objc_instance_method_call=false;
+[1271110][      debug]                    passed_as_noescape_block_to=[None]}
+[1271110][      debug]       
+[1271110][      debug]       No variables going out of scope here.
+[1271110][      debug]       Translating statement 'DeclRefExpr' (pointer= '18')
+[1271110][      debug]         trans_state={succ_nodes=[]; continuation=[Some empty]
+[1271110][      debug]                      priority=Busy(16); var_exp_typ=[None];
+[1271110][      debug]                      opaque_exp=[None];
+[1271110][      debug]                      is_fst_arg_objc_instance_method_call=false;
+[1271110][      debug]                      passed_as_noescape_block_to=[None]}
+[1271110][      debug]         
+[1271110][      debug]         No variables going out of scope here.
+[1271110][      debug]         var_deref_trans for &x:int
+[1271110][      debug]         
+[1271110][      debug]         
+[1271110][      debug]       Result of translating statement 'DeclRefExpr' (pointer= '18')
+[1271110][      debug]       control={root_nodes=[]; leaf_nodes=[]; instrs=[]; initd_exps=[]}
+[1271110][      debug]       
+[1271110][      debug]     Result of translating statement 'ImplicitCastExpr' (pointer= '17')
+[1271110][      debug]     control={root_nodes=[]; leaf_nodes=[];
+[1271110][      debug]             instrs=[n$0=*&x:int [line 8, column 10]]; initd_exps=[]}
+[1271110][      debug]     Translating statement 'IntegerLiteral' (pointer= '19')
+[1271110][      debug]       trans_state={succ_nodes=[]; continuation=[Some empty]
+[1271110][      debug]                    priority=Busy(16); var_exp_typ=[None]; opaque_exp=[None];
+[1271110][      debug]                    is_fst_arg_objc_instance_method_call=false;
+[1271110][      debug]                    passed_as_noescape_block_to=[None]}
+[1271110][      debug]       
+[1271110][      debug]       No variables going out of scope here.
+[1271110][      debug]       
+[1271110][      debug]     Result of translating statement 'IntegerLiteral' (pointer= '19')
+[1271110][      debug]     control={root_nodes=[]; leaf_nodes=[]; instrs=[]; initd_exps=[]}
+[1271110][      debug]     collected controls: {root_nodes=[]; leaf_nodes=[];
+[1271110][      debug]                         instrs=[n$0=*&x:int [line 8, column 10]];
+[1271110][      debug]                         initd_exps=[]}
+[1271110][      debug]     Created node 4 with instrs [n$0=*&x:int [line 8, column 10]], returning control 
+[1271110][      debug]     {root_nodes=[4]; leaf_nodes=[4]; instrs=[]; initd_exps=[]}
+[1271110][      debug]     Translating statement 'UnaryOperator' (pointer= '21')
+[1271110][      debug]       trans_state={succ_nodes=[3];
+[1271110][      debug]                    continuation=[Some {break=[2]; continue=[3];
+[1271110][      debug]                                       return_temp=false}]
+[1271110][      debug]                    priority=Free; var_exp_typ=[None]; opaque_exp=[None];
+[1271110][      debug]                    is_fst_arg_objc_instance_method_call=false;
+[1271110][      debug]                    passed_as_noescape_block_to=[None]}
+[1271110][      debug]       
+[1271110][      debug]       No variables going out of scope here.
+[1271110][      debug]       Priority is free. Locking priority node in 21
+[1271110][      debug]       Translating statement 'DeclRefExpr' (pointer= '22')
+[1271110][      debug]         trans_state={succ_nodes=[];
+[1271110][      debug]                      continuation=[Some {break=[2]; continue=[3];
+[1271110][      debug]                                         return_temp=false}]
+[1271110][      debug]                      priority=Busy(21); var_exp_typ=[None];
+[1271110][      debug]                      opaque_exp=[None];
+[1271110][      debug]                      is_fst_arg_objc_instance_method_call=false;
+[1271110][      debug]                      passed_as_noescape_block_to=[None]}
+[1271110][      debug]         
+[1271110][      debug]         No variables going out of scope here.
+[1271110][      debug]         var_deref_trans for &y:int
+[1271110][      debug]         
+[1271110][      debug]         
+[1271110][      debug]       Result of translating statement 'DeclRefExpr' (pointer= '22')
+[1271110][      debug]       control={root_nodes=[]; leaf_nodes=[]; instrs=[]; initd_exps=[]}
+[1271110][      debug]       collected controls: {root_nodes=[]; leaf_nodes=[];
+[1271110][      debug]                           instrs=[n$1=*&y:int [line 9, column 5];*&y:int=(n$1 + 1) [line 9, column 5]];
+[1271110][      debug]                           initd_exps=[]}
+[1271110][      debug]       Created node 7 with instrs [n$1=*&y:int [line 9, column 5];*&y:int=(n$1 + 1) [line 9, column 5]], returning control 
+[1271110][      debug]       {root_nodes=[7]; leaf_nodes=[7]; instrs=[]; initd_exps=[]}
+[1271110][      debug]       
+[1271110][      debug]     Result of translating statement 'UnaryOperator' (pointer= '21')
+[1271110][      debug]     control={root_nodes=[7]; leaf_nodes=[7]; instrs=[]; initd_exps=[]}
+[1271110][      debug]     
+[1271110][      debug]   Result of translating statement 'WhileStmt' (pointer= '15')
+[1271110][      debug]   control={root_nodes=[3]; leaf_nodes=[6]; instrs=[]; initd_exps=[]}
+[1271110][      debug]   Translating statement 'DeclStmt' (pointer= '12')
+[1271110][      debug]     trans_state={succ_nodes=[3]; continuation=[None] priority=Free;
+[1271110][      debug]                  var_exp_typ=[None]; opaque_exp=[None];
+[1271110][      debug]                  is_fst_arg_objc_instance_method_call=false;
+[1271110][      debug]                  passed_as_noescape_block_to=[None]}
+[1271110][      debug]     
+[1271110][      debug]     No variables going out of scope here.
+[1271110][      debug]     init_expr_trans true {succ_nodes=[3]; continuation=[None] priority=Free;
+[1271110][      debug]                           var_exp_typ=[None]; opaque_exp=[None];
+[1271110][      debug]                           is_fst_arg_objc_instance_method_call=false;
+[1271110][      debug]                           passed_as_noescape_block_to=[None]} (&x,
+[1271110][      debug]     int) <?qual_type> <stmt_info> [Some IntegerLiteral]
+[1271110][      debug]     Force-locking priority node in 12 (was Free)
+[1271110][      debug]     Priority is Busy(12). No claim possible in -2
+[1271110][      debug]     Translating statement 'IntegerLiteral' (pointer= '13')
+[1271110][      debug]       trans_state={succ_nodes=[]; continuation=[None] priority=Busy(12);
+[1271110][      debug]                    var_exp_typ=[Some (&x,int)]; opaque_exp=[None];
+[1271110][      debug]                    is_fst_arg_objc_instance_method_call=false;
+[1271110][      debug]                    passed_as_noescape_block_to=[None]}
+[1271110][      debug]       
+[1271110][      debug]       No variables going out of scope here.
+[1271110][      debug]       
+[1271110][      debug]     Result of translating statement 'IntegerLiteral' (pointer= '13')
+[1271110][      debug]     control={root_nodes=[]; leaf_nodes=[]; instrs=[]; initd_exps=[]}
+[1271110][      debug]     init expr result: {root_nodes=[]; leaf_nodes=[]; instrs=[];
+[1271110][      debug]                       initd_exps=[]}
+[1271110][      debug]     Sub-expr did not initialize &x, initializing with 1
+[1271110][      debug]     sending init_expr_trans results to parent
+[1271110][      debug]     collected controls: {root_nodes=[]; leaf_nodes=[];
+[1271110][      debug]                         instrs=[*&x:int=1 [line 7, column 3]]; initd_exps=[]}
+[1271110][      debug]     Delegating node creation to parent with control {root_nodes=[];
+[1271110][      debug]                                                     leaf_nodes=[];
+[1271110][      debug]                                                     instrs=[*&x:int=1 [line 7, column 3]];
+[1271110][      debug]                                                     initd_exps=[]}
+[1271110][      debug]     sequential composition :
+[1271110][      debug]       {root_nodes=[]; leaf_nodes=[];
+[1271110][      debug]       instrs=[VARIABLE_DECLARED(x:int); [line 7, column 3]]; initd_exps=[]}
+[1271110][      debug]     ;
+[1271110][      debug]       {root_nodes=[]; leaf_nodes=[]; instrs=[*&x:int=1 [line 7, column 3]];
+[1271110][      debug]       initd_exps=[]}
+[1271110][      debug]     collected controls: {root_nodes=[]; leaf_nodes=[];
+[1271110][      debug]                         instrs=[VARIABLE_DECLARED(x:int); [line 7, column 3];*&x:int=1 [line 7, column 3]];
+[1271110][      debug]                         initd_exps=[]}
+[1271110][      debug]     Created node 8 with instrs [VARIABLE_DECLARED(x:int); [line 7, column 3];*&x:int=1 [line 7, column 3]], returning control 
+[1271110][      debug]     {root_nodes=[8]; leaf_nodes=[8]; instrs=[]; initd_exps=[]}
+[1271110][      debug]     res_trans_tmp.control={root_nodes=[8]; leaf_nodes=[8]; instrs=[];
+[1271110][      debug]                           initd_exps=[]}
+[1271110][      debug]     
+[1271110][      debug]   Result of translating statement 'DeclStmt' (pointer= '12')
+[1271110][      debug]   control={root_nodes=[8]; leaf_nodes=[8]; instrs=[]; initd_exps=[]}
+[1271110][      debug]   
+[1271110][      debug] Result of translating statement 'CompoundStmt' (pointer= '11')
+[1271110][      debug] control={root_nodes=[8]; leaf_nodes=[6]; instrs=[]; initd_exps=[]}
+[1271110][      debug] 
+[1271110][      debug]  Finished creating icfg
+[1271110][      debug] 
+[1271110][      debug]  End building call/cfg graph for 'pulseinf/simple_loop_not_terminate.cpp'.
+[1271110][      debug] Stored on disk:METHOD SIGNATURES
+[1271110][      debug]                simple_loop_not_terminate [defined, Return type: void, Formals:  y:int, Locals:  x:int, is_deleted:false]
+[1271110][      debug]                
+[1271110][      debug] End translating the AST of file stdin of pulseinf/simple_loop_not_terminate.cpp... OK!
+[1271110][      debug] Elapsed: 15.1ms.
+[1271110][      debug] Database size capture_db_size_mb: 0
+[1271110][      debug] GC stats for capture:
+[1271110][      debug]   minor_words: 133429
+[1271110][      debug]   promoted_words: 253406
+[1271110][      debug]   major_words: 263652
+[1271110][      debug]   minor_collections: 1
+[1271110][      debug]   major_collections: 0
+[1271110][      debug]   compactions: 0
+[1271110][      debug]   top_heap_words: 760832
+[1271110][      debug]   
+[1271110][environment] Parallel jobs: 40
+[1271110][      debug] Closing an existing database connection Primary CaptureDatabase
+[1271110][      debug] Closing an existing database connection Primary AnalysisDatabase
+[1271110][      debug] 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Opening a new database connection Primary CaptureDatabase
+[1271110][      debug] Opening a new database connection Primary AnalysisDatabase
+[1271110][      debug] 
+[1271110][   progress] Found 1 source file to analyze in /huge/jvanegue/PUBLIC_GITHUB/infer/infer/tests/codetoanalyze/c/pulse/infer-out
+[1271110][      debug] Opening a new database connection Primary CaptureDatabase
+[1271110][      debug] Closing an existing database connection Primary CaptureDatabase
+[1271110][      debug] Opening a new database connection Primary AnalysisDatabase
+[1271110][      debug] Closing an existing database connection Primary AnalysisDatabase
+[1271110][      debug] [1271117][      debug] Opening a new database connection Primary CaptureDatabase
+[1271117][      debug] Opening a new database connection Primary AnalysisDatabase
+[1271117][      debug] 
+[1271117][   progress] pulseinf/simple_loop_not_terminate.cpp starting
+[1271116][      debug] Opening a new database connection Primary CaptureDatabase
+[1271116][      debug] Opening a new database connection Primary AnalysisDatabase
+[1271116][      debug] 
+[1271116][   progress] Analysing block of 200 procs, starting with simple_loop_not_terminate
+[1271117][   progress] pulseinf/simple_loop_not_terminate.cpp DONE
+[1271116][      debug] Elapsed analysis time: simple_loop_not_terminate: 56.5ms
+[1271116][      debug] 
+[1271116][   progress] pulseinf/simple_loop_not_terminate.cpp starting
+[1271116][   progress] pulseinf/simple_loop_not_terminate.cpp DONE
+[1271119][      debug] Opening a new database connection Primary CaptureDatabase
+[1271119][      debug] Opening a new database connection Primary AnalysisDatabase
+[1271119][      debug] [1271120][      debug] Opening a new database connection Primary CaptureDatabase
+[1271120][      debug] Opening a new database connection Primary AnalysisDatabase
+[1271120][      debug] [1271122][      debug] Opening a new database connection Primary CaptureDatabase
+[1271122][      debug] Opening a new database connection Primary AnalysisDatabase
+[1271122][      debug] [1271118][      debug] Opening a new database connection Primary CaptureDatabase
+[1271118][      debug] Opening a new database connection Primary AnalysisDatabase
+[1271118][      debug] [1271124][      debug] Opening a new database connection Primary CaptureDatabase
+[1271124][      debug] Opening a new database connection Primary AnalysisDatabase
+[1271124][      debug] [1271126][      debug] Opening a new database connection Primary CaptureDatabase
+[1271126][      debug] Opening a new database connection Primary AnalysisDatabase
+[1271126][      debug] [1271123][      debug] Opening a new database connection Primary CaptureDatabase
+[1271123][      debug] Opening a new database connection Primary AnalysisDatabase
+[1271123][      debug] [1271125][      debug] Opening a new database connection Primary CaptureDatabase
+[1271125][      debug] Opening a new database connection Primary AnalysisDatabase
+[1271125][      debug] [1271138][      debug] Opening a new database connection Primary CaptureDatabase
+[1271138][      debug] Opening a new database connection Primary AnalysisDatabase
+[1271138][      debug] [1271131][      debug] Opening a new database connection Primary CaptureDatabase
+[1271131][      debug] Opening a new database connection Primary AnalysisDatabase
+[1271131][      debug] [1271134][      debug] Opening a new database connection Primary CaptureDatabase
+[1271134][      debug] Opening a new database connection Primary AnalysisDatabase
+[1271134][      debug] [1271129][      debug] Opening a new database connection Primary CaptureDatabase
+[1271129][      debug] Opening a new database connection Primary AnalysisDatabase
+[1271129][      debug] [1271127][      debug] Opening a new database connection Primary CaptureDatabase
+[1271127][      debug] Opening a new database connection Primary AnalysisDatabase
+[1271127][      debug] [1271130][      debug] Opening a new database connection Primary CaptureDatabase
+[1271130][      debug] Opening a new database connection Primary AnalysisDatabase
+[1271130][      debug] [1271128][      debug] Opening a new database connection Primary CaptureDatabase
+[1271128][      debug] Opening a new database connection Primary AnalysisDatabase
+[1271128][      debug] [1271136][      debug] Opening a new database connection Primary CaptureDatabase
+[1271136][      debug] Opening a new database connection Primary AnalysisDatabase
+[1271136][      debug] [1271121][      debug] Opening a new database connection Primary CaptureDatabase
+[1271121][      debug] Opening a new database connection Primary AnalysisDatabase
+[1271121][      debug] [1271132][      debug] Opening a new database connection Primary CaptureDatabase
+[1271132][      debug] Opening a new database connection Primary AnalysisDatabase
+[1271132][      debug] [1271139][      debug] Opening a new database connection Primary CaptureDatabase
+[1271139][      debug] Opening a new database connection Primary AnalysisDatabase
+[1271139][      debug] [1271141][      debug] Opening a new database connection Primary CaptureDatabase
+[1271141][      debug] Opening a new database connection Primary AnalysisDatabase
+[1271141][      debug] [1271140][      debug] Opening a new database connection Primary CaptureDatabase
+[1271140][      debug] Opening a new database connection Primary AnalysisDatabase
+[1271140][      debug] [1271144][      debug] Opening a new database connection Primary CaptureDatabase
+[1271144][      debug] Opening a new database connection Primary AnalysisDatabase
+[1271144][      debug] [1271142][      debug] Opening a new database connection Primary CaptureDatabase
+[1271142][      debug] Opening a new database connection Primary AnalysisDatabase
+[1271142][      debug] [1271143][      debug] Opening a new database connection Primary CaptureDatabase
+[1271143][      debug] Opening a new database connection Primary AnalysisDatabase
+[1271143][      debug] [1271145][      debug] Opening a new database connection Primary CaptureDatabase
+[1271145][      debug] Opening a new database connection Primary AnalysisDatabase
+[1271145][      debug] [1271133][      debug] Opening a new database connection Primary CaptureDatabase
+[1271133][      debug] Opening a new database connection Primary AnalysisDatabase
+[1271133][      debug] [1271135][      debug] Opening a new database connection Primary CaptureDatabase
+[1271135][      debug] Opening a new database connection Primary AnalysisDatabase
+[1271135][      debug] [1271137][      debug] Opening a new database connection Primary CaptureDatabase
+[1271137][      debug] Opening a new database connection Primary AnalysisDatabase
+[1271137][      debug] [1271146][      debug] Opening a new database connection Primary CaptureDatabase
+[1271146][      debug] Opening a new database connection Primary AnalysisDatabase
+[1271146][      debug] [1271148][      debug] Opening a new database connection Primary CaptureDatabase
+[1271148][      debug] Opening a new database connection Primary AnalysisDatabase
+[1271148][      debug] [1271147][      debug] Opening a new database connection Primary CaptureDatabase
+[1271147][      debug] Opening a new database connection Primary AnalysisDatabase
+[1271147][      debug] [1271152][      debug] Opening a new database connection Primary CaptureDatabase
+[1271152][      debug] Opening a new database connection Primary AnalysisDatabase
+[1271152][      debug] [1271151][      debug] Opening a new database connection Primary CaptureDatabase
+[1271151][      debug] Opening a new database connection Primary AnalysisDatabase
+[1271151][      debug] [1271155][      debug] Opening a new database connection Primary CaptureDatabase
+[1271155][      debug] Opening a new database connection Primary AnalysisDatabase
+[1271155][      debug] [1271153][      debug] Opening a new database connection Primary CaptureDatabase
+[1271153][      debug] Opening a new database connection Primary AnalysisDatabase
+[1271153][      debug] [1271154][      debug] Opening a new database connection Primary CaptureDatabase
+[1271154][      debug] Opening a new database connection Primary AnalysisDatabase
+[1271154][      debug] [1271150][      debug] Opening a new database connection Primary CaptureDatabase
+[1271150][      debug] Opening a new database connection Primary AnalysisDatabase
+[1271150][      debug] [1271149][      debug] Opening a new database connection Primary CaptureDatabase
+[1271149][      debug] Opening a new database connection Primary AnalysisDatabase
+[1271149][      debug] GC stats for backend_stats.gc_stats_add.:
+[1271110][      debug]   minor_words: 1.39362e+06
+[1271110][      debug]   promoted_words: 7245
+[1271110][      debug]   major_words: 49950
+[1271110][      debug]   minor_collections: 1
+[1271110][      debug]   major_collections: 0
+[1271110][      debug]   compactions: 0
+[1271110][      debug]   top_heap_words: 33287680
+[1271110][      debug]   
+[1271110][      debug] GC stats for backend_stats.gc_stats_max.:
+[1271110][      debug]   minor_words: 1.38642e+06
+[1271110][      debug]   promoted_words: 7245
+[1271110][      debug]   major_words: 49361
+[1271110][      debug]   minor_collections: 1
+[1271110][      debug]   major_collections: 0
+[1271110][      debug]   compactions: 0
+[1271110][      debug]   top_heap_words: 875008
+[1271110][      debug]   
+[1271110][      debug] Average over 40 processes
+[1271110][      debug] GC stats for backend_stats.gc_stats_average.:
+[1271110][      debug]   minor_words: 34840.4
+[1271110][      debug]   promoted_words: 181.125
+[1271110][      debug]   major_words: 1248.75
+[1271110][      debug]   minor_collections: 0
+[1271110][      debug]   major_collections: 0
+[1271110][      debug]   compactions: 0
+[1271110][      debug]   top_heap_words: 832192
+[1271110][      debug]   
+[1271110][      debug] Analysis phase finished in 96.8ms
+[1271110][      debug] backend_stats.scheduler_process_analysis_time_user= 0.01606800
+[1271110][      debug] backend_stats.scheduler_process_analysis_time_sys= 0.01588400
+[1271110][      debug] backend_stats.scheduler_process_analysis_time_wall= 0.09671580
+[1271110][      debug] backend_stats.scheduler_process_analysis_time_oncpu_pct= 33%
+[1271110][      debug] Database size analysis_db_size_mb: 0
+[1271110][      debug] GC stats for analysis_scheduler:
+[1271110][      debug]   minor_words: 765458
+[1271110][      debug]   promoted_words: 5071
+[1271110][      debug]   major_words: 325157
+[1271110][      debug]   minor_collections: 4
+[1271110][      debug]   major_collections: 2
+[1271110][      debug]   compactions: 1
+[1271110][      debug]   top_heap_words: 1157632
+[1271110][      debug]   
+[1271110][      debug] GC stats for report:
+[1271110][      debug]   minor_words: 4295
+[1271110][      debug]   promoted_words: 0
+[1271110][      debug]   major_words: 514
+[1271110][      debug]   minor_collections: 0
+[1271110][      debug]   major_collections: 0
+[1271110][      debug]   compactions: 0
+[1271110][      debug]   top_heap_words: 1157632
+[1271110][      debug]   
+[1271110][      debug] GC stats for main_process_full:
+[1271110][      debug]   minor_words: 4.47371e+06
+[1271110][      debug]   promoted_words: 714046
+[1271110][      debug]   major_words: 1.09168e+06
+[1271110][      debug]   minor_collections: 13
+[1271110][      debug]   major_collections: 3
+[1271110][      debug]   compactions: 1
+[1271110][      debug]   top_heap_words: 1157632
+[1271110][      debug]   
+[1271110][      debug] Sqlite write daemon: waiting for process 1271111 to finish
+[1271111][      debug] Detected 0 spec overwrites.
+[1271111][      debug] Sqlite write daemon: terminating
+[1271111][      debug] dbwriter.useful_time_user= 0.02468400
+[1271111][      debug] dbwriter.useful_time_sys= 0.00000000
+[1271111][      debug] dbwriter.useful_time_wall= 0.04863629
+[1271111][      debug] dbwriter.useful_time_oncpu_pct= 51%
+[1271111][      debug] dbwriter.store_sql_user= 0.00007900
+[1271111][      debug] dbwriter.store_sql_sys= 0.00000000
+[1271111][      debug] dbwriter.store_sql_wall= 0.00008108
+[1271111][      debug] dbwriter.store_sql_oncpu_pct= 97%
+[1271111][      debug] dbwriter.store_sql_pct= 0%
+[1271111][      debug] dbwriter.total_time_user= 0.02860300
+[1271111][      debug] dbwriter.total_time_sys= 0.00389400
+[1271111][      debug] dbwriter.total_time_wall= 0.14203599
+[1271111][      debug] dbwriter.total_time_oncpu_pct= 23%
+[1271111][      debug] [1271110][      debug] Sqlite write daemon: process 1271111 terminated
+[1271110][      debug] Closing an existing database connection Primary CaptureDatabase
+[1271110][      debug] Closing an existing database connection Primary AnalysisDatabase
+[1271110][      debug] 
+[1271110][     result] 
+  No issues found  

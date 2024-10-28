@@ -129,10 +129,10 @@ let parse_ptr_kind (json : Safe.t) =
 
 let parse_if_kind (json : Safe.t) =
   let ifkind_map =
-    [ ("Ik_bexp", Sil.Ik_bexp {terminated= false})
+    [ ("Ik_bexp", Sil.Ik_bexp)
     ; ("Ik_dowhile", Sil.Ik_dowhile)
     ; ("Ik_for", Sil.Ik_for)
-    ; ("Ik_if", Sil.Ik_if {terminated= false})
+    ; ("Ik_if", Sil.Ik_if)
     ; ("Ik_land_lor", Sil.Ik_land_lor)
     ; ("Ik_while", Sil.Ik_while)
     ; ("Ik_switch", Sil.Ik_switch) ]
@@ -296,7 +296,7 @@ and parse_exp (json : Safe.t) =
     let e = parse_exp (member "expression" json) in
     let fi = parse_fieldident (member "identifier" json) in
     let t = parse_sil_type_name (member "type" json) in
-    Exp.Lfield (e, fi, t)
+    Exp.Lfield ({exp= e; is_implicit= false}, fi, t)
   else if String.equal ekind "LindexExpression" then
     let e1 = parse_exp (member "array" json) in
     let e2 = parse_exp (member "index" json) in
@@ -353,7 +353,7 @@ and parse_sil_type_name (json : Safe.t) : Typ.t =
     let tn = parse_typename (member "type_name" json) in
     Typ.mk (Typ.TVar (Typ.Name.name tn))
   else if String.equal type_kind "Tvoid" then StdTyp.void
-  else if String.equal type_kind "Tfun" then Typ.mk Tfun
+  else if String.equal type_kind "Tfun" then Typ.mk (Tfun None)
   else if String.equal type_kind "Tenum" then
     (* Sil.Tenum (parse_list (parse_pair (fun n -> Mangled.from_string (to_string n)) parse_constant) value) *)
     Logging.die InternalError "Enums are not supported yet"
@@ -390,7 +390,7 @@ let parse_ret_annot (json : Safe.t) : Annot.Item.t =
 let parse_captured_var (json : Safe.t) =
   let pvar = parse_pvar (member "name" json) in
   let typ = parse_sil_type_name (member "type" json) in
-  {CapturedVar.pvar; typ; capture_mode= ByValue; is_formal_of= None}
+  {CapturedVar.pvar; typ; capture_mode= ByValue; captured_from= None; context_info= None}
 
 
 let parse_proc_attributes_var (json : Safe.t) =

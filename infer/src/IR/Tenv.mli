@@ -121,26 +121,41 @@ module MethodInfo : sig
   val get_hack_kind : t -> Hack.kind option
 end
 
+type unresolved_reason =
+  | ClassNameNotFound
+  | CurryInfoNotFound
+  | MaybeMissingDueToMissedCapture
+  | MaybeMissingDueToIncompleteModel
+[@@deriving show]
+
+type unresolved_data = {missed_captures: Typ.Name.Set.t; unresolved_reason: unresolved_reason option}
+
+val mk_unresolved_data :
+  ?missed_captures:Typ.Name.Set.t -> unresolved_reason option -> unresolved_data
+
+type resolution_result = (MethodInfo.t, unresolved_data) Result.t
+
 val resolve_method :
      method_exists:(Procname.t -> Procname.t list -> bool)
   -> t
   -> Typ.Name.t
   -> Procname.t
-  -> MethodInfo.t option * Typ.Name.Set.t
-(** [resolve_method ~method_exists tenv class_name procname] return a pair
-    [(info_opt, missed_captures)] where [info_opt] tries to resolve [procname] to a method in
-    [class_name] or its super-classes, that is non-virtual (non-Java-interface method).
-    [missed_captures] is the set of classnames for which the hierarchy traversal would have need to
-    examine its members but the class was not captured. [method_exists adapted_procname methods]
-    should check if [adapted_procname] ([procname] but with its class potentially changed to some
-    [other_class]) is among the [methods] of [other_class]. *)
+  -> resolution_result
+(** [resolve_method ~method_exists tenv class_name procname] returns either [ResolvedTo info] where
+    [info] resolves [procname] to a method in [class_name] or its super-classes, that is non-virtual
+    (non-Java-interface method); or, it returns [Unresolved {missed_captures; unresolved_reason}]
+    where [missed_captures] is the set of classnames for which the hierarchy traversal needs to
+    examine its members but which have not been captured and [unresolved_reason] is an additional
+    information about the unresolved reasons which are for suppressing FP issues.
+    [method_exists adapted_procname methods] should check if [adapted_procname] ([procname] but with
+    its class potentially changed to some [other_class]) is among the [methods] of [other_class]. *)
 
 val resolve_field_info : t -> Typ.Name.t -> Fieldname.t -> Struct.field_info option
 (** [resolve_field_info tenv class_name field] tries to find the first field declaration that
     matches [field] name (ignoring its enclosing declared type), starting from class [class_name]. *)
 
-val resolve_fieldname : t -> Typ.Name.t -> string -> Fieldname.t option
-(** Similar to [resolve_field_info], but returns the resolved field name. *)
+val resolve_fieldname : t -> Typ.Name.t -> string -> Fieldname.t option * Typ.Name.Set.t
+(** Similar to [resolve_field_info], but returns the resolved field name and missed capture types. *)
 
 val find_cpp_destructor : t -> Typ.Name.t -> Procname.t option
 
@@ -148,7 +163,11 @@ val find_cpp_constructor : t -> Typ.Name.t -> Procname.t list
 
 val is_trivially_copyable : t -> Typ.t -> bool
 
-val get_hack_direct_used_traits : t -> Typ.Name.t -> HackClassName.t list
+val get_hack_direct_used_traits_interfaces :
+  t -> Typ.Name.t -> ([`Interface | `Trait] * HackClassName.t) list
+(** [get_hack_direct_used_traits_interfaces tenv tname] returns a list of the directly used traits
+    and directly implemented interfaces of [tname], each paired with [`Trait] or [`Interface] to
+    indicate its kind *)
 
 val expand_hack_alias : t -> Typ.name -> Typ.name option [@@warning "-unused-value-declaration"]
 

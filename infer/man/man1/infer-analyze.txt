@@ -259,6 +259,24 @@ OPTIONS
            [Java only, all analyses] Matcher or list of matchers for
            functions that never return null.
 
+       --noescaping-function-list +string
+           Useful for the check CXX_REF_CAPTURED_IN_BLOCK. It declares a list
+           of functions that take blocks as arguments that are no escaping
+           but we cannot annotate them accordingly.
+
+       --objc-block-execution-macro string
+           Macro for executing Objective-C blocks safely.
+
+       --ondemand-recursion-restart-limit int
+           In order to make the analysis of mutual recursion cycles
+           deterministic in their output, the analysis of a cycle of mutually
+           recursive functions may restart the analysis of the entire cycle
+           from a deterministic place. If the graph of mutual recursion is
+           more complex than a simple cycle this could potentially result in
+           many restarts before finding the "right" procedure from which to
+           start. This limits the number of restarts before we give up and
+           analyze the cycle as-is instead.
+
        --no-parameter-not-null-checked
            Deactivates: parameter-not-null-checked checker: An
            Objective-C-specific analysis to detect when a block parameter is
@@ -276,6 +294,11 @@ OPTIONS
        --print-logs
            Activates: Also log messages to stdout and stderr (Conversely:
            --no-print-logs)
+
+       --procs-to-analyze-index file
+           Specify the file containing an Sexp representing a list of pairs
+           of procedures and specializations to analyze. Only works with the
+           restart scheduler.
 
        --progress-bar-style { auto | plain | multiline }
            Style of the progress bar. auto selects multiline if connected to
@@ -561,6 +584,9 @@ CLANG OPTIONS
            [{"lock":["pthread_mutex_lock"],"unlock":["pthread_mutex_unlock"]}]
            
 
+       --pulse-model-unreachable +string
+           Methods to be modeled as unreachable.
+
        --pulse-unsafe-malloc
            Activates: Assume that malloc(3) never returns null. (Conversely:
            --no-pulse-unsafe-malloc)
@@ -582,6 +608,10 @@ JAVA OPTIONS
            interface. (Conversely:
            --annotation-reachability-apply-superclass-annotations)
 
+       --annotation-reachability-check-loops
+           Activates: Highlights callsites in the trace that are nested in
+           some loop. (Conversely: --no-annotation-reachability-check-loops)
+
        --annotation-reachability-custom-models json
            Specify a map from annotations to lists of regexps to treat
            matching methods as if they had the annotation.
@@ -600,6 +630,12 @@ JAVA OPTIONS
            can call expensive methods (annotated @Expensive or modeled, with
            annotation reachability checker) (Conversely:
            --no-annotation-reachability-expensive)
+
+       --no-annotation-reachability-minimize-sinks
+           Deactivates: do not report paths where a prefix is also a source
+           to sink path. For example if there is a source() -> sink1() ->
+           sink2() path then only source() -> sink1() will be reported.
+           (Conversely: --annotation-reachability-minimize-sinks)
 
        --annotation-reachability-minimize-sources
            Activates: do not report paths where a suffix is also a source to
@@ -853,12 +889,6 @@ PULSE CHECKER OPTIONS
        --pulse-specialization-limit int
            Maximum number of summary specialization by procedure.
 
-       --no-pulse-taint-check-history
-           Deactivates: Check values histories for taint events before
-           reporting a taint issue. This is a temporary flag while the taint
-           analysis transitions from being mainly attribute-based to being
-           history-based. (Conversely: --pulse-taint-check-history)
-
        --pulse-taint-config +path
            Path to a taint analysis configuration file or a directory
            containing such files. This file can define --pulse-taint-sources,
@@ -875,6 +905,11 @@ PULSE CHECKER OPTIONS
            only. If a source has such a kind, only data flows to sinks which
            originate at the source will be reported. If a sink has such a
            kind, only sensitive data flows to the sink will be reported.
+
+       --no-pulse-taint-follow-field-accesses
+           Deactivates: Specify if taint analysis should follow field
+           accesses when propagating taints. (Conversely:
+           --pulse-taint-follow-field-accesses)
 
        --pulse-taint-opaque-files +path
            Specify files that should be treated as opaque for taint analysis
