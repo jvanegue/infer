@@ -1567,7 +1567,10 @@ module PulseTransferFunctions = struct
               PulseOperations.eval_to_value_origin path NoAccess loc rhs_exp astate
             in
             let rhs_addr, rhs_history = ValueOrigin.addr_hist rhs_value_origin in
-            let** astate, lhs_addr_hist = PulseOperations.eval path Write loc lhs_exp astate in
+
+            let** astate, ((lhs_addr, _) as lhs_addr_hist) =
+              PulseOperations.eval path Write loc lhs_exp astate
+            in
 
             let hist = ValueHistory.sequence event rhs_history in
 
@@ -1580,6 +1583,13 @@ module PulseTransferFunctions = struct
             let=* astate =
               PulseTaintOperations.store tenv path loc ~lhs:lhs_exp
                 ~rhs:(rhs_exp, rhs_value_origin, typ) astate
+            in
+            let astate =
+              if
+                Option.is_some
+                  (AbductiveDomain.AddressAttributes.get_valid_returned_from_unknown rhs_addr astate)
+              then AbductiveDomain.apply_unknown_effect hist lhs_addr astate
+              else astate
             in
             let=+ astate =
               PulseOperations.write_deref path loc ~ref:lhs_addr_hist ~obj:(rhs_addr, hist) astate

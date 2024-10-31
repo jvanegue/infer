@@ -23,7 +23,7 @@ module Error : sig
 end
 
 module NodeName : sig
-  type t
+  type t [@@deriving equal]
 
   module Map : Caml.Map.S with type key = t
 
@@ -107,7 +107,6 @@ module BuiltinCaller : sig
     | FormatFn of FormatFunction.t
     | CallFunctionEx  (** [CALL_FUNCTION_EX] *)
     | Inplace of BinaryOp.t
-    | ImportStar
     | Binary of BinaryOp.t
     | Unary of UnaryOp.t
     | Compare of CompareOp.t
@@ -118,8 +117,13 @@ module BuiltinCaller : sig
     | IterData
     | GetYieldFromIter
     | ListAppend
+    | ListExtend
+    | ListToTuple
     | SetAdd
+    | SetUpdate
     | DictSetItem
+    | DictUpdate
+    | DictMerge
     | DeleteSubscr
     | YieldFrom
     | GetAwaitable
@@ -143,6 +147,7 @@ module Exp : sig
   type collection = List | Set | Tuple | Map
 
   type t =
+    | AssertionError
     | BuildFrozenSet of t list
     | BuildSlice of t list
     | BuildString of t list
@@ -161,6 +166,11 @@ module Exp : sig
     | LoadClassDeref of {name: Ident.t; slot: int}  (** [LOAD_CLASSDEREF] *)
     | LoadClosure of {name: Ident.t; slot: int}  (** [LOAD_CLOSURE] *)
     | LoadDeref of {name: Ident.t; slot: int}  (** [LOAD_DEREF] *)
+    | MatchClass of {subject: t; type_: t; count: int; names: t}
+    | BoolOfMatchClass of t
+    | AttributesOfMatchClass of t
+    | MatchSequence of t
+    | GetLen of t
     | Subscript of {exp: t; index: t}
     | Temp of SSA.t
     | Var of ScopedIdent.t
@@ -170,6 +180,8 @@ module Exp : sig
 end
 
 module Stmt : sig
+  type gen_kind = Generator | Coroutine | AsyncGenerator
+
   type t =
     | Let of {lhs: SSA.t; rhs: Exp.t}
     | SetAttr of {lhs: Exp.t; attr: Ident.t; rhs: Exp.t}
@@ -183,6 +195,8 @@ module Stmt : sig
     | Delete of ScopedIdent.t
     | DeleteDeref of {name: Ident.t; slot: int}  (** [DELETE_DEREF] *)
     | DeleteAttr of {exp: Exp.t; attr: Ident.t}
+    | ImportStar of Exp.t
+    | GenStart of {kind: gen_kind}
     | SetupAnnotations
 end
 

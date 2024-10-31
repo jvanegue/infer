@@ -333,9 +333,15 @@ let run_files modules =
             (* Note: Python dictionnaries may have other type of keys *)
             let index = eval_exp index |> expect_string ~who ~how:"as index" |> Ident.mk in
             get index
+        | AssertionError
         | BuildSlice _
         | BuildString _
         | BuildFrozenSet _
+        | MatchClass _
+        | BoolOfMatchClass _
+        | AttributesOfMatchClass _
+        | MatchSequence _
+        | GetLen _
         | Collection _
         | LoadClosure _
         | LoadDeref _
@@ -419,8 +425,14 @@ let run_files modules =
             let {Dict.set} = eval_exp lhs |> expect_dict ~who ~how:"as 1st argument" in
             let key = eval_exp index |> expect_string ~who ~how:"as 2nd argument" |> Ident.mk in
             set key (eval_exp rhs)
-        | BuiltinCall _ | Delete _ | DeleteDeref _ | DeleteAttr _ | StoreDeref _ | SetupAnnotations
-          ->
+        | BuiltinCall _
+        | Delete _
+        | DeleteDeref _
+        | DeleteAttr _
+        | StoreDeref _
+        | SetupAnnotations
+        | ImportStar _
+        | GenStart _ ->
             todo "exec_stmt"
       in
       let rec exec_terminator terminator =

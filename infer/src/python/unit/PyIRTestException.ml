@@ -27,14 +27,8 @@ finally:
         b0:
           n0 <- TOPLEVEL[print]
           n1 <- $Call(n0, "TRY BLOCK", None)
-          jmp b1
-
-        b1:
           n2 <- TOPLEVEL[print]
           n3 <- $Call(n2, "FINALLY BLOCK", None)
-          jmp b2
-
-        b2:
           return None |}]
 
 
@@ -61,28 +55,25 @@ print("END")
         b0:
           n0 <- TOPLEVEL[print]
           n1 <- $Call(n0, "TRY BLOCK", None)
-          jmp b1
+          n2 <- TOPLEVEL[foo]
+          if n2 then jmp b1 else jmp b2
 
         b1:
-          n2 <- TOPLEVEL[foo]
-          if n2 then jmp b2 else jmp b3
-
-        b2:
           n5 <- TOPLEVEL[print]
           n6 <- $Call(n5, "X", None)
-          jmp b4
+          jmp b3
 
-        b3:
+        b2:
           n3 <- TOPLEVEL[print]
           n4 <- $Call(n3, "Y", None)
-          jmp b4
+          jmp b3
 
-        b4:
+        b3:
           n7 <- TOPLEVEL[print]
           n8 <- $Call(n7, "FINALLY BLOCK", None)
-          jmp b5
+          jmp b8
 
-        b5:
+        b8:
           n9 <- TOPLEVEL[print]
           n10 <- $Call(n9, "END", None)
           return None |}]
@@ -107,9 +98,9 @@ print("END")
         b0:
           n0 <- TOPLEVEL[print]
           n1 <- $Call(n0, "TRY BLOCK", None)
-          jmp b3
+          jmp b2
 
-        b3:
+        b2:
           n2 <- TOPLEVEL[print]
           n3 <- $Call(n2, "END", None)
           return None |}]
@@ -142,9 +133,6 @@ except (ValueError, AttributeError):
           n1 <- TOPLEVEL[os]
           n2 <- $CallMethod[sysconf](n1, "SC_PAGESIZE", None)
           TOPLEVEL[page_size] <- n2
-          jmp b8
-
-        b8:
           return None |}]
 
 
@@ -185,7 +173,7 @@ def f(x):
         b1:
           n2 <- $NextIter(n1, None)
           n3 <- $HasNextIter(n1, None)
-          if n3 then jmp b2 else jmp b5
+          if n3 then jmp b2 else jmp b4
 
         b2:
           LOCAL[i] <- n2
@@ -194,17 +182,11 @@ def f(x):
           LOCAL[e] <- n5
           n6 <- GLOBAL[print]
           n7 <- $Call(n6, "yolo", None)
-          jmp b3
-
-        b3:
           n8 <- LOCAL[e]
           n9 <- $CallMethod[bar](n8, None)
-          jmp b4
-
-        b4:
           jmp b1
 
-        b5:
+        b4:
           return None |}]
 
 
@@ -249,7 +231,7 @@ with open("foo", "r") as fp:
                   [n2; "foo"; "r"]
                18 CALL_FUNCTION                     2
                   [n3]
-               20 SETUP_WITH                       66
+               20 SETUP_WITH                       38
                   [CM(n3).__exit__; n4]
                22 STORE_NAME                        3 (fp)
                   [CM(n3).__exit__]
@@ -261,29 +243,23 @@ with open("foo", "r") as fp:
 
     Building a new node, starting from offset 28
                   [CM(n3).__exit__; n6]
-         >>>   28 FOR_ITER                         54 (to +54)
+         >>>   28 FOR_ITER                         26 (to +52)
                   [CM(n3).__exit__; n6; n7]
-    Successors: 30,84
+    Successors: 30,82
 
-    Building a new node, starting from offset 84
+    Building a new node, starting from offset 82
                   [CM(n3).__exit__]
-         >>>   84 POP_BLOCK                         0
+       5 >>>   82 POP_BLOCK                         0
                   [CM(n3).__exit__]
-               86 BEGIN_FINALLY                     0
+       4       84 LOAD_CONST                        7 (None)
                   [CM(n3).__exit__; None]
-    Successors: 88
-
-    Building a new node, starting from offset 88
-                  [CM(n3).__exit__; None]
-         >>>   88 WITH_CLEANUP_START                0
-                  [None; None; n9]
-               90 WITH_CLEANUP_FINISH               0
-                  [None]
-               92 END_FINALLY                       0
-                  []
-    Successors: 94
-
-    Building a new node, starting from offset 94
+               86 DUP_TOP                           0
+                  [CM(n3).__exit__; None; None]
+               88 DUP_TOP                           0
+                  [CM(n3).__exit__; None; None; None]
+               90 CALL_FUNCTION                     3
+                  [n9]
+               92 POP_TOP                           0
                   []
                94 LOAD_CONST                        7 (None)
                   [None]
@@ -295,7 +271,7 @@ with open("foo", "r") as fp:
                   [CM(n3).__exit__; n6; n7]
                30 STORE_NAME                        4 (line)
                   [CM(n3).__exit__; n6]
-       6       32 SETUP_FINALLY                    12
+       6       32 SETUP_FINALLY                     6
                   [CM(n3).__exit__; n6]
        7       34 LOAD_NAME                         5 (print)
                   [CM(n3).__exit__; n6; n10]
@@ -307,21 +283,21 @@ with open("foo", "r") as fp:
                   [CM(n3).__exit__; n6]
                42 POP_BLOCK                         0
                   [CM(n3).__exit__; n6]
-               44 JUMP_FORWARD                     28 (to +28)
+               44 JUMP_FORWARD                     13 (to +26)
                   [CM(n3).__exit__; n6]
-    Successors: 74
+    Successors: 72
 
-    Building a new node, starting from offset 74
+    Building a new node, starting from offset 72
                   [CM(n3).__exit__; n6]
-      11 >>>   74 LOAD_NAME                         5 (print)
+      11 >>>   72 LOAD_NAME                         5 (print)
                   [CM(n3).__exit__; n6; n12]
-               76 LOAD_CONST                        6 ("ELSE")
+               74 LOAD_CONST                        6 ("ELSE")
                   [CM(n3).__exit__; n6; n12; "ELSE"]
-               78 CALL_FUNCTION                     1
+               76 CALL_FUNCTION                     1
                   [CM(n3).__exit__; n6; n13]
-               80 POP_TOP                           0
+               78 POP_TOP                           0
                   [CM(n3).__exit__; n6]
-               82 JUMP_ABSOLUTE                    28 (to 28)
+               80 JUMP_ABSOLUTE                    14 (to 28)
                   [CM(n3).__exit__; n6]
     Successors: 28
 
@@ -358,13 +334,7 @@ with open("foo", "r") as fp:
           jmp b1
 
         b7:
-          jmp b8
-
-        b8:
-          n9 <- $CallMethod[__enter__](n3, None, None, None, None)
-          jmp b9
-
-        b9:
+          n9 <- $CallMethod[__exit__](n3, None)
           return None |}]
 
 
@@ -409,7 +379,7 @@ def subhelper():
         b1:
           n5 <- $NextIter(n4, None)
           n6 <- $HasNextIter(n4, None)
-          if n6 then jmp b2 else jmp b7
+          if n6 then jmp b2 else jmp b6
 
         b2:
           LOCAL[i] <- n5
@@ -417,7 +387,7 @@ def subhelper():
           n8 <- $Call(n7, "foo", None)
           jmp b1
 
-        b7:
+        b6:
           return None |}]
 
 
@@ -444,9 +414,6 @@ except C as c:
           TOPLEVEL[foo] <- n0
           n1 <- TOPLEVEL[foo]
           n2 <- $Call(n1, None)
-          jmp b6
-
-        b6:
           return None
 
 
@@ -477,6 +444,7 @@ async def async_with(filename):
 
       function dummy.async_with(filename):
         b0:
+          $GenStartCoroutine()
           n0 <- GLOBAL[open]
           n1 <- LOCAL[filename]
           n2 <- $Call(n0, n1, "r", None)
@@ -488,15 +456,9 @@ async def async_with(filename):
           n7 <- $CallMethod[read](n6, None)
           n8 <- $GetAwaitable(n7, None)
           n9 <- $YieldFrom(n8, None, None)
-          jmp b1
-
-        b1:
-          n10 <- $CallMethod[__enter__](n2, None, None, None, None)
+          n10 <- $CallMethod[__exit__](n2, None)
           n11 <- $GetAwaitable(n10, None)
           n12 <- $YieldFrom(n11, None, None)
-          jmp b2
-
-        b2:
           return None |}]
 
 
@@ -526,9 +488,6 @@ def call_finally():
         b0:
           n0 <- GLOBAL[read]
           n1 <- $Call(n0, None)
-          jmp b7
-
-        b7:
           return None |}]
 
 
@@ -565,16 +524,16 @@ def call_finally_with_break():
         b1:
           n3 <- $NextIter(n2, None)
           n4 <- $HasNextIter(n2, None)
-          if n4 then jmp b2 else jmp b11
-
-        b11:
-          return None
+          if n4 then jmp b2 else jmp b7
 
         b2:
           LOCAL[i] <- n3
           n5 <- GLOBAL[read]
           n6 <- $Call(n5, None)
-          jmp b1 |}]
+          jmp b1
+
+        b7:
+          return None |}]
 
 
 let%expect_test _ =
@@ -625,6 +584,7 @@ async def foo():
 
       function dummy.foo():
         b0:
+          $GenStartCoroutine()
           n0 <- GLOBAL[read1]
           n1 <- $Call(n0, None)
           n2 <- $CallMethod[__enter__](n1, None)
@@ -642,31 +602,19 @@ async def foo():
           n14 <- $Call(n13, None)
           n15 <- $GetAwaitable(n14, None)
           n16 <- $YieldFrom(n15, None, None)
-          jmp b1
-
-        b1:
-          n17 <- $CallMethod[__enter__](n11, None, None, None, None)
-          jmp b2
-
-        b2:
-          jmp b3
-
-        b3:
-          n18 <- $CallMethod[__enter__](n6, None, None, None, None)
-          n19 <- $GetAwaitable(n18, None)
-          n20 <- $YieldFrom(n19, None, None)
+          n17 <- $CallMethod[__exit__](n11, None)
           jmp b4
 
         b4:
-          jmp b5
+          n18 <- $CallMethod[__exit__](n6, None)
+          n19 <- $GetAwaitable(n18, None)
+          n20 <- $YieldFrom(n19, None, None)
+          jmp b8
 
-        b5:
-          n21 <- $CallMethod[__enter__](n1, None, None, None, None)
+        b8:
+          n21 <- $CallMethod[__exit__](n1, None)
           n22 <- $GetAwaitable(n21, None)
           n23 <- $YieldFrom(n22, None, None)
-          jmp b6
-
-        b6:
           return None |}]
 
 
@@ -701,68 +649,85 @@ async def foo():
     topological order: 0
 
     dummy.foo
-       3        0 LOAD_GLOBAL                       0 (read1)
-                2 CALL_FUNCTION                     0
-                4 SETUP_WITH                       66
-                6 POP_TOP                           0
-       4        8 SETUP_FINALLY                    50
-       5       10 LOAD_GLOBAL                       2 (read2)
-               12 CALL_FUNCTION                     0
-               14 SETUP_WITH                       18
-               16 POP_TOP                           0
-       6       18 LOAD_GLOBAL                       3 (get)
-               20 CALL_FUNCTION                     0
-               22 GET_AWAITABLE                     0
-               24 LOAD_CONST                        0 (None)
-               26 YIELD_FROM                        0
-               28 STORE_FAST                        0 (res)
-               30 POP_BLOCK                         0
-               32 BEGIN_FINALLY                     0
-         >>>   34 WITH_CLEANUP_START                0
-               36 WITH_CLEANUP_FINISH               0
-               38 END_FINALLY                       0
-       7       40 LOAD_FAST                         0 (res)
-               42 POP_BLOCK                         0
-               44 CALL_FINALLY                     14
-               46 POP_BLOCK                         0
-               48 ROT_TWO                           0
-               50 BEGIN_FINALLY                     0
-               52 WITH_CLEANUP_START                0
-               54 WITH_CLEANUP_FINISH               0
-               56 POP_FINALLY                       0
-               58 RETURN_VALUE                      0
-       9 >>>   60 LOAD_GLOBAL                       1 (do_finally)
-               62 CALL_FUNCTION                     0
-               64 POP_TOP                           0
-               66 END_FINALLY                       0
-               68 POP_BLOCK                         0
-               70 BEGIN_FINALLY                     0
-         >>>   72 WITH_CLEANUP_START                0
-               74 WITH_CLEANUP_FINISH               0
-               76 END_FINALLY                       0
-               78 LOAD_CONST                        0 (None)
-               80 RETURN_VALUE                      0
+                0 GEN_START                         1
+       3        2 LOAD_GLOBAL                       0 (read1)
+                4 CALL_FUNCTION                     0
+                6 SETUP_WITH                       44
+                8 POP_TOP                           0
+       4       10 SETUP_FINALLY                    38
+       5       12 LOAD_GLOBAL                       1 (read2)
+               14 CALL_FUNCTION                     0
+               16 SETUP_WITH                       14
+               18 POP_TOP                           0
+       6       20 LOAD_GLOBAL                       2 (get)
+               22 CALL_FUNCTION                     0
+               24 GET_AWAITABLE                     0
+               26 LOAD_CONST                        0 (None)
+               28 YIELD_FROM                        0
+               30 STORE_FAST                        0 (res)
+               32 POP_BLOCK                         0
+       5       34 LOAD_CONST                        0 (None)
+               36 DUP_TOP                           0
+               38 DUP_TOP                           0
+               40 CALL_FUNCTION                     3
+               42 POP_TOP                           0
+               44 JUMP_FORWARD                      8 (to +16)
+         >>>   46 WITH_EXCEPT_START                 0
+               48 POP_JUMP_IF_TRUE                 26 (to 52)
+               50 RERAISE                           1
+         >>>   52 POP_TOP                           0
+               54 POP_TOP                           0
+               56 POP_TOP                           0
+               58 POP_EXCEPT                        0
+               60 POP_TOP                           0
+       7 >>>   62 LOAD_FAST                         0 (res)
+               64 POP_BLOCK                         0
+       9       66 LOAD_GLOBAL                       3 (do_finally)
+               68 CALL_FUNCTION                     0
+               70 POP_TOP                           0
+       3       72 POP_BLOCK                         0
+               74 ROT_TWO                           0
+               76 LOAD_CONST                        0 (None)
+               78 DUP_TOP                           0
+               80 DUP_TOP                           0
+               82 CALL_FUNCTION                     3
+               84 POP_TOP                           0
+               86 RETURN_VALUE                      0
+       9 >>>   88 LOAD_GLOBAL                       3 (do_finally)
+               90 CALL_FUNCTION                     0
+               92 POP_TOP                           0
+               94 RERAISE                           0
+       3 >>>   96 WITH_EXCEPT_START                 0
+               98 POP_JUMP_IF_TRUE                 51 (to 102)
+              100 RERAISE                           1
+         >>>  102 POP_TOP                           0
+              104 POP_TOP                           0
+              106 POP_TOP                           0
+              108 POP_EXCEPT                        0
+              110 POP_TOP                           0
+              112 LOAD_CONST                        0 (None)
+              114 RETURN_VALUE                      0
     CFG successors:
-       0: 34
-      34: 40
-      40: 60
-      46: 52
-      52:
-      60: 46
-      68: 72
-      72: 78
-      78:
+       0: 62
+      46: 50 52
+      50: 52
+      52: 62
+      62:
+      88: 96
+      96: 100 102
+     100: 102
+     102:
     CFG predecessors:
        0:
-      34: 0
-      40: 34
-      46: 60
-      52: 46
-      60: 40
-      68:
-      72:
-      78:
-    topological order: 0 34 40 60 46 52
+      46:
+      50:
+      52:
+      62: 0
+      88:
+      96:
+     100:
+     102:
+    topological order: 0 62
 
     module dummy:
 
@@ -775,6 +740,7 @@ async def foo():
 
       function dummy.foo(res):
         b0:
+          $GenStartCoroutine()
           n0 <- GLOBAL[read1]
           n1 <- $Call(n0, None)
           n2 <- $CallMethod[__enter__](n1, None)
@@ -786,27 +752,15 @@ async def foo():
           n8 <- $GetAwaitable(n7, None)
           n9 <- $YieldFrom(n8, None, None)
           LOCAL[res] <- n8
-          jmp b1
-
-        b1:
-          n10 <- $CallMethod[__enter__](n4, None, None, None, None)
-          jmp b2
-
-        b2:
-          n11 <- LOCAL[res]
-          jmp b5
-
-        b3:
+          n10 <- $CallMethod[__exit__](n4, None)
           jmp b4
 
         b4:
-          n14 <- $CallMethod[__enter__](n1, None, None, None, None)
-          return n11
-
-        b5:
+          n11 <- LOCAL[res]
           n12 <- GLOBAL[do_finally]
           n13 <- $Call(n12, None)
-          jmp b3 |}]
+          n14 <- $CallMethod[__exit__](n1, None)
+          return n11 |}]
 
 
 let%expect_test _ =
@@ -831,7 +785,57 @@ def foo():
   in
   PyIR.test source ;
   [%expect
-    {| IR error: bad operand stack: offset 92 is reachable with two stacks of different sizes |}]
+    {|
+    module dummy:
+
+      function toplevel():
+        b0:
+          n0 <- $MakeFunction["foo", "dummy.foo", None, None, None, None]
+          TOPLEVEL[foo] <- n0
+          return None
+
+
+      function dummy.foo(num_attempts, should_stop, output):
+        b0:
+          LOCAL[num_attempts] <- 25
+          jmp b1
+
+        b1:
+          n0 <- LOCAL[num_attempts]
+          n1 <- $Compare.gt(n0, 0, None)
+          if n1 then jmp b2 else jmp b14
+
+        b11:
+          n5 <- LOCAL[num_attempts]
+          n6 <- $Binary.Subtract(n5, 1, None)
+          LOCAL[num_attempts] <- n6
+          jmp b13
+
+        b13:
+          n7 <- LOCAL[num_attempts]
+          n8 <- $Compare.gt(n7, 0, None)
+          if n8 then jmp b2 else jmp b14
+
+        b14:
+          return None
+
+        b2:
+          n2 <- GLOBAL[stop_conditionx]
+          n3 <- $Call(n2, None)
+          LOCAL[should_stop] <- n3[0]
+          LOCAL[output] <- n3[1]
+          n4 <- LOCAL[should_stop]
+          if n4 then jmp b3 else jmp b4
+
+        b3:
+          n9 <- LOCAL[output]
+          n10 <- LOCAL[num_attempts]
+          n11 <- $Binary.Subtract(n10, 1, None)
+          LOCAL[num_attempts] <- n11
+          return n9
+
+        b4:
+          jmp b11 |}]
 
 
 let%expect_test _ =
@@ -871,48 +875,57 @@ def foo(test):
     Translating dummy.foo...
     Building a new node, starting from offset 0
                   []
-       3        0 LOAD_CONST                        0 (None)
-                  [None]
-                2 SETUP_FINALLY                    62
-                  [None]
-                4 SETUP_FINALLY                    28
-                  [None]
-       4        6 LOAD_FAST                         0 (test)
-                  [None; n0]
-                8 POP_JUMP_IF_FALSE                22 (to 22)
-                  [None]
-    Successors: 10,22
-
-    Building a new node, starting from offset 22
-                  [None]
-       6 >>>   22 POP_BLOCK                         0
-                  [None]
-               24 POP_BLOCK                         0
-                  [None]
-               26 CALL_FINALLY                     38
-                  [None; CFR(28)]
-    Successors: 66
-
-    Building a new node, starting from offset 10
-                  [None]
-       5       10 POP_BLOCK                         0
-                  [None]
-               12 POP_BLOCK                         0
-                  [None]
-               14 CALL_FINALLY                     50
-                  [None; CFR(16)]
-    Successors: 66
-
-    Building a new node, starting from offset 66 with params (n1)
-                  [None; n1]
-      10 >>>   66 POP_FINALLY                       0
-                  [None]
-               68 POP_TOP                           0
+       3        0 SETUP_FINALLY                    22
                   []
-               70 LOAD_CONST                        1 (3)
+                2 SETUP_FINALLY                    10
+                  []
+       4        4 LOAD_FAST                         0 (test)
+                  [n0]
+                6 POP_JUMP_IF_FALSE                 8 (to 16)
+                  []
+    Successors: 8,16
+
+    Building a new node, starting from offset 16
+                  []
+       6 >>>   16 POP_BLOCK                         0
+                  []
+               18 POP_BLOCK                         0
+                  []
+      10       20 LOAD_CONST                        1 (3)
                   [3]
-               72 RETURN_VALUE                      0
+               22 RETURN_VALUE                      0
                   []
     Successors:
 
-    IR error: UNEXPECTED_EXPRESSION: CFR(16) |}]
+    Building a new node, starting from offset 8
+                  []
+       5        8 POP_BLOCK                         0
+                  []
+               10 POP_BLOCK                         0
+                  []
+      10       12 LOAD_CONST                        1 (3)
+                  [3]
+               14 RETURN_VALUE                      0
+                  []
+    Successors:
+
+
+    module dummy:
+
+      function toplevel():
+        b0:
+          n0 <- $MakeFunction["foo", "dummy.foo", None, None, None, None]
+          TOPLEVEL[foo] <- n0
+          return None
+
+
+      function dummy.foo(test):
+        b0:
+          n0 <- LOCAL[test]
+          if n0 then jmp b1 else jmp b2
+
+        b1:
+          return 3
+
+        b2:
+          return 3 |}]

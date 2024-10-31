@@ -159,13 +159,25 @@ start()
         b0:
           LOCAL[x] <- $BuildTuple(3, 4)
           n0 <- GLOBAL[f]
-          n1 <- LOCAL[x]
-          n2 <- $CallFunctionEx(n0, $BuildTupleUnpack($BuildTuple(1, 2), n1), $BuildMap("test", 42), None)
-          n3 <- GLOBAL[f]
-          n4 <- $CallFunctionEx(n3, $BuildTupleUnpack($BuildTuple(1, 2), $BuildTuple("a", "b")), $BuildMap("test", 42), None)
-          n5 <- GLOBAL[g]
-          n6 <- LOCAL[x]
-          n7 <- $CallFunctionEx(n5, $BuildTupleUnpack($BuildTuple(1, 2), n6), None, None)
+          n1 <- $ListExtend($BuildList(), $BuildTuple(1, 2), None)
+          n2 <- LOCAL[x]
+          n3 <- $ListExtend($BuildList(), n2, None)
+          n4 <- $ListToTuple($BuildList(), None)
+          n5 <- $DictMerge($BuildMap(), $BuildMap("test", 42), None)
+          n6 <- $CallFunctionEx(n0, n4, $BuildMap(), None)
+          n7 <- GLOBAL[f]
+          n8 <- $ListExtend($BuildList(), $BuildTuple(1, 2), None)
+          n9 <- $ListAppend($BuildList(), "a", None)
+          n10 <- $ListAppend($BuildList(), "b", None)
+          n11 <- $ListToTuple($BuildList(), None)
+          n12 <- $DictMerge($BuildMap(), $BuildMap("test", 42), None)
+          n13 <- $CallFunctionEx(n7, n11, $BuildMap(), None)
+          n14 <- GLOBAL[g]
+          n15 <- $ListExtend($BuildList(), $BuildTuple(1, 2), None)
+          n16 <- LOCAL[x]
+          n17 <- $ListExtend($BuildList(), n16, None)
+          n18 <- $ListToTuple($BuildList(), None)
+          n19 <- $CallFunctionEx(n14, n18, None, None)
           return None |xxx}]
 
 
@@ -209,27 +221,35 @@ def f(foo, a, b, c):
           n8 <- n7.f
           n9 <- LOCAL[a]
           n10 <- LOCAL[b]
-          n11 <- $CallFunctionEx(n8, $BuildTupleUnpack($BuildTuple(n9), n10), None, None)
-          n12 <- LOCAL[foo]
-          n13 <- n12.f
-          n14 <- LOCAL[c]
-          n15 <- $CallFunctionEx(n13, $BuildTuple(), n14, None)
-          n16 <- LOCAL[foo]
-          n17 <- n16.f
-          n18 <- LOCAL[b]
-          n19 <- LOCAL[c]
-          n20 <- $CallFunctionEx(n17, n18, n19, None)
-          n21 <- LOCAL[foo]
-          n22 <- n21.f
-          n23 <- LOCAL[a]
-          n24 <- LOCAL[c]
-          n25 <- $CallFunctionEx(n22, $BuildTuple(n23), n24, None)
-          n26 <- LOCAL[foo]
-          n27 <- n26.f
-          n28 <- LOCAL[a]
-          n29 <- LOCAL[b]
-          n30 <- LOCAL[c]
-          n31 <- $CallFunctionEx(n27, $BuildTupleUnpack($BuildTuple(n28), n29), n30, None)
+          n11 <- $ListExtend($BuildList(n9), n10, None)
+          n12 <- $ListToTuple($BuildList(n9), None)
+          n13 <- $CallFunctionEx(n8, n12, None, None)
+          n14 <- LOCAL[foo]
+          n15 <- n14.f
+          n16 <- LOCAL[c]
+          n17 <- $DictMerge($BuildMap(), n16, None)
+          n18 <- $CallFunctionEx(n15, $BuildTuple(), $BuildMap(), None)
+          n19 <- LOCAL[foo]
+          n20 <- n19.f
+          n21 <- LOCAL[b]
+          n22 <- LOCAL[c]
+          n23 <- $DictMerge($BuildMap(), n22, None)
+          n24 <- $CallFunctionEx(n20, n21, $BuildMap(), None)
+          n25 <- LOCAL[foo]
+          n26 <- n25.f
+          n27 <- LOCAL[a]
+          n28 <- LOCAL[c]
+          n29 <- $DictMerge($BuildMap(), n28, None)
+          n30 <- $CallFunctionEx(n26, $BuildTuple(n27), $BuildMap(), None)
+          n31 <- LOCAL[foo]
+          n32 <- n31.f
+          n33 <- LOCAL[a]
+          n34 <- LOCAL[b]
+          n35 <- $ListExtend($BuildList(n33), n34, None)
+          n36 <- $ListToTuple($BuildList(n33), None)
+          n37 <- LOCAL[c]
+          n38 <- $DictMerge($BuildMap(), n37, None)
+          n39 <- $CallFunctionEx(n32, n36, $BuildMap(), None)
           return None |}]
 
 
@@ -262,18 +282,22 @@ f(**d1, x=42)
           n1 <- $BuildConstKeyMap($BuildTuple("a", "b"), 0, 1, None)
           TOPLEVEL[d1] <- n1
           n2 <- TOPLEVEL[d0]
-          n3 <- TOPLEVEL[d1]
-          TOPLEVEL[x] <- $BuildMapUnpack(n2, n3)
-          n4 <- TOPLEVEL[print]
-          n5 <- TOPLEVEL[x]
-          n6 <- $Call(n4, n5, None)
-          n7 <- $MakeFunction["f", "dummy.f", None, None, None, None]
-          TOPLEVEL[f] <- n7
-          n8 <- $BuildConstKeyMap($BuildTuple("a", "b"), 0, 1, None)
-          TOPLEVEL[d1] <- n8
-          n9 <- TOPLEVEL[f]
-          n10 <- TOPLEVEL[d1]
-          n11 <- $CallFunctionEx(n9, $BuildTuple(), $BuildMapUnpack(n10, $BuildMap("x", 42)), None)
+          n3 <- $DictUpdate($BuildMap(), n2, None)
+          n4 <- TOPLEVEL[d1]
+          n5 <- $DictUpdate($BuildMap(), n4, None)
+          TOPLEVEL[x] <- $BuildMap()
+          n6 <- TOPLEVEL[print]
+          n7 <- TOPLEVEL[x]
+          n8 <- $Call(n6, n7, None)
+          n9 <- $MakeFunction["f", "dummy.f", None, None, None, None]
+          TOPLEVEL[f] <- n9
+          n10 <- $BuildConstKeyMap($BuildTuple("a", "b"), 0, 1, None)
+          TOPLEVEL[d1] <- n10
+          n11 <- TOPLEVEL[f]
+          n12 <- TOPLEVEL[d1]
+          n13 <- $DictMerge($BuildMap(), n12, None)
+          n14 <- $DictMerge($BuildMap(), $BuildMap("x", 42), None)
+          n15 <- $CallFunctionEx(n11, $BuildTuple(), $BuildMap(), None)
           return None
 
 

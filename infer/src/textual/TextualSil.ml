@@ -34,10 +34,13 @@ module LocationBridge = struct
           match entry with
           | None ->
               BaseLocation.{line; col; file; macro_file_opt= None; macro_line= -1}
-          (* hackc doesn't output column information yet *)
-          | Some original_line ->
-              BaseLocation.{line= original_line; col= -1; file; macro_file_opt= None; macro_line= -1}
-          ) )
+          | Some {line= original_line; column= original_column} ->
+              BaseLocation.
+                { line= original_line
+                ; col= original_column
+                ; file
+                ; macro_file_opt= None
+                ; macro_line= -1 } ) )
     | Unknown ->
         BaseLocation.none file
 
@@ -794,7 +797,9 @@ module InstrBridge = struct
           match TextualDecls.get_procdecl decls_env procsig (List.length args) with
           | Some (variadic_flag, _, procdecl) ->
               (variadic_flag, procdecl)
-          | None when QualifiedProcName.contains_wildcard proc ->
+          | None
+            when QualifiedProcName.contains_wildcard proc
+                 || QualifiedProcName.is_python_builtin proc ->
               let textual_ret_typ =
                 (* Declarations with unknown formals are expected in Hack/Python. Assume that unknown
                    return types are *HackMixed/*PyObject respectively. *)
@@ -1247,7 +1252,7 @@ module ModuleBridge = struct
                if is_undefined_type tname then
                  let sil_tname = TypeNameBridge.to_sil lang tname in
                  Tenv.mk_struct ~dummy:true tenv sil_tname |> ignore ) ;
-        (cfgs, tenv)
+        (cfgs, tenv, module_)
 
 
   let of_sil ~sourcefile ~lang tenv cfg =
@@ -1273,7 +1278,9 @@ end
 
 let proc_decl_to_sil lang procdecl = ProcDeclBridge.to_sil lang procdecl
 
-let module_to_sil = ModuleBridge.to_sil
+let module_to_sil module_ =
+  try Ok (ModuleBridge.to_sil module_) with Textual.TextualTransformError errors -> Error errors
+
 
 let pp_copyright fmt =
   F.fprintf fmt "// \n" ;

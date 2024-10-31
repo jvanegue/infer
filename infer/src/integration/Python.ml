@@ -13,7 +13,8 @@ module Error = struct
   type t =
     | FFI of FFI.Error.t
     | IR of PyIR.Error.t
-    | Textual of (Textual.SourceFile.t * TextualVerification.error list)
+    | TextualVerification of (Textual.SourceFile.t * TextualVerification.error list)
+    | TextualTransformation of (Textual.SourceFile.t * Textual.transform_error list)
 
   let format_error file error =
     let log level =
@@ -30,16 +31,20 @@ module Error = struct
         log level "[python:%s][-1] %a@\n" file FFI.Error.pp_kind err
     | IR (level, loc, err) ->
         log level "[python:%s][%a] %a@\n" file PyIR.Location.pp loc PyIR.Error.pp_kind err
-    | Textual (sourcefile, errs) ->
+    | TextualVerification (sourcefile, errs) ->
         List.iter errs
           ~f:(L.internal_error "%a@\n" (TextualVerification.pp_error_with_sourcefile sourcefile))
+    | TextualTransformation (sourcefile, errs) ->
+        List.iter errs ~f:(L.internal_error "%a@\n" (Textual.pp_transform_error sourcefile))
 
 
   let ffi x = FFI x
 
   let ir x = IR x
 
-  let textual sourcefile list = Textual (sourcefile, list)
+  let textual_verification sourcefile list = TextualVerification (sourcefile, list)
+
+  let textual_transformation sourcefile list = TextualTransformation (sourcefile, list)
 end
 
 module Interpreter = struct
@@ -70,10 +75,11 @@ module Interpreter = struct
     Py.finalize ()
 end
 
-let dump_textual_file pyc module_ =
+let dump_textual_file ~version pyc module_ =
+  let suffix = Format.asprintf ".v%d.sil" version in
   let filename =
     let textual_filename = TextualSil.to_filename pyc in
-    Filename.temp_file ~in_dir:(ResultsDir.get_path Temporary) textual_filename "sil"
+    Filename.temp_file ~in_dir:(ResultsDir.get_path Temporary) textual_filename suffix
   in
   TextualSil.dump_module ~filename module_
 
@@ -81,12 +87,25 @@ let dump_textual_file pyc module_ =
 let process_file ~is_binary file =
   let open IResult.Let_syntax in
   let sourcefile = Textual.SourceFile.create file in
-  let* code = Result.map_error ~f:Error.ffi @@ FFI.from_file ~is_binary file in
-  let* pyir = Result.map_error ~f:Error.ir @@ PyIR.mk ~debug:false code in
+  let* code = FFI.from_file ~is_binary file |> Result.map_error ~f:Error.ffi in
+  let* pyir = PyIR.mk ~debug:false code |> Result.map_error ~f:Error.ir in
   let textual = PyIR2Textual.mk_module pyir in
-  if Config.debug_mode then dump_textual_file file textual ;
-  let* _ = Result.map_error ~f:(Error.textual sourcefile) @@ TextualVerification.verify textual in
-  Ok ()
+  if Config.debug_mode then dump_textual_file ~version:0 file textual ;
+  let* verified_textual =
+    let f = Error.textual_verification sourcefile in
+    TextualVerification.verify textual |> Result.map_error ~f
+  in
+  if Config.debug_mode then dump_textual_file ~version:1 file verified_textual ;
+  let* cfg, tenv, transformed_textual =
+    let f = Error.textual_transformation sourcefile in
+    TextualSil.module_to_sil verified_textual |> Result.map_error ~f
+  in
+  if Config.debug_mode then dump_textual_file ~version:2 file transformed_textual ;
+  let sil = {TextualParser.TextualFile.sourcefile; cfg; tenv} in
+  if Config.python_skip_db then Ok None
+  else (
+    TextualParser.TextualFile.capture ~use_global_tenv:true sil ;
+    Ok (Some tenv) )
 
 
 let capture_file ~is_binary file = process_file ~is_binary file
@@ -99,7 +118,8 @@ let capture_files ~is_binary files =
       let t0 = Mtime_clock.now () in
       !ProcessPoolState.update_status (Some t0) file ;
       match capture_file ~is_binary file with
-      | Ok () ->
+      | Ok file_tenv ->
+          Option.iter file_tenv ~f:(fun file_tenv -> Tenv.merge ~src:file_tenv ~dst:child_tenv) ;
           None
       | Error err ->
           Error.format_error file err ;
@@ -149,7 +169,8 @@ let capture_files ~is_binary files =
   L.progress "Success: %d files@\n" !n_captured ;
   L.progress "Failure: %d files@\n" !n_error ;
   L.progress "Merging type environments...@\n%!" ;
-  MergeCapture.merge_global_tenv ~normalize:true (Array.to_list child_tenv_paths) ;
+  if not Config.python_skip_db then
+    MergeCapture.merge_global_tenv ~normalize:true (Array.to_list child_tenv_paths) ;
   Array.iter child_tenv_paths ~f:(fun filename -> DB.filename_to_string filename |> Unix.unlink)
 
 

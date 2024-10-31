@@ -102,6 +102,8 @@ let exp_globals = Textual.Exp.(Load {exp= Lvar Parameter.globals; typ= None})
 
 let rec of_exp exp : Textual.Exp.t =
   match (exp : Exp.t) with
+  | AssertionError ->
+      call_builtin "py_load_assertion_error" []
   | Const const ->
       of_const const
   | Var {scope= Global; ident} ->
@@ -122,6 +124,17 @@ let rec of_exp exp : Textual.Exp.t =
       call_builtin "py_import_from" [exp_of_ident_str name; of_exp exp]
   | Temp ssa ->
       Var (mk_ident ssa)
+  | MatchClass {subject; type_; count; names} ->
+      let count = Textual.(Exp.Const (Const.Int (Z.of_int count))) in
+      call_builtin "py_match_class" [of_exp subject; of_exp type_; count; of_exp names]
+  | BoolOfMatchClass exp ->
+      call_builtin "py_bool_of_match_class" [of_exp exp]
+  | AttributesOfMatchClass exp ->
+      call_builtin "py_attributes_of_match_class" [of_exp exp]
+  | MatchSequence exp ->
+      call_builtin "py_match_sequence" [of_exp exp]
+  | GetLen exp ->
+      call_builtin "py_get_len" [of_exp exp]
   | Subscript {exp; index} ->
       call_builtin "py_subscript" [of_exp exp; of_exp index]
   | BuildSlice args ->
@@ -144,10 +157,12 @@ let rec of_exp exp : Textual.Exp.t =
       {qual_name; short_name= _; default_values; default_values_kw; annotations; cells_for_closure}
     ->
       let proc = mk_qualified_proc_name (RegularFunction qual_name) in
-      let captured =
-        List.map ~f:of_exp [default_values; default_values_kw; annotations; cells_for_closure]
+      let closure =
+        Textual.Exp.Closure {proc; captured= [exp_globals]; params= [Parameter.locals]}
       in
-      Closure {proc; captured; params= [] (* TODO *)}
+      call_builtin "py_make_function"
+        ( closure
+        :: List.map ~f:of_exp [default_values; default_values_kw; annotations; cells_for_closure] )
   | Yield exp ->
       call_builtin "py_yield" [of_exp exp]
 
@@ -261,8 +276,6 @@ let builtin_name builtin =
       "py_call_function_ex"
   | Inplace op ->
       F.asprintf "py_inplace_%s" (binary_op_name op)
-  | ImportStar ->
-      "py_import_star"
   | Binary op ->
       F.asprintf "py_binary_%s" (binary_op_name op)
   | Unary op ->
@@ -283,10 +296,20 @@ let builtin_name builtin =
       "py_get_yield_from_iter"
   | ListAppend ->
       "py_list_append"
+  | ListExtend ->
+      "py_list_extend"
+  | ListToTuple ->
+      "py_list_to_tuple"
   | SetAdd ->
       "py_set_add"
+  | SetUpdate ->
+      "py_set_update"
   | DictSetItem ->
       "py_dict_set_item"
+  | DictUpdate ->
+      "py_dict_update"
+  | DictMerge ->
+      "py_dict_merge"
   | DeleteSubscr ->
       "py_delete_subscr"
   | YieldFrom ->
@@ -371,9 +394,22 @@ let of_stmt loc stmt : Textual.Instr.t =
       Let {id= None; exp= call_builtin "py_delete_attr" [of_exp exp; exp_of_ident_str attr]; loc}
   | SetupAnnotations ->
       Let {id= None; exp= call_builtin "py_setup_annotations" []; loc}
+  | ImportStar exp ->
+      Let {id= None; exp= call_builtin "py_import_star" [of_exp exp]; loc}
+  | GenStart {kind} ->
+      let kind =
+        match kind with
+        | Generator ->
+            "generator"
+        | Coroutine ->
+            "coroutine"
+        | AsyncGenerator ->
+            "async_generator"
+      in
+      Let {id= None; exp= call_builtin ("py_gen_start_" ^ kind) []; loc}
 
 
-let of_node {Node.name; first_loc; last_loc; ssa_parameters; stmts; last} =
+let of_node is_module_body entry {Node.name; first_loc; last_loc; ssa_parameters; stmts; last} =
   let label = mk_node_name name in
   let label_loc = of_location first_loc in
   let last_loc = of_location last_loc in
@@ -383,6 +419,20 @@ let of_node {Node.name; first_loc; last_loc; ssa_parameters; stmts; last} =
         let loc = of_location loc in
         of_stmt loc stmt )
   in
+  let instrs =
+    if is_module_body && NodeName.equal name entry then
+      let loc = label_loc in
+      Textual.(
+        Instr.Store
+          {exp1= Lvar Parameter.globals; exp2= call_builtin "py_make_dictionnary" []; typ= None; loc}
+        :: Instr.Store
+             { exp1= Lvar Parameter.locals
+             ; exp2= Load {exp= Lvar Parameter.globals; typ= None}
+             ; typ= None
+             ; loc }
+        :: instrs )
+    else instrs
+  in
   let exn_succs = [] (* TODO *) in
   let ssa_parameters = List.map ssa_parameters ~f:(fun ssa -> (mk_ident ssa, Typ.value)) in
   {Textual.Node.label; ssa_parameters; exn_succs; last; instrs; last_loc; label_loc}
@@ -390,11 +440,19 @@ let of_node {Node.name; first_loc; last_loc; ssa_parameters; stmts; last} =
 
 let mk_procdesc proc_kind {CFG.entry; nodes; code_info= _} =
   let procdecl = mk_procdecl proc_kind in
+  let is_module_body = is_module_body proc_kind in
   let nodes_bindings = NodeName.Map.bindings nodes in
-  let nodes = List.map nodes_bindings ~f:(fun (_node_name, node) -> of_node node) in
+  let nodes =
+    List.map nodes_bindings ~f:(fun (_node_name, node) -> of_node is_module_body entry node)
+  in
   let start = mk_node_name entry in
-  let params = if is_module_body proc_kind then [] else [Parameter.globals; Parameter.locals] in
-  let locals = [] in
+  let params = if is_module_body then [] else [Parameter.globals; Parameter.locals] in
+  let locals =
+    if is_module_body then
+      [ (Parameter.globals, Textual.Typ.mk_without_attributes Typ.globals)
+      ; (Parameter.locals, Textual.Typ.mk_without_attributes Typ.locals) ]
+    else []
+  in
   let exit_loc =
     let last_loc =
       List.fold nodes_bindings ~init:None ~f:(fun acc (_, {Node.last_loc}) ->
@@ -417,4 +475,5 @@ let mk_module {Module.name; toplevel; functions} =
         Textual.Module.Proc (mk_procdesc (RegularFunction qual_name) cfg) )
   in
   let decls = Textual.Module.Proc (mk_procdesc (ModuleBody name) toplevel) :: decls in
-  {Textual.Module.attrs= []; decls; sourcefile}
+  let attrs = [Textual.Attr.mk_source_language Python] in
+  {Textual.Module.attrs; decls; sourcefile}

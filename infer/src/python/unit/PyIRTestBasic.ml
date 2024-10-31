@@ -178,11 +178,12 @@ l[0:2:1]
 
       function toplevel():
         b0:
-          TOPLEVEL[l] <- $BuildList(0, 1, 2, 3, 4, 5)
-          n0 <- TOPLEVEL[l]
-          n1 <- n0[$BuildSlice(0, 2)]
-          n2 <- TOPLEVEL[l]
-          n3 <- n2[$BuildSlice(0, 2, 1)]
+          n0 <- $ListExtend($BuildList(), $BuildTuple(0, 1, 2, 3, 4, 5), None)
+          TOPLEVEL[l] <- $BuildList()
+          n1 <- TOPLEVEL[l]
+          n2 <- n1[$BuildSlice(0, 2)]
+          n3 <- TOPLEVEL[l]
+          n4 <- n3[$BuildSlice(0, 2, 1)]
           return None |}]
 
 
@@ -211,11 +212,12 @@ print(l[0])
 
       function toplevel():
         b0:
-          TOPLEVEL[l] <- $BuildList(1, 2, 3)
-          n0 <- TOPLEVEL[print]
-          n1 <- TOPLEVEL[l]
-          n2 <- n1[0]
-          n3 <- $Call(n0, n2, None)
+          n0 <- $ListExtend($BuildList(), $BuildTuple(1, 2, 3), None)
+          TOPLEVEL[l] <- $BuildList()
+          n1 <- TOPLEVEL[print]
+          n2 <- TOPLEVEL[l]
+          n3 <- n2[0]
+          n4 <- $Call(n1, n3, None)
           return None |}]
 
 
@@ -232,11 +234,12 @@ l[x] = 10
 
       function toplevel():
         b0:
-          TOPLEVEL[l] <- $BuildList(1, 2, 3)
+          n0 <- $ListExtend($BuildList(), $BuildTuple(1, 2, 3), None)
+          TOPLEVEL[l] <- $BuildList()
           TOPLEVEL[x] <- 0
-          n0 <- TOPLEVEL[l]
-          n1 <- TOPLEVEL[x]
-          n0[n1] <- 10
+          n1 <- TOPLEVEL[l]
+          n2 <- TOPLEVEL[x]
+          n1[n2] <- 10
           return None |}]
 
 
@@ -251,7 +254,8 @@ s = {1, 2, 3}
 
       function toplevel():
         b0:
-          TOPLEVEL[s] <- $BuildSet(1, 2, 3)
+          n0 <- $SetUpdate($BuildSet(), $BuildFrozenSet(1, 2, 3), None)
+          TOPLEVEL[s] <- $BuildSet()
           return None |}]
 
 
@@ -335,13 +339,7 @@ with open("foo.txt", "wt") as fp:
           TOPLEVEL[fp] <- n2
           n3 <- TOPLEVEL[fp]
           n4 <- $CallMethod[write](n3, "yolo", None)
-          jmp b1
-
-        b1:
-          n5 <- $CallMethod[__enter__](n1, None, None, None, None)
-          jmp b2
-
-        b2:
+          n5 <- $CallMethod[__exit__](n1, None)
           return None |}]
 
 
@@ -368,18 +366,24 @@ print(result)
         b0:
           TOPLEVEL[values] <- $BuildList(1, 2, $BuildList(3, 4), 5)
           TOPLEVEL[values2] <- $BuildTuple("a", "b")
-          n0 <- TOPLEVEL[values]
-          n1 <- TOPLEVEL[values2]
-          TOPLEVEL[result] <- $BuildTupleUnpack($BuildList(10, 100), n0, n1)
-          n2 <- TOPLEVEL[print]
-          n3 <- TOPLEVEL[result]
-          n4 <- $Call(n2, n3, None)
-          n5 <- TOPLEVEL[values]
-          n6 <- TOPLEVEL[values2]
-          TOPLEVEL[result] <- $BuildListUnpack(n5, n6)
-          n7 <- TOPLEVEL[print]
-          n8 <- TOPLEVEL[result]
-          n9 <- $Call(n7, n8, None)
+          n0 <- $ListExtend($BuildList(), $BuildList(10, 100), None)
+          n1 <- TOPLEVEL[values]
+          n2 <- $ListExtend($BuildList(), n1, None)
+          n3 <- TOPLEVEL[values2]
+          n4 <- $ListExtend($BuildList(), n3, None)
+          n5 <- $ListToTuple($BuildList(), None)
+          TOPLEVEL[result] <- n5
+          n6 <- TOPLEVEL[print]
+          n7 <- TOPLEVEL[result]
+          n8 <- $Call(n6, n7, None)
+          n9 <- TOPLEVEL[values]
+          n10 <- $ListExtend($BuildList(), n9, None)
+          n11 <- TOPLEVEL[values2]
+          n12 <- $ListExtend($BuildList(), n11, None)
+          TOPLEVEL[result] <- $BuildList()
+          n13 <- TOPLEVEL[print]
+          n14 <- TOPLEVEL[result]
+          n15 <- $Call(n13, n14, None)
           return None |}]
 
 
@@ -445,59 +449,81 @@ x = o.f(0, *args1, *args2, **d1, **d2)
           TOPLEVEL[x] <- n5
           n6 <- TOPLEVEL[f]
           n7 <- TOPLEVEL[args]
-          n8 <- $CallFunctionEx(n6, $BuildTupleUnpack($BuildTuple(0), n7), None, None)
-          TOPLEVEL[x] <- n8
-          n9 <- TOPLEVEL[f]
-          n10 <- TOPLEVEL[d]
-          n11 <- $CallFunctionEx(n9, $BuildTuple(0), n10, None)
-          TOPLEVEL[x] <- n11
-          n12 <- TOPLEVEL[f]
-          n13 <- TOPLEVEL[args]
-          n14 <- TOPLEVEL[d]
-          n15 <- $CallFunctionEx(n12, $BuildTupleUnpack($BuildTuple(0), n13), n14, None)
-          TOPLEVEL[x] <- n15
-          n16 <- TOPLEVEL[f]
-          n17 <- TOPLEVEL[args1]
-          n18 <- TOPLEVEL[args2]
-          n19 <- TOPLEVEL[d1]
-          n20 <- TOPLEVEL[d2]
-          n21 <- $CallFunctionEx(n16, $BuildTupleUnpack($BuildTuple(0), n17, n18), $BuildMapUnpack(n19, n20), None)
+          n8 <- $ListExtend($BuildList(0), n7, None)
+          n9 <- $ListToTuple($BuildList(0), None)
+          n10 <- $CallFunctionEx(n6, n9, None, None)
+          TOPLEVEL[x] <- n10
+          n11 <- TOPLEVEL[f]
+          n12 <- TOPLEVEL[d]
+          n13 <- $DictMerge($BuildMap(), n12, None)
+          n14 <- $CallFunctionEx(n11, $BuildTuple(0), $BuildMap(), None)
+          TOPLEVEL[x] <- n14
+          n15 <- TOPLEVEL[f]
+          n16 <- TOPLEVEL[args]
+          n17 <- $ListExtend($BuildList(0), n16, None)
+          n18 <- $ListToTuple($BuildList(0), None)
+          n19 <- TOPLEVEL[d]
+          n20 <- $DictMerge($BuildMap(), n19, None)
+          n21 <- $CallFunctionEx(n15, n18, $BuildMap(), None)
           TOPLEVEL[x] <- n21
-          n22 <- TOPLEVEL[o]
-          n23 <- $CallMethod[f](n22, 0, 1, None)
-          TOPLEVEL[x] <- n23
-          n24 <- TOPLEVEL[o]
-          n25 <- n24.f
-          n26 <- $Call(n25, 0, 1, $BuildTuple("b"))
-          TOPLEVEL[x] <- n26
-          n27 <- TOPLEVEL[o]
-          n28 <- n27.f
-          n29 <- $Call(n28, 0, 1, $BuildTuple("a", "b"))
-          TOPLEVEL[x] <- n29
-          n30 <- TOPLEVEL[o]
-          n31 <- n30.f
-          n32 <- TOPLEVEL[args]
-          n33 <- $CallFunctionEx(n31, $BuildTupleUnpack($BuildTuple(0), n32), None, None)
-          TOPLEVEL[x] <- n33
-          n34 <- TOPLEVEL[o]
-          n35 <- n34.f
-          n36 <- TOPLEVEL[d]
-          n37 <- $CallFunctionEx(n35, $BuildTuple(0), n36, None)
+          n22 <- TOPLEVEL[f]
+          n23 <- TOPLEVEL[args1]
+          n24 <- $ListExtend($BuildList(0), n23, None)
+          n25 <- TOPLEVEL[args2]
+          n26 <- $ListExtend($BuildList(0), n25, None)
+          n27 <- $ListToTuple($BuildList(0), None)
+          n28 <- TOPLEVEL[d1]
+          n29 <- $DictMerge($BuildMap(), n28, None)
+          n30 <- TOPLEVEL[d2]
+          n31 <- $DictMerge($BuildMap(), n30, None)
+          n32 <- $CallFunctionEx(n22, n27, $BuildMap(), None)
+          TOPLEVEL[x] <- n32
+          n33 <- TOPLEVEL[o]
+          n34 <- $CallMethod[f](n33, 0, 1, None)
+          TOPLEVEL[x] <- n34
+          n35 <- TOPLEVEL[o]
+          n36 <- n35.f
+          n37 <- $Call(n36, 0, 1, $BuildTuple("b"))
           TOPLEVEL[x] <- n37
           n38 <- TOPLEVEL[o]
           n39 <- n38.f
-          n40 <- TOPLEVEL[args]
-          n41 <- TOPLEVEL[d]
-          n42 <- $CallFunctionEx(n39, $BuildTupleUnpack($BuildTuple(0), n40), n41, None)
-          TOPLEVEL[x] <- n42
-          n43 <- TOPLEVEL[o]
-          n44 <- n43.f
-          n45 <- TOPLEVEL[args1]
-          n46 <- TOPLEVEL[args2]
-          n47 <- TOPLEVEL[d1]
-          n48 <- TOPLEVEL[d2]
-          n49 <- $CallFunctionEx(n44, $BuildTupleUnpack($BuildTuple(0), n45, n46), $BuildMapUnpack(n47, n48), None)
-          TOPLEVEL[x] <- n49
+          n40 <- $Call(n39, 0, 1, $BuildTuple("a", "b"))
+          TOPLEVEL[x] <- n40
+          n41 <- TOPLEVEL[o]
+          n42 <- n41.f
+          n43 <- TOPLEVEL[args]
+          n44 <- $ListExtend($BuildList(0), n43, None)
+          n45 <- $ListToTuple($BuildList(0), None)
+          n46 <- $CallFunctionEx(n42, n45, None, None)
+          TOPLEVEL[x] <- n46
+          n47 <- TOPLEVEL[o]
+          n48 <- n47.f
+          n49 <- TOPLEVEL[d]
+          n50 <- $DictMerge($BuildMap(), n49, None)
+          n51 <- $CallFunctionEx(n48, $BuildTuple(0), $BuildMap(), None)
+          TOPLEVEL[x] <- n51
+          n52 <- TOPLEVEL[o]
+          n53 <- n52.f
+          n54 <- TOPLEVEL[args]
+          n55 <- $ListExtend($BuildList(0), n54, None)
+          n56 <- $ListToTuple($BuildList(0), None)
+          n57 <- TOPLEVEL[d]
+          n58 <- $DictMerge($BuildMap(), n57, None)
+          n59 <- $CallFunctionEx(n53, n56, $BuildMap(), None)
+          TOPLEVEL[x] <- n59
+          n60 <- TOPLEVEL[o]
+          n61 <- n60.f
+          n62 <- TOPLEVEL[args1]
+          n63 <- $ListExtend($BuildList(0), n62, None)
+          n64 <- TOPLEVEL[args2]
+          n65 <- $ListExtend($BuildList(0), n64, None)
+          n66 <- $ListToTuple($BuildList(0), None)
+          n67 <- TOPLEVEL[d1]
+          n68 <- $DictMerge($BuildMap(), n67, None)
+          n69 <- TOPLEVEL[d2]
+          n70 <- $DictMerge($BuildMap(), n69, None)
+          n71 <- $CallFunctionEx(n61, n66, $BuildMap(), None)
+          TOPLEVEL[x] <- n71
           return None
 |xxx}]
 
@@ -535,10 +561,9 @@ def main(arg):
           n1 <- GLOBAL[int]
           n2 <- GLOBAL[str]
           n3 <- GLOBAL[float]
-          n4 <- $BuildConstKeyMap($BuildTuple("x", "y", "z"), n1, n2, n3, None)
-          n5 <- $LoadClosure(0,"arg")
-          n6 <- $MakeFunction["f", "dummy.main.f", $BuildTuple("ok", 0.), n0, n4, $BuildTuple(n5)]
-          LOCAL[f] <- n6
+          n4 <- $LoadClosure(0,"arg")
+          n5 <- $MakeFunction["f", "dummy.main.f", $BuildTuple("ok", 0.), n0, $BuildTuple("x", n1, "y", n2, "z", n3), $BuildTuple(n4)]
+          LOCAL[f] <- n5
           return None |}]
 
 
@@ -565,4 +590,34 @@ def foo(n):
           n1 <- LOCAL[n]
           n2 <- $Binary.Multiply("*", n1, None)
           n3 <- $CallMethod[update](n0, $BuildMap("key", n2), None)
+          return None |}]
+
+
+let%expect_test _ =
+  let source = {|
+def foo(n):
+    assert(n>0)
+|} in
+  PyIR.test source ;
+  [%expect
+    {|
+    module dummy:
+
+      function toplevel():
+        b0:
+          n0 <- $MakeFunction["foo", "dummy.foo", None, None, None, None]
+          TOPLEVEL[foo] <- n0
+          return None
+
+
+      function dummy.foo(n):
+        b0:
+          n0 <- LOCAL[n]
+          n1 <- $Compare.gt(n0, 0, None)
+          if n1 then jmp b2 else jmp b1
+
+        b1:
+          throw $AssertionError
+
+        b2:
           return None |}]

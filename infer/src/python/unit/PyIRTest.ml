@@ -190,18 +190,16 @@ def f(x, y):
           if n1 then jmp b1 else jmp b2
 
         b1:
-          n3 <- LOCAL[x]
-          LOCAL[z] <- n3
-          jmp b3
+          n4 <- LOCAL[x]
+          LOCAL[z] <- n4
+          n5 <- LOCAL[z]
+          return n5
 
         b2:
           n2 <- LOCAL[y]
           LOCAL[z] <- n2
-          jmp b3
-
-        b3:
-          n4 <- LOCAL[z]
-          return n4 |}]
+          n3 <- LOCAL[z]
+          return n3 |}]
 
 
 let%expect_test _ =
@@ -254,23 +252,24 @@ def f(x, y):
           if n1 then jmp b1 else jmp b5
 
         b1:
-          n7 <- GLOBAL[coin]
-          n8 <- $Call(n7, None)
-          if n8 then jmp b2 else jmp b3
+          n8 <- GLOBAL[coin]
+          n9 <- $Call(n8, None)
+          if n9 then jmp b2 else jmp b3
 
         b2:
-          n9 <- LOCAL[x]
-          LOCAL[z] <- n9
+          n10 <- LOCAL[x]
+          LOCAL[z] <- n10
           jmp b4
 
         b3:
           return 1664
 
         b4:
-          n10 <- LOCAL[z]
-          n11 <- $Binary.Add(n10, 1, None)
-          LOCAL[z] <- n11
-          jmp b8
+          n11 <- LOCAL[z]
+          n12 <- $Binary.Add(n11, 1, None)
+          LOCAL[z] <- n12
+          n13 <- LOCAL[z]
+          return n13
 
         b5:
           n2 <- LOCAL[z]
@@ -286,11 +285,8 @@ def f(x, y):
         b7:
           n6 <- LOCAL[y]
           LOCAL[z] <- n6
-          jmp b8
-
-        b8:
-          n12 <- LOCAL[z]
-          return n12 |}]
+          n7 <- LOCAL[z]
+          return n7 |}]
 
 
 let%expect_test _ =
@@ -322,13 +318,11 @@ def f(x):
           if n1 then jmp b1 else jmp b2
 
         b1:
-          jmp b3(1)
+          n3 <- $Call(n0, 1, None)
+          return None
 
         b2:
-          jmp b3(0)
-
-        b3(n2):
-          n3 <- $Call(n0, n2, None)
+          n2 <- $Call(n0, 0, None)
           return None
 
 
@@ -402,12 +396,12 @@ def f(x, y, l, bar, toto):
         b1:
           n2 <- $NextIter(n1, None)
           n3 <- $HasNextIter(n1, None)
-          if n3 then jmp b2 else jmp b11
+          if n3 then jmp b2 else jmp b13
 
-        b10:
+        b12:
           jmp b1
 
-        b11:
+        b13:
           return None
 
         b2:
@@ -420,34 +414,22 @@ def f(x, y, l, bar, toto):
           n9 <- $CallMethod[__enter__](n8, None)
           LOCAL[obj] <- n9
           n10 <- LOCAL[y]
-          if n10 then jmp b3 else jmp b6
+          if n10 then jmp b3 else jmp b4
 
         b3:
-          jmp b4
-
-        b4:
-          n15 <- $CallMethod[__enter__](n8, None, None, None, None)
-          jmp b5
-
-        b5:
-          n16 <- $CallMethod[__enter__](n5, None, None, None, None)
+          n15 <- $CallMethod[__exit__](n8, None)
+          n16 <- $CallMethod[__exit__](n5, None)
           jmp b1
 
-        b6:
+        b4:
           n11 <- GLOBAL[print]
           n12 <- $Call(n11, "nop", None)
-          jmp b7
-
-        b7:
-          n13 <- $CallMethod[__enter__](n8, None, None, None, None)
+          n13 <- $CallMethod[__exit__](n8, None)
           jmp b8
 
         b8:
-          jmp b9
-
-        b9:
-          n14 <- $CallMethod[__enter__](n5, None, None, None, None)
-          jmp b10 |}]
+          n14 <- $CallMethod[__exit__](n5, None)
+          jmp b12 |}]
 
 
 let%expect_test _ =
@@ -515,14 +497,12 @@ def f1(x, y:str) -> bool:
         b0:
           n0 <- TOPLEVEL[int]
           n1 <- TOPLEVEL[float]
-          n2 <- $BuildConstKeyMap($BuildTuple("x", "z"), n0, n1, None)
-          n3 <- $MakeFunction["f0", "dummy.f0", None, None, n2, None]
-          TOPLEVEL[f0] <- n3
-          n4 <- TOPLEVEL[str]
-          n5 <- TOPLEVEL[bool]
-          n6 <- $BuildConstKeyMap($BuildTuple("y", "return"), n4, n5, None)
-          n7 <- $MakeFunction["f1", "dummy.f1", None, None, n6, None]
-          TOPLEVEL[f1] <- n7
+          n2 <- $MakeFunction["f0", "dummy.f0", None, None, $BuildTuple("x", n0, "z", n1), None]
+          TOPLEVEL[f0] <- n2
+          n3 <- TOPLEVEL[str]
+          n4 <- TOPLEVEL[bool]
+          n5 <- $MakeFunction["f1", "dummy.f1", None, None, $BuildTuple("y", n3, "return", n4), None]
+          TOPLEVEL[f1] <- n5
           return None
 
 
@@ -556,17 +536,15 @@ expect_int(get())
       function toplevel():
         b0:
           n0 <- TOPLEVEL[int]
-          n1 <- $BuildConstKeyMap($BuildTuple("x"), n0, None)
-          n2 <- $MakeFunction["expect_int", "dummy.expect_int", None, None, n1, None]
-          TOPLEVEL[expect_int] <- n2
-          n3 <- TOPLEVEL[int]
-          n4 <- $BuildConstKeyMap($BuildTuple("return"), n3, None)
-          n5 <- $MakeFunction["get", "dummy.get", None, None, n4, None]
-          TOPLEVEL[get] <- n5
-          n6 <- TOPLEVEL[expect_int]
-          n7 <- TOPLEVEL[get]
-          n8 <- $Call(n7, None)
-          n9 <- $Call(n6, n8, None)
+          n1 <- $MakeFunction["expect_int", "dummy.expect_int", None, None, $BuildTuple("x", n0), None]
+          TOPLEVEL[expect_int] <- n1
+          n2 <- TOPLEVEL[int]
+          n3 <- $MakeFunction["get", "dummy.get", None, None, $BuildTuple("return", n2), None]
+          TOPLEVEL[get] <- n3
+          n4 <- TOPLEVEL[expect_int]
+          n5 <- TOPLEVEL[get]
+          n6 <- $Call(n5, None)
+          n7 <- $Call(n4, n6, None)
           return None
 
 
@@ -600,17 +578,15 @@ expect(get())
       function toplevel():
         b0:
           n0 <- TOPLEVEL[object]
-          n1 <- $BuildConstKeyMap($BuildTuple("x", "return"), n0, None, None)
-          n2 <- $MakeFunction["expect", "dummy.expect", None, None, n1, None]
-          TOPLEVEL[expect] <- n2
-          n3 <- TOPLEVEL[int]
-          n4 <- $BuildConstKeyMap($BuildTuple("return"), n3, None)
-          n5 <- $MakeFunction["get", "dummy.get", None, None, n4, None]
-          TOPLEVEL[get] <- n5
-          n6 <- TOPLEVEL[expect]
-          n7 <- TOPLEVEL[get]
-          n8 <- $Call(n7, None)
-          n9 <- $Call(n6, n8, None)
+          n1 <- $MakeFunction["expect", "dummy.expect", None, None, $BuildTuple("x", n0, "return", None), None]
+          TOPLEVEL[expect] <- n1
+          n2 <- TOPLEVEL[int]
+          n3 <- $MakeFunction["get", "dummy.get", None, None, $BuildTuple("return", n2), None]
+          TOPLEVEL[get] <- n3
+          n4 <- TOPLEVEL[expect]
+          n5 <- TOPLEVEL[get]
+          n6 <- $Call(n5, None)
+          n7 <- $Call(n4, n6, None)
           return None
 
 
@@ -862,23 +838,25 @@ def build_list():
 
       function toplevel():
         b0:
-          TOPLEVEL[l] <- $BuildList(1, 2, 3)
-          n0 <- TOPLEVEL[print]
-          n1 <- TOPLEVEL[l]
-          n2 <- $Call(n0, n1, None)
-          n3 <- $MakeFunction["build_list", "dummy.build_list", None, None, None, None]
-          TOPLEVEL[build_list] <- n3
-          n4 <- TOPLEVEL[build_list]
-          n5 <- $Call(n4, None)
-          TOPLEVEL[x] <- n5[0]
-          TOPLEVEL[y] <- n5[1]
-          TOPLEVEL[z] <- n5[2]
+          n0 <- $ListExtend($BuildList(), $BuildTuple(1, 2, 3), None)
+          TOPLEVEL[l] <- $BuildList()
+          n1 <- TOPLEVEL[print]
+          n2 <- TOPLEVEL[l]
+          n3 <- $Call(n1, n2, None)
+          n4 <- $MakeFunction["build_list", "dummy.build_list", None, None, None, None]
+          TOPLEVEL[build_list] <- n4
+          n5 <- TOPLEVEL[build_list]
+          n6 <- $Call(n5, None)
+          TOPLEVEL[x] <- n6[0]
+          TOPLEVEL[y] <- n6[1]
+          TOPLEVEL[z] <- n6[2]
           return None
 
 
       function dummy.build_list():
         b0:
-          return $BuildList(1, 2, 3) |}]
+          n0 <- $ListExtend($BuildList(), $BuildTuple(1, 2, 3), None)
+          return $BuildList() |}]
 
 
 let%expect_test _ =
@@ -918,20 +896,14 @@ def f(foo, bar):
           n6 <- GLOBAL[print]
           n7 <- LOCAL[bar0]
           n8 <- $Call(n6, n7, None)
-          jmp b1
+          n9 <- $CallMethod[__exit__](n4, None)
+          jmp b4
 
-        b1:
-          n9 <- $CallMethod[__enter__](n4, None, None, None, None)
-          jmp b2
-
-        b2:
+        b4:
           n10 <- GLOBAL[print]
           n11 <- LOCAL[foo0]
           n12 <- $Call(n10, n11, None)
-          jmp b3
-
-        b3:
-          n13 <- $CallMethod[__enter__](n1, None, None, None, None)
+          n13 <- $CallMethod[__exit__](n1, None)
           return 42 |}]
 
 
@@ -1020,25 +992,36 @@ def f(m, a, b, c):
           if n3 then jmp b1 else jmp b2
 
         b1:
-          n10 <- LOCAL[b]
-          n11 <- $Inplace.Subtract(n10, 1, None)
-          LOCAL[b] <- n11
-          jmp b0
+          n4 <- LOCAL[b]
+          n5 <- $Inplace.Subtract(n4, 1, None)
+          LOCAL[b] <- n5
+          n6 <- LOCAL[a]
+          n7 <- LOCAL[b]
+          n8 <- LOCAL[m]
+          n9 <- $Compare.not_in($BuildTuple(n6, n7), n8, None)
+          if n9 then jmp b1 else jmp b2
 
         b2:
-          n4 <- LOCAL[a]
-          n5 <- LOCAL[c]
-          n6 <- LOCAL[m]
-          n7 <- $Compare.not_in($BuildTuple(n4, n5), n6, None)
-          if n7 then jmp b3 else jmp b4
+          n10 <- LOCAL[a]
+          n11 <- LOCAL[c]
+          n12 <- LOCAL[m]
+          n13 <- $Compare.not_in($BuildTuple(n10, n11), n12, None)
+          if n13 then jmp b3 else jmp b5
 
         b3:
-          n8 <- LOCAL[c]
-          n9 <- $Inplace.Add(n8, 1, None)
-          LOCAL[c] <- n9
-          jmp b2
+          n14 <- LOCAL[c]
+          n15 <- $Inplace.Add(n14, 1, None)
+          LOCAL[c] <- n15
+          n16 <- LOCAL[a]
+          n17 <- LOCAL[c]
+          n18 <- LOCAL[m]
+          n19 <- $Compare.not_in($BuildTuple(n16, n17), n18, None)
+          if n19 then jmp b3 else jmp b4
 
         b4:
+          return None
+
+        b5:
           return None |}]
 
 
@@ -1459,11 +1442,13 @@ async def g():
 
       function dummy.f():
         b0:
+          $GenStartCoroutine()
           return true
 
 
       function dummy.g():
         b0:
+          $GenStartCoroutine()
           n0 <- GLOBAL[f]
           n1 <- $Call(n0, None)
           n2 <- $GetAwaitable(n1, None)
@@ -1473,14 +1458,11 @@ async def g():
         b1:
           n6 <- GLOBAL[print]
           n7 <- $Call(n6, 0, None)
-          jmp b3
+          return None
 
         b2:
           n4 <- GLOBAL[print]
           n5 <- $Call(n4, 1, None)
-          jmp b3
-
-        b3:
           return None |}]
 
 
@@ -1509,16 +1491,14 @@ def m(self, x, y, test):
           if n2 then jmp b1 else jmp b2
 
         b1:
-          n4 <- LOCAL[x]
-          jmp b3(n4)
+          n5 <- LOCAL[x]
+          n6 <- $Call(n0, n1, n5, None)
+          return n6
 
         b2:
           n3 <- LOCAL[y]
-          jmp b3(n3)
-
-        b3(n5):
-          n6 <- $Call(n0, n1, n5, None)
-          return n6 |}]
+          n4 <- $Call(n0, n1, n3, None)
+          return n4 |}]
 
 
 let%expect_test _ =
@@ -1545,16 +1525,14 @@ def m(self, x, y, test):
           if n1 then jmp b1 else jmp b2
 
         b1:
-          n3 <- LOCAL[x]
-          jmp b3(n3)
+          n4 <- LOCAL[x]
+          n5 <- $CallMethod[foo](n0, n4, None)
+          return n5
 
         b2:
           n2 <- LOCAL[y]
-          jmp b3(n2)
-
-        b3(n4):
-          n5 <- $CallMethod[foo](n0, n4, None)
-          return n5 |}]
+          n3 <- $CallMethod[foo](n0, n2, None)
+          return n3 |}]
 
 
 let%expect_test _ =
@@ -1580,16 +1558,14 @@ def m(x, y, test):
           if n0 then jmp b1 else jmp b2
 
         b1:
-          n2 <- LOCAL[x]
-          jmp b3(n2)
+          n3 <- LOCAL[x]
+          n4 <- $CallMethod[foo](n3, None)
+          return n4
 
         b2:
           n1 <- LOCAL[y]
-          jmp b3(n1)
-
-        b3(n3):
-          n4 <- $CallMethod[foo](n3, None)
-          return n4 |}]
+          n2 <- $CallMethod[foo](n1, None)
+          return n2 |}]
 
 
 let%expect_test _ =
@@ -1666,9 +1642,6 @@ res = dict.attr(0 if not False else 1)
       function toplevel():
         b0:
           n0 <- TOPLEVEL[dict]
-          jmp b2
-
-        b2:
           n1 <- $CallMethod[attr](n0, 0, None)
           TOPLEVEL[res] <- n1
           return None |}]
@@ -1683,9 +1656,110 @@ async def foo():
             return
 |}
   in
-  PyIR.test source ;
+  PyIR.test ~debug:true source ;
   [%expect
     {|
+    Translating dummy...
+    Building a new node, starting from offset 0
+                  []
+       2        0 LOAD_CONST                        0 (<code object foo>)
+                  [<foo>]
+                2 LOAD_CONST                        1 ("foo")
+                  [<foo>; "foo"]
+                4 MAKE_FUNCTION                     0
+                  [n0]
+                6 STORE_NAME                        0 (foo)
+                  []
+                8 LOAD_CONST                        2 (None)
+                  [None]
+               10 RETURN_VALUE                      0
+                  []
+    Successors:
+
+    Translating dummy.foo...
+    Building a new node, starting from offset 0
+                  []
+                0 GEN_START                         1
+                  []
+       3        2 LOAD_GLOBAL                       0 (range)
+                  [n0]
+                4 LOAD_GLOBAL                       1 (num)
+                  [n0; n1]
+                6 CALL_FUNCTION                     1
+                  [n2]
+                8 GET_ITER                          0
+                  [n3]
+    Successors: 10
+
+    Building a new node, starting from offset 10
+                  [n3]
+         >>>   10 FOR_ITER                         37 (to +74)
+                  [n3; n4]
+    Successors: 12,86
+
+    Building a new node, starting from offset 86
+                  []
+       3 >>>   86 LOAD_CONST                        0 (None)
+                  [None]
+               88 RETURN_VALUE                      0
+                  []
+    Successors:
+
+    Building a new node, starting from offset 12
+                  [n3; n4]
+               12 STORE_FAST                        0 (i)
+                  [n3]
+       4       14 LOAD_GLOBAL                       2 (read)
+                  [n3; n6]
+               16 CALL_FUNCTION                     0
+                  [n3; n7]
+               18 GET_AWAITABLE                     0
+                  [n3; n8]
+               20 LOAD_CONST                        0 (None)
+                  [n3; n8; None]
+               22 YIELD_FROM                        0
+                  [n3; n8]
+               24 BEFORE_ASYNC_WITH                 0
+                  [n3; CM(n8).__exit__; n10]
+               26 GET_AWAITABLE                     0
+                  [n3; CM(n8).__exit__; n11]
+               28 LOAD_CONST                        0 (None)
+                  [n3; CM(n8).__exit__; n11; None]
+               30 YIELD_FROM                        0
+                  [n3; CM(n8).__exit__; n11]
+               32 SETUP_ASYNC_WITH                 14
+                  [n3; CM(n8).__exit__; n11]
+               34 STORE_FAST                        1 (f)
+                  [n3; CM(n8).__exit__]
+       5       36 NOP                               0
+                  [n3; CM(n8).__exit__]
+       4       38 POP_BLOCK                         0
+                  [n3; CM(n8).__exit__]
+               40 LOAD_CONST                        0 (None)
+                  [n3; CM(n8).__exit__; None]
+               42 DUP_TOP                           0
+                  [n3; CM(n8).__exit__; None; None]
+               44 DUP_TOP                           0
+                  [n3; CM(n8).__exit__; None; None; None]
+               46 CALL_FUNCTION                     3
+                  [n3; n13]
+               48 GET_AWAITABLE                     0
+                  [n3; n14]
+               50 LOAD_CONST                        0 (None)
+                  [n3; n14; None]
+               52 YIELD_FROM                        0
+                  [n3; n14]
+               54 POP_TOP                           0
+                  [n3]
+               56 POP_TOP                           0
+                  []
+               58 LOAD_CONST                        0 (None)
+                  [None]
+               60 RETURN_VALUE                      0
+                  []
+    Successors:
+
+
     module dummy:
 
       function toplevel():
@@ -1697,6 +1771,7 @@ async def foo():
 
       function dummy.foo(i, f):
         b0:
+          $GenStartCoroutine()
           n0 <- GLOBAL[range]
           n1 <- GLOBAL[num]
           n2 <- $Call(n0, n1, None)
@@ -1718,10 +1793,7 @@ async def foo():
           n11 <- $GetAwaitable(n10, None)
           n12 <- $YieldFrom(n11, None, None)
           LOCAL[f] <- n11
-          jmp b3
-
-        b3:
-          n13 <- $CallMethod[__enter__](n8, None, None, None, None)
+          n13 <- $CallMethod[__exit__](n8, None)
           n14 <- $GetAwaitable(n13, None)
           n15 <- $YieldFrom(n14, None, None)
           return None

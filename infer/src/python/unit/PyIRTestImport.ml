@@ -178,7 +178,7 @@ if __name__ == '__main__':
         b1:
           n8 <- TOPLEVEL[_main]
           n9 <- $Call(n8, None)
-          jmp b2
+          return None
 
         b2:
           return None
@@ -205,45 +205,47 @@ if __name__ == '__main__':
           n15 <- $Call(n12, n14, None)
           n16 <- $Binary.Subtract(n15, 1, None)
           LOCAL[i] <- n16
-          jmp b1
-
-        b1:
           n17 <- LOCAL[i]
           n18 <- $Compare.ge(n17, 0, None)
-          if n18 then jmp b2 else jmp b5
+          if n18 then jmp b1 else jmp b5
 
-        b2:
-          n25 <- GLOBAL[os]
-          n26 <- n25.path
-          n27 <- GLOBAL[os]
-          n28 <- n27.path
-          n29 <- GLOBAL[sys]
-          n30 <- n29.path
-          n31 <- LOCAL[i]
-          n32 <- n30[n31]
-          n33 <- $CallMethod[normpath](n28, n32, None)
-          n34 <- $CallMethod[abspath](n26, n33, None)
-          n35 <- LOCAL[mydir]
-          n36 <- $Compare.eq(n34, n35, None)
-          if n36 then jmp b3 else jmp b4
-
-        b3:
-          jmp b1
-
-        b4:
-          n37 <- LOCAL[i]
-          n38 <- $Inplace.Subtract(n37, 1, None)
-          LOCAL[i] <- n38
-          jmp b1
-
-        b5:
+        b1:
           n19 <- GLOBAL[os]
           n20 <- n19.path
-          n21 <- GLOBAL[__file__]
-          n22 <- $CallMethod[abspath](n20, n21, None)
-          GLOBAL[__file__] <- n22
-          n23 <- GLOBAL[main]
-          n24 <- $Call(n23, None)
+          n21 <- GLOBAL[os]
+          n22 <- n21.path
+          n23 <- GLOBAL[sys]
+          n24 <- n23.path
+          n25 <- LOCAL[i]
+          n26 <- n24[n25]
+          n27 <- $CallMethod[normpath](n22, n26, None)
+          n28 <- $CallMethod[abspath](n20, n27, None)
+          n29 <- LOCAL[mydir]
+          n30 <- $Compare.eq(n28, n29, None)
+          if n30 then jmp b2 else jmp b3
+
+        b2:
+          jmp b4
+
+        b3:
+          n31 <- LOCAL[i]
+          n32 <- $Inplace.Subtract(n31, 1, None)
+          LOCAL[i] <- n32
+          jmp b4
+
+        b4:
+          n33 <- LOCAL[i]
+          n34 <- $Compare.ge(n33, 0, None)
+          if n34 then jmp b1 else jmp b5
+
+        b5:
+          n35 <- GLOBAL[os]
+          n36 <- n35.path
+          n37 <- GLOBAL[__file__]
+          n38 <- $CallMethod[abspath](n36, n37, None)
+          GLOBAL[__file__] <- n38
+          n39 <- GLOBAL[main]
+          n40 <- $Call(n39, None)
           return None |}]
 
 
@@ -482,9 +484,6 @@ def f(ok):
         b0:
           n0 <- GLOBAL[foo]
           n1 <- $CallMethod[bar](n0, None)
-          jmp b6
-
-        b6:
           return None |}]
 
 
@@ -610,5 +609,36 @@ from foo import *
       function toplevel():
         b0:
           n0 <- $ImportName(foo, $BuildTuple("*"), 0)
-          n1 <- $ImportStar(n0, None)
+          $ImportStart(n0)
+          return None |}]
+
+
+let%expect_test _ =
+  let source =
+    {|
+if test():
+    from mod import *
+try:
+    pass
+except Exception as error:
+    pass
+|}
+  in
+  PyIR.test source ;
+  [%expect
+    {|
+    module dummy:
+
+      function toplevel():
+        b0:
+          n0 <- TOPLEVEL[test]
+          n1 <- $Call(n0, None)
+          if n1 then jmp b1 else jmp b2
+
+        b1:
+          n2 <- $ImportName(mod, $BuildTuple("*"), 0)
+          $ImportStart(n2)
+          jmp b2
+
+        b2:
           return None |}]
