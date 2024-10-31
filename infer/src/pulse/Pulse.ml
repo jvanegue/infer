@@ -1672,7 +1672,7 @@ module PulseTransferFunctions = struct
           in
           (astates, path, astate_n)
 
-      | Prune (condition, loc, is_then_branch, if_kind) ->
+      | Prune (condition, loc, _is_then_branch, _if_kind) ->
          (* L.debug Analysis Quiet "exec_instr: Prune \n"; *)
 
           let prune_result =
