@@ -396,7 +396,6 @@ let get_copy_type = function
 
 let aborts_execution = function
   | AccessToInvalidAddress _
-  | InfiniteError _
   | ErlangError
       ( Badarg _
       | Badgenerator _
@@ -413,7 +412,8 @@ let aborts_execution = function
       (* these errors either abort the whole program or, if they are false positives, mean that
          pulse is confused and the current abstract state has stopped making sense; either way,
          abort! *)
-      true
+     true
+  | InfiniteError _    
   | ConfigUsage _
   | ConstRefableParameter _
   | DynamicTypeMismatch _

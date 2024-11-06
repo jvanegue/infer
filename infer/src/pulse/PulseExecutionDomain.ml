@@ -122,7 +122,10 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
   (* if (num_iters <= 0) then next,-1 else *)
   (* It looks like infer reporting will filter issues by location to avoid duplicate already *)
 
-  let cfgnode = (Metadata.get_cfg_node ()) in  
+  (* let cfgnode = (Metadata.get_cfg_node ()) in  *)
+
+  let cfgnode = AnalysisState.get_node_exn() in
+  
   let same = phys_equal prev next in
   
   let rec detect_elem e lst curi : bool * int =
@@ -274,7 +277,7 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
     match hd with
     | ExceptionRaised astate -> print_warning "Exception" cnt hd; InfiniteProgram astate
     | ContinueProgram astate -> print_warning "Continue" cnt hd; InfiniteProgram astate
-    | AbortProgram astate -> AbortProgram astate
+    | AbortProgram astate -> AbortProgram astate 
     | ExitProgram astate -> ExitProgram astate
     | LatentAbortProgram a -> LatentAbortProgram a
     | LatentInvalidAccess a -> LatentInvalidAccess a
