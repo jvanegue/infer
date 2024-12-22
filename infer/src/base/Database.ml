@@ -138,7 +138,13 @@ type location = Primary | Secondary of string [@@deriving show {with_path= false
 let results_dir_get_path entry = ResultsDirEntryName.get_path ~results_dir:Config.results_dir entry
 
 let get_db_path location id =
-  match location with Primary -> results_dir_get_path (get_db_entry id) | Secondary file -> file
+  match location with Secondary file -> file | Primary -> results_dir_get_path (get_db_entry id)
+
+
+let do_in_db_dir db_path ~f =
+  let dir = Filename.dirname db_path in
+  let base_name = Filename.basename db_path in
+  Utils.do_in_dir ~dir ~f:(fun () -> f base_name)
 
 
 let create_db location id =
@@ -153,7 +159,7 @@ let create_db location id =
           "results." ^ Pid.to_string pid ^ ".db" )
       ".tmp"
   in
-  let db = Sqlite3.db_open ~mutex:`FULL temp_db_path in
+  let db = do_in_db_dir temp_db_path ~f:(fun db_path -> Sqlite3.db_open ~mutex:`FULL db_path) in
   SqliteUtils.exec db ~log:"sqlite page size"
     ~stmt:(Printf.sprintf "PRAGMA page_size=%d" Config.sqlite_page_size) ;
   create_tables db id ;
@@ -173,43 +179,33 @@ let create_db location id =
   with Sys_error _ -> (* lost the race, doesn't matter *) ()
 
 
-let new_analysis_db_callbacks = ref []
+let make_callback_get_and_set () =
+  let make_key () = DLS.new_key ~split_from_parent:Fn.id (fun () -> []) in
+  let db_keys = [(AnalysisDatabase, make_key ()); (CaptureDatabase, make_key ())] in
+  let get_db_callbacks id = Stdlib.List.assoc id db_keys |> DLS.get in
+  let set_db_callbacks id callbacks = DLS.set (Stdlib.List.assoc id db_keys) callbacks in
+  (get_db_callbacks, set_db_callbacks)
 
-let new_capture_db_callbacks = ref []
 
-let get_new_db_callbacks = function
-  | AnalysisDatabase ->
-      new_analysis_db_callbacks
-  | CaptureDatabase ->
-      new_capture_db_callbacks
-
+let get_new_db_callbacks, set_new_db_callbacks = make_callback_get_and_set ()
 
 let on_new_database_connection id ~f =
   let callbacks = get_new_db_callbacks id in
-  callbacks := f :: !callbacks
+  set_new_db_callbacks id (f :: callbacks)
 
 
-let close_analysis_db_callbacks = ref []
-
-let close_capture_db_callbacks = ref []
-
-let get_close_db_callbacks = function
-  | AnalysisDatabase ->
-      close_analysis_db_callbacks
-  | CaptureDatabase ->
-      close_capture_db_callbacks
-
+let get_close_db_callbacks, set_close_db_callbacks = make_callback_get_and_set ()
 
 let on_close_database id ~f =
   let callbacks = get_close_db_callbacks id in
-  callbacks := f :: !callbacks
+  set_close_db_callbacks id (f :: callbacks)
 
 
 type registered_stmt = unit -> Sqlite3.stmt * Sqlite3.db
 
 let register_statement id =
   let k stmt0 =
-    let stmt_ref = ref None in
+    let stmt_key = DLS.new_key (fun () -> None) in
     let new_statement db =
       let stmt =
         try Sqlite3.prepare db stmt0
@@ -218,11 +214,11 @@ let register_statement id =
             error
       in
       on_close_database id ~f:(fun _ -> SqliteUtils.finalize db ~log:"db close callback" stmt) ;
-      stmt_ref := Some (stmt, db)
+      DLS.set stmt_key (Some (stmt, db))
     in
     on_new_database_connection id ~f:new_statement ;
     fun () ->
-      match !stmt_ref with
+      match DLS.get stmt_key with
       | None ->
           L.(die InternalError) "database not initialized"
       | Some (stmt, db) ->
@@ -242,12 +238,6 @@ let with_registered_statement get_stmt ~f =
   result
 
 
-let do_db_close db close_callbacks =
-  List.iter ~f:(fun callback -> callback db) !close_callbacks ;
-  close_callbacks := [] ;
-  SqliteUtils.db_close db
-
-
 module UnsafeDatabaseRef : sig
   val get_database : id -> Sqlite3.db
 
@@ -259,19 +249,25 @@ module UnsafeDatabaseRef : sig
 
   val new_database_connections : location -> unit
 end = struct
-  let capture_db_descr : (location * Sqlite3.db) option ref = ref None
+  let make_db_descr () =
+    (* we implicitly throw away the descr of the parent domain here to avoid conflict *)
+    let key = DLS.new_key (fun () -> None) in
+    let get () = DLS.get key in
+    let set descr = DLS.set key descr in
+    (get, set)
 
-  let results_db_descr : (location * Sqlite3.db) option ref = ref None
 
-  let get_db_descr = function
-    | CaptureDatabase ->
-        capture_db_descr
-    | AnalysisDatabase ->
-        results_db_descr
+  let get_db_descr, set_db_descr =
+    let db_descr_xetters =
+      [(CaptureDatabase, make_db_descr ()); (AnalysisDatabase, make_db_descr ())]
+    in
+    let get_db_descr id = (Stdlib.List.assoc id db_descr_xetters |> fst) () in
+    let set_db_descr id descr = (Stdlib.List.assoc id db_descr_xetters |> snd) descr in
+    (get_db_descr, set_db_descr)
 
 
   let get_database id =
-    match !(get_db_descr id) with
+    match get_db_descr id with
     | Some (_, db) ->
         db
     | None ->
@@ -282,11 +278,14 @@ end = struct
 
   let db_close_1 id =
     let descr = get_db_descr id in
-    Option.iter !descr ~f:(fun (loc, db) ->
+    Option.iter descr ~f:(fun (loc, db) ->
         L.debug Capture Verbose "Closing an existing database connection %a %a@\n" pp_location loc
           pp_id id ;
-        do_db_close db (get_close_db_callbacks id) ) ;
-    descr := None
+        let callbacks = get_close_db_callbacks id in
+        List.iter ~f:(fun callback -> callback db) callbacks ;
+        set_close_db_callbacks id [] ;
+        SqliteUtils.db_close db ;
+        set_db_descr id None )
 
 
   let db_close () = List.iter [CaptureDatabase; AnalysisDatabase] ~f:db_close_1
@@ -298,8 +297,10 @@ end = struct
     db_close_1 id ;
     let db_path = get_db_path location id in
     let db =
-      Sqlite3.db_open ~mode:`NO_CREATE ~cache:`PRIVATE ~mutex:`FULL ?vfs:Config.sqlite_vfs ~uri:true
-        db_path
+      do_in_db_dir db_path ~f:(fun db_path ->
+          let mutex = if Config.multicore then `NO else `FULL in
+          Sqlite3.db_open ~mode:`NO_CREATE ~cache:`PRIVATE ~mutex ?vfs:Config.sqlite_vfs ~uri:true
+            db_path )
     in
     Sqlite3.busy_timeout db Config.sqlite_lock_timeout ;
     SqliteUtils.exec db ~log:"mmap"
@@ -307,13 +308,12 @@ end = struct
     SqliteUtils.exec db ~log:"synchronous=OFF" ~stmt:"PRAGMA synchronous=OFF" ;
     SqliteUtils.exec db ~log:"sqlite cache size"
       ~stmt:(Printf.sprintf "PRAGMA cache_size=%i" Config.sqlite_cache_size) ;
-    let db_ref = get_db_descr id in
-    db_ref := Some (location, db) ;
-    List.iter ~f:(fun callback -> callback db) !(get_new_db_callbacks id)
+    set_db_descr id (Some (location, db)) ;
+    List.iter ~f:(fun callback -> callback db) (get_new_db_callbacks id)
 
 
   let ensure_database_connection location id =
-    match !(get_db_descr id) with
+    match get_db_descr id with
     | Some (actual_location, _) when equal_location actual_location location ->
         ()
     | _ ->

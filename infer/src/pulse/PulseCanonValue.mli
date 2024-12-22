@@ -21,13 +21,12 @@ module type S = sig
 
   module Set : PrettyPrintable.PPSet with type elt = t
 
-  val downcast_set : Set.t -> AbstractValue.Set.t [@@inline always]
+  val downcast_set : Set.t -> AbstractValue.Set.t
 
   val unsafe_cast_set : AbstractValue.Set.t -> Set.t
   [@@deprecated
     "unsafe, obviously; please add a comment why you need to use this and suppress this warning \
      locally with [@alert \"-deprecated\"]"]
-  [@@inline always]
 
   (** an abstract value that needs to be normalized; just [AbstractValue.t] under the hood too *)
   type needs_canon
@@ -64,6 +63,8 @@ module type S = sig
 
   val canon_opt_fst : astate -> (needs_canon * 'a) option -> (t * 'a) option
 
+  val canon_opt_fst' : astate -> (AbstractValue.t * 'a) option -> (t * 'a) option
+
   val canon_opt_fst4' :
     astate -> (AbstractValue.t * 'a * 'b * 'c) option -> (t * 'a * 'b * 'c) option
 
@@ -80,7 +81,6 @@ module type S = sig
   [@@deprecated
     "unsafe, obviously; please add a comment why you need to use this and suppress this warning \
      locally with [@alert \"-deprecated\"]"]
-  [@@inline always]
 
   (** {2 Domain elements, revisited to be safe wrt value normalization} *)
 
@@ -91,6 +91,9 @@ module type S = sig
     val add : Var.t -> ValueOrigin.t -> t -> t
     (* we don't care about the normalization status of the value we put in the map since the idea is
        to always normalize upon reading *)
+
+    val merge : (Var.t -> value option -> value option -> ValueOrigin.t option) -> t -> t -> t
+    (* like {!add}, needed to strengthen the requirements on the return value of the callback *)
   end
 
   module Memory :

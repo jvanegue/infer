@@ -65,23 +65,50 @@ module GlobalForStats = struct
 
   let empty = {node_is_not_stuck= false; one_call_is_stuck= false}
 
-  let global = ref empty
+  let global = DLS.new_key (fun () -> empty)
 
-  let () = AnalysisGlobalState.register_ref ~init:(fun () -> empty) global
+  let () = AnalysisGlobalState.register_dls ~init:(fun () -> empty) global
 
-  let init_before_call () = global := {!global with node_is_not_stuck= false}
+  let init_before_call () =
+    Utils.with_dls global ~f:(fun global -> {global with node_is_not_stuck= false})
 
-  let is_node_not_stuck () = !global.node_is_not_stuck
 
-  let node_is_not_stuck () = global := {!global with node_is_not_stuck= true}
+  let is_node_not_stuck () = (DLS.get global).node_is_not_stuck
 
-  let is_one_call_stuck () = !global.one_call_is_stuck
+  let node_is_not_stuck () =
+    Utils.with_dls global ~f:(fun global -> {global with node_is_not_stuck= true})
 
-  let one_call_is_stuck () = global := {!global with one_call_is_stuck= true}
+
+  let is_one_call_stuck () = (DLS.get global).one_call_is_stuck
+
+  let one_call_is_stuck () =
+    Utils.with_dls global ~f:(fun global -> {global with one_call_is_stuck= true})
 end
 
+let print_arity_mismatch_message ?(extra_call_prefix = "") callee_pname_opt ~formals ~actuals =
+  let formals_n = List.length formals in
+  let actuals_n = List.length actuals in
+  let pp_args pp_val fmt args =
+    Pp.seq ~sep:"," (Pp.pair ~fst:pp_val ~snd:(Typ.pp_full Pp.text)) fmt args
+  in
+  let message =
+    F.asprintf
+      "Arities mismatch in%s call to %a, something bogus is going on.@\n\
+      \  %d formals: %a@\n\
+      \  %d actuals: %a@\n"
+      extra_call_prefix (Pp.option Procname.pp_verbose) callee_pname_opt formals_n
+      (pp_args (Pvar.pp Pp.text))
+      formals actuals_n
+      (pp_args (fun fmt (v, _hist) -> AbstractValue.pp fmt v))
+      actuals
+  in
+  L.debug Analysis Medium "%s" message ;
+  L.d_printfln "%s" message ;
+  ()
+
+
 let unknown_call tenv ({PathContext.timestamp} as path) call_loc (reason : CallEvent.t)
-    callee_pname_opt ~ret ~actuals ~formals_opt astate0 =
+    ?(force_pure = false) callee_pname_opt ~ret ~actuals ~formals_opt astate0 =
   let hist =
     let actuals_hists = List.map actuals ~f:(fun ((_, hist), _) -> hist) in
     ValueHistory.unknown_call reason actuals_hists call_loc timestamp
@@ -91,9 +118,9 @@ let unknown_call tenv ({PathContext.timestamp} as path) call_loc (reason : CallE
   let astate = add_returned_from_unknown callee_pname_opt ret_val actuals astate0 in
   let astate = PulseOperations.write_id (fst ret) (ret_val, hist) astate in
   let astate = Decompiler.add_call_source ret_val reason actuals astate in
-  (* set to [false] if we think the procedure called does not behave "functionally", i.e. return the
-     same value for the same inputs *)
-  let is_functional = ref true in
+  (* set to [false] if we think the procedure called does not behave "purely", i.e. return the same
+     value for the same inputs *)
+  let is_pure = ref true in
   let should_havoc actual_typ formal_typ_opt =
     match actual_typ.Typ.desc with
     | _ when not Config.pulse_havoc_arguments ->
@@ -122,7 +149,7 @@ let unknown_call tenv ({PathContext.timestamp} as path) call_loc (reason : CallE
     (* We should not havoc when the corresponding formal is a pointer to const *)
     match should_havoc actual_typ (Option.map ~f:snd formal_opt) with
     | `ShouldHavoc ->
-        is_functional := false ;
+        is_pure := false ;
         (* this will deallocate anything reachable from the [actual] and havoc the values pointed to
            by [actual] *)
         let astate =
@@ -173,7 +200,8 @@ let unknown_call tenv ({PathContext.timestamp} as path) call_loc (reason : CallE
               let some_resource_found =
                 some_resource_found
                 || AddressAttributes.get_allocation_attr reachable_actual astate
-                   |> Option.exists ~f:(fun (attr, _) -> Attribute.is_hack_resource attr)
+                   |> Option.exists ~f:(fun (attr, _) ->
+                          Attribute.is_hack_resource attr || Attribute.is_python_resource attr )
               in
               (some_resource_found, AddressAttributes.remove_allocation_attr reachable_actual astate) )
         in
@@ -193,7 +221,15 @@ let unknown_call tenv ({PathContext.timestamp} as path) call_loc (reason : CallE
     in
     let++ astate =
       match f with
-      | Some f when !is_functional ->
+      | Some f when !is_pure || force_pure ->
+          let ret_val =
+            match (Option.bind formals_opt ~f:List.last, List.last actuals) with
+            | Some (pvar, _), Some ((return_param_val, _), _)
+              when Mangled.is_return_param (Pvar.get_name pvar) ->
+                return_param_val
+            | _ ->
+                ret_val
+          in
           PulseArithmetic.and_equal (AbstractValueOperand ret_val)
             (FunctionApplicationOperand
                {f; actuals= List.map ~f:(fun ((actual_val, _hist), _typ) -> actual_val) actuals} )
@@ -230,8 +266,7 @@ let unknown_call tenv ({PathContext.timestamp} as path) call_loc (reason : CallE
             havoc_actual_if_ptr actual_typ (Some formal) astate )
       with
       | Unequal_lengths ->
-          L.d_printfln "ERROR: formals have length %d but actuals have length %d"
-            (List.length formals) (List.length actuals) ;
+          print_arity_mismatch_message callee_pname_opt ~formals ~actuals ;
           havoc_actuals_without_typ_info astate
       | Ok result ->
           result ) )
@@ -239,8 +274,8 @@ let unknown_call tenv ({PathContext.timestamp} as path) call_loc (reason : CallE
 
 
 let apply_callee ({InterproceduralAnalysis.tenv; proc_desc} as analysis_data)
-    ({PathContext.timestamp} as path) callee_proc_name call_loc callee_exec_state ~ret
-    ~captured_formals ~captured_actuals ~formals ~actuals ?call_flags astate =
+    ({PathContext.timestamp} as path) callee_proc_name call_loc call_flags callee_exec_state ~ret
+    ~captured_formals ~captured_actuals ~formals ~actuals astate =
   let open ExecutionDomain in
   let copy_to_caller_return_variable astate return_val_opt =
     (* Copies the return value of the callee into the return register of the caller.
@@ -286,11 +321,9 @@ let apply_callee ({InterproceduralAnalysis.tenv; proc_desc} as analysis_data)
     (* In order to apply summary specialisation, we call blocks or function pointers with the closure as the first argument,
        but when we want to call the actual code of the block or function, we need to remove the closure argument again. *)
     let actuals =
-      match call_flags with
-      | Some call_flags when call_flags.CallFlags.cf_is_objc_block -> (
-        match actuals with _ :: rest -> rest | [] -> [] )
-      | _ ->
-          actuals
+      if call_flags.CallFlags.cf_is_objc_block then
+        match actuals with _ :: rest -> rest | [] -> []
+      else actuals
     in
     let sat_unsat, contradiction =
       PulseInterproc.apply_summary analysis_data path ~callee_proc_name call_loc ~callee_summary
@@ -338,7 +371,6 @@ let apply_callee ({InterproceduralAnalysis.tenv; proc_desc} as analysis_data)
           let** astate_summary =
             let open SatUnsat.Import in
             AbductiveDomain.Summary.of_post
-              (Procdesc.get_proc_name proc_desc)
               (Procdesc.get_attributes proc_desc)
               call_loc astate_post_call
             >>| AccessResult.ignore_leaks >>| AccessResult.of_abductive_summary_result
@@ -366,7 +398,7 @@ let apply_callee ({InterproceduralAnalysis.tenv; proc_desc} as analysis_data)
               | `ReportNow ->
                   L.d_printfln ~color:Red "issue is now manifest, emitting an error" ;
                   Sat
-                    (AccessResult.of_error_f
+                    (AccessResult.of_error_f path
                        (WithSummary
                           (ReportableError {diagnostic; astate= astate_post_call}, astate_summary)
                        )
@@ -449,8 +481,8 @@ let apply_callee ({InterproceduralAnalysis.tenv; proc_desc} as analysis_data)
 
 
 let call_aux disjunct_limit ({InterproceduralAnalysis.tenv} as analysis_data) path call_loc
-    callee_pname ret actuals call_kind (callee_proc_attrs : ProcAttributes.t) exec_states_callee
-    non_disj_callee (astate_caller : AbductiveDomain.t) ?call_flags non_disj_caller =
+    callee_pname ret actuals call_kind call_flags (callee_proc_attrs : ProcAttributes.t)
+    exec_states_callee non_disj_callee (astate_caller : AbductiveDomain.t) non_disj_caller =
   let formals =
     List.map callee_proc_attrs.formals ~f:(fun (mangled, typ, _) ->
         (Pvar.mk mangled callee_pname, typ) )
@@ -458,7 +490,7 @@ let call_aux disjunct_limit ({InterproceduralAnalysis.tenv} as analysis_data) pa
   let captured_formals = callee_proc_attrs.captured in
   let ( let<**> ) = bind_sat_result (non_disj_caller, None) in
   let<**> astate, captured_actuals =
-    PulseOperations.get_captured_actuals callee_pname path call_loc ~captured_formals ~call_kind
+    PulseOperations.get_captured_actuals callee_pname path call_loc call_kind ~captured_formals
       ~actuals astate_caller
   in
   let captured_formals =
@@ -477,21 +509,35 @@ let call_aux disjunct_limit ({InterproceduralAnalysis.tenv} as analysis_data) pa
     NonDisjDomain.apply_summary ~callee_pname ~call_loc ~skip_transitive_accesses non_disj_caller
       non_disj_callee
   in
-  (* call {!AbductiveDomain.PrePost.apply} on each pre/post pair in the summary. *)
+  (* call {!AbductiveDomain.PrePost.apply} on each pre/post pair in the summary, and to the
+     over-approximate pre/post if we are currently executing the over-approximate part of the
+     current state *)
+  let exec_states_callee =
+    if path.PathContext.is_non_disj then
+      match NonDisjDomain.Summary.get_pre_post non_disj_callee with
+      | Bottom ->
+          exec_states_callee
+      | NonBottom astate_over_approx ->
+          exec_states_callee @ [ContinueProgram astate_over_approx]
+    else exec_states_callee
+  in
   let posts, contradiction =
     List.fold ~init:([], None) exec_states_callee
       ~f:(fun (posts, contradiction) callee_exec_state ->
         if
-          Option.exists disjunct_limit ~f:(fun limit -> List.length posts >= limit)
-          || (should_keep_at_most_one_disjunct && not (List.is_empty posts))
-        then (posts, contradiction)
+          (not path.PathContext.is_non_disj)
+          && ( Option.exists disjunct_limit ~f:(fun limit -> List.length posts >= limit)
+             || (should_keep_at_most_one_disjunct && not (List.is_empty posts)) )
+        then (
+          L.d_printfln "disjunct limit reached, stop applying callee pre/posts" ;
+          (posts, contradiction) )
         else (
           (* apply one pre/post spec, check for timeouts in-between each pre/post spec from the callee
               *)
           Timer.check_timeout () ;
           match
-            apply_callee analysis_data path callee_pname call_loc callee_exec_state
-              ~captured_formals ~captured_actuals ~formals ~actuals ~ret ?call_flags astate
+            apply_callee analysis_data path callee_pname call_loc call_flags callee_exec_state
+              ~captured_formals ~captured_actuals ~formals ~actuals ~ret astate
           with
           | Unsat, new_contradiction ->
               (* couldn't apply pre/post pair *)
@@ -499,11 +545,40 @@ let call_aux disjunct_limit ({InterproceduralAnalysis.tenv} as analysis_data) pa
           | Sat post, new_contradiction ->
               (post :: posts, PulseInterproc.merge_contradictions contradiction new_contradiction) ) )
   in
+  (* We always apply the non-disj part of the summary from the current state, even if it we are
+     inside a disjunct and not the non-disj part of the current state. We then put the result
+     directly into the non-disjunctive part of the state, which will be joined with the results from
+     other disjuncts and whatever over-approximate state was already there. *)
+  let non_disj =
+    match NonDisjDomain.Summary.get_pre_post non_disj_callee with
+    | NonBottom callee_astate_over_approx
+      when not path.PathContext.is_non_disj (* already executed above in this case *) ->
+        let (non_disj_caller : _ AbstractDomain.Types.bottom_lifted) =
+          match
+            apply_callee analysis_data path callee_pname call_loc call_flags
+              (ContinueProgram callee_astate_over_approx) ~captured_formals ~captured_actuals
+              ~formals ~actuals ~ret astate
+          with
+          | Sat (Ok (ContinueProgram post)), _new_contradiction ->
+              NonBottom (post, path)
+          | Sat (Recoverable (ContinueProgram post, _)), _new_contradiction ->
+              (* TODO: report errors *)
+              NonBottom (post, path)
+          | Sat (FatalError _), _ ->
+              (* TODO: report errors, recover after errors *)
+              Bottom
+          | _, _new_contradiction ->
+              Bottom
+        in
+        NonDisjDomain.join_to_astate non_disj_caller non_disj
+    | _ ->
+        non_disj
+  in
   (posts, (non_disj, contradiction))
 
 
 let call_aux_unknown limit ({InterproceduralAnalysis.tenv} as analysis_data) path call_loc
-    callee_pname ~ret ~actuals ~formals_opt ~call_kind (astate : AbductiveDomain.t) ?call_flags
+    callee_pname ~ret ~actuals ~formals_opt call_kind call_flags (astate : AbductiveDomain.t)
     non_disj_caller =
   let arg_values = List.map actuals ~f:(fun ((value, _), _) -> value) in
   let ( let<**> ) = bind_sat_result (non_disj_caller, None) in
@@ -513,12 +588,12 @@ let call_aux_unknown limit ({InterproceduralAnalysis.tenv} as analysis_data) pat
          ~actuals ~formals_opt
   in
   if Config.pulse_log_unknown_calls then
-    ScubaLogging.log_message_with_location ~label:"unmodeled_function_operation_pulse"
+    StatsLogging.log_message_with_location ~label:"unmodeled_function_operation_pulse"
       ~loc:(F.asprintf "%a" Location.pp_file_pos call_loc)
       ~message:
         (Format.asprintf "Unmodeled Function[Pulse] : %a" Procname.pp_without_templates callee_pname) ;
   Option.iter Config.pulse_log_unknown_calls_sampled ~f:(fun sample_rate ->
-      ScubaLogging.log_message_with_location_sampled
+      StatsLogging.log_message_with_location_sampled
         ~label:(lazy "unmodeled_function_operation_pulse")
         ~loc:(lazy (F.asprintf "%a" Location.pp_file_pos call_loc))
         ~message:
@@ -545,7 +620,7 @@ let call_aux_unknown limit ({InterproceduralAnalysis.tenv} as analysis_data) pat
              ~default:([], (NonDisjDomain.bottom, None))
              ~f:(fun nil_summary ->
                call_aux limit analysis_data path call_loc callee_pname ret actuals call_kind
-                 proc_attrs [nil_summary] NonDisjDomain.Summary.bottom astate ?call_flags
+                 call_flags proc_attrs [nil_summary] NonDisjDomain.Summary.bottom astate
                  non_disj_caller )
       in
       ( result_unknown @ result_unknown_nil
@@ -634,14 +709,48 @@ let maybe_dynamic_type_specialization_is_needed already_specialized contradictio
       `UseCurrentSummary
 
 
-let on_recursive_call ({InterproceduralAnalysis.proc_desc} as analysis_data) call_loc callee_pname
-    astate =
+let on_recursive_call ({InterproceduralAnalysis.proc_desc} as analysis_data) call_loc
+    (call_flags : CallFlags.t) callee_pname ~actuals ~formals_opt astate =
+  let actuals_values = List.map actuals ~f:(fun ((actual, _), _) -> actual) in
   if Procname.equal callee_pname (Procdesc.get_proc_name proc_desc) then (
-    PulseReport.report analysis_data ~is_suppressed:false ~latent:false
-      (MutualRecursionCycle
-         {cycle= PulseMutualRecursion.mk call_loc callee_pname; location= call_loc} ) ;
+    ( match formals_opt with
+    | Some formals when List.length formals <> List.length actuals ->
+        print_arity_mismatch_message ~extra_call_prefix:" recursive" (Some callee_pname) ~formals
+          ~actuals
+    | _ when Procname.is_hack_xinit callee_pname ->
+        L.d_printfln "Suppressing recursive call report for non-user-visible function %a"
+          Procname.pp callee_pname
+    | _ when call_flags.cf_is_objc_getter_setter ->
+        (* objc custom getters and setters generate recursive calls to themselves in the clang AST
+           that end up here too; discard any possible cycle coming from them *)
+        L.d_printfln "Suppressing recursive call to ObjC getter/setter %a" Procname.pp callee_pname
+    | _ ->
+        if AbductiveDomain.has_reachable_in_inner_pre_heap actuals_values astate then
+          L.d_printfln
+            "heap progress made before recursive call to %a; unlikely to be an infinite recursion, \
+             suppressing report"
+            Procname.pp callee_pname
+        else
+          let is_call_with_same_values =
+            AbductiveDomain.are_same_values_as_pre_formals proc_desc actuals_values astate
+          in
+          PulseReport.report analysis_data ~is_suppressed:false ~latent:false
+            (MutualRecursionCycle
+               { cycle= PulseMutualRecursion.mk call_loc callee_pname actuals_values
+               ; location= call_loc
+               ; is_call_with_same_values } ) ) ;
     astate )
-  else AbductiveDomain.add_recursive_call call_loc callee_pname astate
+  else if
+    AbductiveDomain.has_reachable_in_inner_pre_heap
+      (List.map actuals ~f:(fun ((actual, _), _) -> actual))
+      astate
+  then (
+    L.d_printfln
+      "heap progress made before recursive call to %a; unlikely to be an infinite recursion, not \
+       recording the cycle"
+      Procname.pp callee_pname ;
+    astate )
+  else AbductiveDomain.add_recursive_call call_loc callee_pname actuals_values astate
 
 
 let check_uninit_method ({InterproceduralAnalysis.tenv} as analysis_data) call_loc callee_pname
@@ -686,8 +795,8 @@ let check_uninit_method ({InterproceduralAnalysis.tenv} as analysis_data) call_l
 
 
 let call ?disjunct_limit ({InterproceduralAnalysis.analyze_dependency} as analysis_data) path
-    call_loc ?unresolved_reason callee_pname ~ret ~actuals ~formals_opt ~call_kind
-    (astate : AbductiveDomain.t) ?call_flags non_disj_caller =
+    call_loc ?unresolved_reason callee_pname ~ret ~actuals ~formals_opt call_kind call_flags
+    (astate : AbductiveDomain.t) non_disj_caller =
   let has_continue_program results =
     let f one_result =
       match one_result with
@@ -701,7 +810,7 @@ let call ?disjunct_limit ({InterproceduralAnalysis.analyze_dependency} as analys
   let call_as_unknown () =
     let results, (non_disj, contradiction) =
       call_aux_unknown disjunct_limit analysis_data path call_loc callee_pname ~ret ~actuals
-        ~formals_opt ~call_kind astate ?call_flags non_disj_caller
+        ~formals_opt call_kind call_flags astate non_disj_caller
     in
     if Option.is_some contradiction then (
       L.debug Analysis Verbose
@@ -716,8 +825,9 @@ let call ?disjunct_limit ({InterproceduralAnalysis.analyze_dependency} as analys
       {PulseSummary.pre_post_list= exec_states; non_disj= non_disj_callee} astate =
     let results, (non_disj, contradiction) =
       call_aux disjunct_limit analysis_data path call_loc callee_pname ret actuals call_kind
+        call_flags
         (IRAttributes.load_exn callee_pname)
-        exec_states non_disj_callee astate ?call_flags non_disj_caller
+        exec_states non_disj_callee astate non_disj_caller
     in
     let non_disj =
       NonDisjDomain.add_specialized_direct_callee callee_pname specialization call_loc non_disj
@@ -836,7 +946,8 @@ let call ?disjunct_limit ({InterproceduralAnalysis.analyze_dependency} as analys
                        match exec_state with
                        | ContinueProgram astate ->
                            ContinueProgram
-                             (on_recursive_call analysis_data call_loc callee_pname astate)
+                             (on_recursive_call analysis_data call_loc call_flags callee_pname
+                                ~actuals ~formals_opt astate )
                        | exec_state ->
                            exec_state ) )
                 in
@@ -862,7 +973,9 @@ let call ?disjunct_limit ({InterproceduralAnalysis.analyze_dependency} as analys
         iter_call ~max_iteration ~nth_iteration:0 ~is_pulse_specialization_limit_not_reached
           already_given summary.PulseSummary.main astate
       in
-      let has_continue_program = has_continue_program res in
+      let has_continue_program =
+        has_continue_program res || not (NonDisjDomain.astate_is_bottom non_disj)
+      in
       if has_continue_program then GlobalForStats.node_is_not_stuck () ;
       let res, non_disj =
         if
@@ -889,7 +1002,8 @@ let call ?disjunct_limit ({InterproceduralAnalysis.analyze_dependency} as analys
       let astate =
         match no_summary with
         | MutualRecursionCycle ->
-            on_recursive_call analysis_data call_loc callee_pname astate
+            on_recursive_call analysis_data call_loc call_flags callee_pname ~actuals ~formals_opt
+              astate
         | AnalysisFailed | InBlockList | UnknownProcedure ->
             astate
       in
@@ -904,6 +1018,6 @@ let call ?disjunct_limit ({InterproceduralAnalysis.analyze_dependency} as analys
           check_uninit_method analysis_data call_loc callee_pname actuals astate ) ;
       let res, (non_disj, contradiction) =
         call_aux_unknown disjunct_limit analysis_data path call_loc callee_pname ~ret ~actuals
-          ~formals_opt ~call_kind astate ?call_flags non_disj_caller
+          ~formals_opt call_kind call_flags astate non_disj_caller
       in
       (res, non_disj, contradiction, `UnknownCall)

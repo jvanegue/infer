@@ -7,7 +7,7 @@
 
 open! IStd
 module F = Format
-module Hashtbl = Caml.Hashtbl
+module Hashtbl = Stdlib.Hashtbl
 
 module Lang : sig
   type t = Java | Hack | Python [@@deriving equal]
@@ -22,6 +22,8 @@ module Location : sig
 
   val known : line:int -> col:int -> t
 
+  val decr_line : t -> t
+
   val pp : F.formatter -> t -> unit
 
   val pp_line : F.formatter -> t -> unit
@@ -30,7 +32,7 @@ end
 module type NAME = sig
   type t = {value: string; loc: Location.t} [@@deriving compare, equal, hash]
 
-  val of_string : string -> t
+  val of_string : ?loc:Location.t -> string -> t
   (** we replace any dot in the string by '::' because dot is a reserved separator in Textual *)
 
   val pp : F.formatter -> t -> unit
@@ -41,9 +43,9 @@ module type NAME = sig
 
   module HashSet : HashSet.S with type elt = t
 
-  module Map : Caml.Map.S with type key = t
+  module Map : Stdlib.Map.S with type key = t
 
-  module Set : Caml.Set.S with type elt = t
+  module Set : Stdlib.Set.S with type elt = t
 end
 
 module ProcName : NAME (* procedure names, without their attachement type *)
@@ -109,6 +111,8 @@ module Attr : sig
 
   val is_alias : t -> bool
 
+  val is_closure_wrapper : t -> bool
+
   val is_hack_wrapper : t -> bool
 
   val is_final : t -> bool
@@ -124,6 +128,14 @@ module Attr : sig
   val is_variadic : t -> bool
 
   val is_const : t -> bool
+
+  val mk_python_args : string list -> t
+
+  val find_python_args : t -> string list option
+
+  val mk_async : t
+
+  val mk_closure_wrapper : t
 
   val mk_trait : t
 
@@ -155,9 +167,9 @@ end
 module Ident : sig
   type t [@@deriving equal]
 
-  module Set : Caml.Set.S with type elt = t
+  module Set : Stdlib.Set.S with type elt = t
 
-  module Map : Caml.Map.S with type key = t
+  module Map : Stdlib.Map.S with type key = t
 
   val of_int : int -> t
 

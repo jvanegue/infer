@@ -122,15 +122,15 @@ let invalidate ~changed_files =
       invalidated_nodes_count total_nodes invalidated_files
       (if Int.equal invalidated_files 1 then "" else "s")
       Mtime.Span.pp traverse_time Mtime.Span.pp db_time ;
-    ScubaLogging.log_count ~label:"incremental_analysis.total_nodes" ~value:total_nodes ;
-    ScubaLogging.log_count ~label:"incremental_analysis.invalidated_nodes"
+    StatsLogging.log_count ~label:"incremental_analysis.total_nodes" ~value:total_nodes ;
+    StatsLogging.log_count ~label:"incremental_analysis.invalidated_nodes"
       ~value:invalidated_nodes_count ;
-    ScubaLogging.log_count ~label:"incremental_analysis.invalidated_files" ~value:invalidated_files ;
-    ScubaLogging.log_duration ~label:"incremental_analysis.invalidation_time"
+    StatsLogging.log_count ~label:"incremental_analysis.invalidated_files" ~value:invalidated_files ;
+    StatsLogging.log_duration ~label:"incremental_analysis.invalidation_time"
       ~duration_us:(span_to_us @@ Mtime.Span.add traverse_time db_time) ;
-    ScubaLogging.log_duration ~label:"incremental_analysis.invalidation_traverse_time"
+    StatsLogging.log_duration ~label:"incremental_analysis.invalidation_traverse_time"
       ~duration_us:(span_to_us traverse_time) ;
-    ScubaLogging.log_duration ~label:"incremental_analysis.invalidation_db_time"
+    StatsLogging.log_duration ~label:"incremental_analysis.invalidation_db_time"
       ~duration_us:(span_to_us db_time) ) ;
   (* save some memory *)
   ResultsDir.scrub_for_incremental ()
@@ -156,7 +156,7 @@ let from_summaries () =
       edges_to_ignore := Procname.Map.add proc_name recursion_edges !edges_to_ignore ;
       CallGraph.create_node graph proc_name summary_loads ) ;
   if Config.debug_level_analysis > 0 then CallGraph.to_dotty graph AnalysisDependencyGraphDot ;
-  Ondemand.edges_to_ignore := Some !edges_to_ignore ;
+  DLS.set Ondemand.edges_to_ignore (Some !edges_to_ignore) ;
   graph
 
 
@@ -224,7 +224,7 @@ module Serialized = struct
           is_first := false )
         coll
     in
-    let pp_proc_id_list fmt list = pp_proc_id_iter Caml.List.iter fmt list in
+    let pp_proc_id_list fmt list = pp_proc_id_iter Stdlib.List.iter fmt list in
     let pp_proc_id_set fmt set = pp_proc_id_iter Procname.Set.iter fmt set in
     Utils.with_file_out file ~f:(fun outf ->
         Printf.fprintf outf "schema_version=%d\n" schema_version ;
@@ -276,7 +276,7 @@ module Serialized = struct
         in
         edges_to_ignore := Procname.Map.add proc_name recursion_edges !edges_to_ignore )
       pre_call_graph ;
-    Ondemand.edges_to_ignore := Some !edges_to_ignore ;
+    DLS.set Ondemand.edges_to_ignore (Some !edges_to_ignore) ;
     call_graph
 
 

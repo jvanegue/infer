@@ -75,7 +75,8 @@ val eval_var : PathContext.t -> Location.t -> Pvar.t -> t -> t * (AbstractValue.
 val eval_ident : Ident.t -> t -> t * (AbstractValue.t * ValueHistory.t)
 
 val prune :
-  PathContext.t
+     Procdesc.t
+  -> PathContext.t
   -> Location.t
   -> condition:Exp.t
   -> t
@@ -134,7 +135,7 @@ val eval_deref_access :
 val eval_proc_name :
   PathContext.t -> Location.t -> Exp.t -> t -> (t * Procname.t option) AccessResult.t SatUnsat.t
 
-val hack_python_propagates_type_on_load :
+val hack_propagates_type_on_load :
   Tenv.t -> PathContext.t -> Location.t -> Exp.t -> AbstractValue.t -> t -> t
 
 val add_static_type_objc_class : Tenv.t -> Typ.t -> AbstractValue.t -> Location.t -> t -> t
@@ -311,16 +312,22 @@ val get_dynamic_type_unreachable_values : Var.t list -> t -> (Var.t * Typ.t) lis
 val remove_vars : Var.t list -> Location.t -> t -> t SatUnsat.t
 
 val check_address_escape :
-  Location.t -> Procdesc.t -> AbstractValue.t -> ValueHistory.t -> t -> t AccessResult.t
+     Location.t
+  -> Procdesc.t
+  -> PathContext.t
+  -> AbstractValue.t
+  -> ValueHistory.t
+  -> t
+  -> t AccessResult.t
 
-type call_kind = [`Closure of (Exp.t * CapturedVar.t) list | `Var of Ident.t | `ResolvedProcname]
+type call_kind = ClosureCall of (Exp.t * CapturedVar.t) list | VarCall of Ident.t | ResolvedCall
 
 val get_captured_actuals :
      Procname.t
   -> PathContext.t
   -> Location.t
+  -> call_kind
   -> captured_formals:CapturedVar.t list
-  -> call_kind:call_kind
   -> actuals:((AbstractValue.t * ValueHistory.t) * Typ.t) list
   -> t
   -> (t * ((AbstractValue.t * ValueHistory.t) * Typ.t) list) AccessResult.t SatUnsat.t

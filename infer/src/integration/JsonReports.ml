@@ -70,7 +70,7 @@ let compute_hash =
       , location_independent_proc_name
       , base_filename
       , location_independent_qualifier )
-    |> Caml.Digest.to_hex
+    |> Stdlib.Digest.to_hex
 
 
 let loc_trace_to_jsonbug_record trace_list =
@@ -239,9 +239,12 @@ module JsonIssuePrinter = MakeJsonListPrinter (struct
           match Utils.read_file filename with
           | Error _ ->
               L.user_error "Could not read file %s@\n" filename ;
-              String.Map.empty
+              IString.Map.empty
           | Ok lines ->
-              Suppressions.parse_lines ~file:filename lines )
+              let suppressions, errors = Suppressions.parse_lines ~file:filename lines in
+              List.iter errors ~f:(fun (Suppressions.UserError error) ->
+                  L.user_error "%s" (error ()) ) ;
+              suppressions )
     in
     suppressions_cache := SourceFile.Map.add source_file suppressions !suppressions_cache ;
     Suppressions.is_suppressed ~suppressions ~issue_type ~line
@@ -499,7 +502,7 @@ let process_all_summaries_and_issues ~issues_outf ~costs_outf ~config_impact_out
       all_issues := collect_issues proc_name None errlog !all_issues ) ;
   let all_issues = Issue.sort_filter_issues !all_issues in
   let n_issues = List.length all_issues in
-  ScubaLogging.log_count ~label:"reports_unfiltered" ~value:n_issues ;
+  StatsLogging.log_count ~label:"reports_unfiltered" ~value:n_issues ;
   List.iter all_issues ~f:(fun {Issue.proc_name; proc_location_opt; err_key; err_data} ->
       let error_filter = mk_error_filter filters proc_name in
       JsonIssuePrinter.pp issues_outf.Utils.fmt

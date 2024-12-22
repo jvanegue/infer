@@ -5,19 +5,20 @@
  * LICENSE file in the root directory of this source tree.
  *)
 open! IStd
+module F = Format
 module L = Logging
 open Option.Monad_infix
 
 (** Module for Type Environments. *)
 
 (** Hash tables on type names. *)
-module TypenameHash = Caml.Hashtbl.Make (Typ.Name)
+module TypenameHash = Stdlib.Hashtbl.Make (Typ.Name)
 
 (** Type for type environment. *)
 type t = Struct.t TypenameHash.t
 
 let pp fmt (tenv : t) =
-  TypenameHash.iter (fun name typ -> Format.fprintf fmt "%a@," (Struct.pp Pp.text name) typ) tenv
+  TypenameHash.iter (fun name typ -> F.fprintf fmt "%a@\n@," (Struct.pp Pp.text name) typ) tenv
 
 
 let length tenv = TypenameHash.length tenv
@@ -46,7 +47,7 @@ let mk_struct tenv ?default ?fields ?statics ?methods ?exported_objc_methods ?su
 let lookup tenv name : Struct.t option =
   let result =
     try Some (TypenameHash.find tenv name)
-    with Caml.Not_found -> (
+    with Stdlib.Not_found -> (
       (* ToDo: remove the following additional lookups once C/C++ interop is resolved *)
       match (name : Typ.Name.t) with
       | CStruct m ->
@@ -174,7 +175,7 @@ let get_parent tenv name =
 
 
 let get_fields_trans =
-  let module Fields = Caml.Set.Make (struct
+  let module Fields = Stdlib.Set.Make (struct
     type t = Struct.field
 
     let compare {Struct.name= x} {Struct.name= y} =
@@ -194,9 +195,9 @@ type per_file = Global | FileLocal of t
 
 let pp_per_file fmt = function
   | Global ->
-      Format.fprintf fmt "Global"
+      F.fprintf fmt "Global"
   | FileLocal tenv ->
-      Format.fprintf fmt "FileLocal @[<v>%a@]" pp tenv
+      F.fprintf fmt "FileLocal @[<v>%a@]" pp tenv
 
 
 module SQLite : SqliteUtils.Data with type t = per_file = struct
@@ -295,7 +296,7 @@ let load =
 let store_debug_file tenv tenv_filename =
   let debug_filename = DB.filename_to_string (DB.filename_add_suffix tenv_filename ".debug") in
   let out_channel = Out_channel.create debug_filename in
-  let fmt = Format.formatter_of_out_channel out_channel in
+  let fmt = F.formatter_of_out_channel out_channel in
   pp fmt tenv ;
   Out_channel.close out_channel
 
@@ -315,7 +316,7 @@ let write tenv tenv_filename =
   let value = size / 1024 / 1024 in
   let label = "global_tenv_size_mb" in
   L.debug Capture Quiet "Global tenv size %s: %d@\n" label value ;
-  ScubaLogging.log_count ~label:"global_tenv_size_mb" ~value
+  StatsLogging.log_count ~label:"global_tenv_size_mb" ~value
 
 
 module Normalizer = struct
@@ -362,10 +363,11 @@ module MethodInfo = struct
   end
 
   module Hack = struct
-    type kind = IsClass | IsTrait of {used: Typ.Name.t; is_direct: bool}
+    type kind = IsClass | IsTrait of {in_class: Typ.Name.t; is_direct: bool}
     [@@deriving show {with_path= false}]
 
-    type t = {proc_name: Procname.t; kind: kind} [@@deriving show {with_path= false}]
+    type t = {proc_name: (Procname.t[@show.printer Procname.pp_verbose]); kind: kind}
+    [@@deriving show {with_path= false}]
 
     let mk_class ~kind proc_name = {proc_name; kind}
 
@@ -380,10 +382,10 @@ module MethodInfo = struct
           IsClass
       | Trait -> (
         match last_class_visited with
-        | Some used ->
-            IsTrait {used; is_direct= false}
+        | Some in_class ->
+            IsTrait {in_class; is_direct= false}
         | None ->
-            IsTrait {used= class_name; is_direct= true} )
+            IsTrait {in_class= class_name; is_direct= true} )
   end
 
   type t = HackInfo of Hack.t | DefaultInfo of Default.t [@@deriving show {with_path= false}]
@@ -412,7 +414,7 @@ module MethodInfo = struct
         Hack.IsClass
 
 
-  let get_procname = function HackInfo {proc_name} | DefaultInfo {proc_name} -> proc_name
+  let get_proc_name = function HackInfo {proc_name} | DefaultInfo {proc_name} -> proc_name
 
   let get_hack_kind = function HackInfo {kind} -> Some kind | _ -> None
 end
@@ -439,7 +441,7 @@ let is_hack_model source_file =
          String.equal source_file hack_model )
 
 
-let resolve_method ~method_exists tenv class_name proc_name =
+let resolve_method ?(is_virtual = false) ~method_exists tenv class_name proc_name =
   let visited = ref Typ.Name.Set.empty in
   (* For Hack, we need to remember the last class we visited. Once we visit a trait, we are sure
      we will only visit traits from now on *)
@@ -477,11 +479,22 @@ let resolve_method ~method_exists tenv class_name proc_name =
                 last_class_visited := Some class_name ;
                 0
             | IsTrait {is_direct= false} ->
+                L.d_printfln
+                  "method belongs to a Trait and is not called directly, adjusting arity +1" ;
                 1
             | IsTrait {is_direct= true} ->
-                (* We do not need to increase the arity when the trait method is called directly, i.e.
-                   [T::foo], since the [proc_name] has the increased arity already. *)
-                0
+                if is_virtual then (
+                  (* This happens, eg, in the wrapper methods we generate to deal with optional
+                     arguments; in these cases the call to the "base" method with no optional
+                     arguments is emitted by hackc as a virtual call *)
+                  L.d_printfln
+                    "method belongs to a Trait, is called directly but virtually, adjusting arity \
+                     +1" ;
+                  1 )
+                else
+                  (* We do not need to increase the arity when the trait method is called directly, i.e.
+                     [T::foo], since the [proc_name] has the increased arity already. *)
+                  0
           in
           let right_proc_name = Procname.replace_class ~arity_incr proc_name class_name in
           if method_exists right_proc_name methods then

@@ -30,7 +30,7 @@ end
 
 module LocalAccessPathSet = PrettyPrintable.MakePPSet (LocalAccessPath)
 
-let suffixes = String.Set.of_list ["Attr"; "Dip"; "Px"; "Res"; "Sp"]
+let suffixes = ["Attr"; "Dip"; "Px"; "Res"; "Sp"]
 
 module MethodCallPrefix = struct
   type t =
@@ -40,7 +40,7 @@ module MethodCallPrefix = struct
   let make_with_prefixes procname location =
     let method_name = Procname.get_method procname in
     let prefix_opt =
-      String.Set.find_map suffixes ~f:(fun suffix -> String.chop_suffix method_name ~suffix)
+      List.find_map suffixes ~f:(fun suffix -> String.chop_suffix method_name ~suffix)
     in
     let default = [{prefix= method_name; procname; location}] in
     Option.value_map prefix_opt ~default ~f:(fun prefix ->
@@ -185,9 +185,9 @@ module MethodCalls = struct
 
   let to_string_set method_calls =
     let accum_as_string method_call acc =
-      String.Set.add acc (MethodCallPrefix.procname_to_string method_call)
+      IString.Set.add (MethodCallPrefix.procname_to_string method_call) acc
     in
-    S.fold accum_as_string method_calls String.Set.empty
+    S.fold accum_as_string method_calls IString.Set.empty
 
 
   let get_call_chain method_calls =

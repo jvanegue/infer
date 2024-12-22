@@ -6,7 +6,9 @@
  *)
 
 open! IStd
+module F = Format
 open PulseBasicInterface
+module AbductiveDomain = PulseAbductiveDomain
 module BaseMemory = PulseBaseMemory
 module DecompilerExpr = PulseDecompilerExpr
 module ExecutionDomain = PulseExecutionDomain
@@ -39,16 +41,39 @@ type parameter_spec_t =
 
 include AbstractDomain.WithBottomTop
 
+val exec :
+     t
+  -> exec_instr:
+       ((ExecutionDomain.t * PathContext.t) * t -> (ExecutionDomain.t * PathContext.t) list * t)
+  -> t
+
+val join_to_astate :
+  (AbductiveDomain.t * PathContext.t) AbstractDomain.Types.bottom_lifted -> t -> t
+
+val astate_is_bottom : t -> bool
+
+val for_disjunct_exec_instr : t -> t
+
+val pp_with_kind : Pp.print_kind -> F.formatter -> t -> unit
+
 type summary
 
-val make_summary : t -> summary
+val make_summary : ProcAttributes.t -> Location.t -> t -> summary
 
 module Summary : sig
-  include AbstractDomain.WithBottom with type t = summary
+  type t = summary
+
+  val bottom : t
+
+  val pp : F.formatter -> t -> unit
+
+  val join : t -> t -> t
 
   val get_transitive_info_if_not_top : t -> TransitiveInfo.t option
 
   val has_dropped_disjuncts : t -> bool
+
+  val get_pre_post : t -> AbductiveDomain.Summary.t AbstractDomain.Types.bottom_lifted
 end
 
 val add_var :

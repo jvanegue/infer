@@ -56,11 +56,11 @@ module FixClosureAppExpr = struct
     let open ProcDesc in
     let globals_and_locals =
       List.fold pdesc.locals ~init:globals ~f:(fun set (varname, _) ->
-          String.Set.add set varname.VarName.value )
+          IString.Set.add varname.VarName.value set )
     in
     let is_varname ({enclosing_class; name} : QualifiedProcName.t) =
       match enclosing_class with
-      | TopLevel when String.Set.mem globals_and_locals name.value ->
+      | TopLevel when IString.Set.mem name.value globals_and_locals ->
           let varname : VarName.t = {value= name.value; loc= name.loc} in
           Some (Exp.Load {exp= Lvar varname; typ= None})
       | TopLevel when is_ident name.value ->
@@ -142,10 +142,10 @@ module FixClosureAppExpr = struct
   let transform (module_ : Module.t) =
     let open Module in
     let globals =
-      List.fold module_.decls ~init:String.Set.empty ~f:(fun set decl ->
+      List.fold module_.decls ~init:IString.Set.empty ~f:(fun set decl ->
           match decl with
           | Global {name} ->
-              String.Set.add set name.VarName.value
+              IString.Set.add name.VarName.value set
           | Proc _ | Struct _ | Procdecl _ ->
               set )
     in
@@ -161,6 +161,51 @@ module FixClosureAppExpr = struct
 end
 
 let fix_closure_app = FixClosureAppExpr.transform
+
+module FixHackWrapper = struct
+  let is_forward_to_static_method_wrapper (pdesc : ProcDesc.t) =
+    (* hackc generates two kinds of wrapper but we are not interested in the
+       forward-to-static-method case *)
+    Int.equal (List.length pdesc.nodes) 1
+
+
+  let replace_forward_call ({procdecl; nodes} as pdesc : ProcDesc.t) =
+    (* we expect the last node to be of the form:
+       n0: *HackMixed = load &$param1
+       n1: *HackMixed = load &$param2
+       ...
+       n_{k+1} = n_k.?.name(n0, n1, ...)
+       ret n_{k+1}
+    *)
+    let nodes =
+      match List.rev nodes with
+      | [] ->
+          []
+      | last_node :: others ->
+          let instrs =
+            List.map last_node.Node.instrs ~f:(function
+              | Instr.Let {id; exp= Exp.Call {proc; args; kind= Virtual}; loc} ->
+                  let enclosing_class = procdecl.qualified_name.enclosing_class in
+                  let proc : QualifiedProcName.t = {proc with enclosing_class} in
+                  let instr = Instr.Let {id; exp= Exp.Call {proc; args; kind= NonVirtual}; loc} in
+                  instr
+              | instr ->
+                  instr )
+          in
+          {last_node with Node.instrs} :: others |> List.rev
+    in
+    {pdesc with nodes}
+
+
+  let transform module_ =
+    module_map_procs module_ ~f:(fun pdesc : ProcDesc.t ->
+        let has_wrapper_attr =
+          List.exists pdesc.procdecl.attributes ~f:Textual.Attr.is_hack_wrapper
+        in
+        if has_wrapper_attr && not (is_forward_to_static_method_wrapper pdesc) then
+          replace_forward_call pdesc
+        else pdesc )
+end
 
 module Subst = struct
   let rec of_exp_one exp ~id ~by =
@@ -289,19 +334,11 @@ module State = struct
 end
 
 module TransformClosures = struct
-  let typename ~(closure : ProcDesc.t) ~(enclosing : ProcDesc.t) fresh_index loc : TypeName.t =
+  let typename sourcefile fresh_index loc : TypeName.t =
     (* we create a new type for this closure *)
-    let pp fmt ({enclosing_class; name} : QualifiedProcName.t) =
-      match enclosing_class with
-      | TopLevel ->
-          ProcName.pp fmt name
-      | Enclosing tname ->
-          F.fprintf fmt "%a_%a" TypeName.pp tname ProcName.pp name
-    in
-    let value =
-      F.asprintf "__Closure_%a_in_%a_%d" pp closure.procdecl.qualified_name pp
-        enclosing.procdecl.qualified_name fresh_index
-    in
+    let filename = F.asprintf "%a" SourceFile.pp sourcefile in
+    let name, _ = Filename.split_extension filename in
+    let value = F.asprintf "closure:%s:%d" name fresh_index in
     {value; loc}
 
 
@@ -340,7 +377,9 @@ module TransformClosures = struct
     (alloc :: List.rev instrs, List.rev fields)
 
 
-  let type_declaration name fields : Struct.t = {name; supers= []; fields; attributes= []}
+  let type_declaration name fields : Struct.t =
+    {name; supers= []; fields; attributes= [Attr.mk_final]}
+
 
   let closure_call_qualified_procname loc : QualifiedProcName.t =
     {enclosing_class= Enclosing TypeName.wildcard; name= {value= "call"; loc}}
@@ -352,6 +391,12 @@ module TransformClosures = struct
 
   let closure_call_procdecl loc typename (closure : ProcDesc.t) nb_captured : ProcDecl.t =
     let procdecl = closure.procdecl in
+    let attributes =
+      Textual.Attr.mk_closure_wrapper
+      :: (* in Python, we transfert the 'args' and 'async' attributes from the 'closure' proc to the generated 'call' proc *)
+         List.filter procdecl.attributes ~f:(fun attr ->
+             Option.is_some (Textual.Attr.find_python_args attr) || Textual.Attr.is_async attr )
+    in
     let unresolved_qualified_name = closure_call_qualified_procname loc in
     let qualified_name = {unresolved_qualified_name with enclosing_class= Enclosing typename} in
     let this_typ = Typ.mk_without_attributes (Ptr (Struct typename)) in
@@ -360,12 +405,14 @@ module TransformClosures = struct
           this_typ :: List.drop formals nb_captured )
     in
     let result_type = procdecl.result_type in
-    {qualified_name; formals_types; result_type; attributes= []}
+    {qualified_name; formals_types; result_type; attributes}
 
 
   let closure_call_procdesc loc typename state (closure : ProcDesc.t) fields params :
       State.t * ProcDesc.t =
     let nb_captured = List.length fields in
+    let save_fresh_ident = state.State.fresh_ident in
+    let state = {state with State.fresh_ident= Ident.of_int 0} in
     let procdecl = closure_call_procdecl loc typename closure nb_captured in
     let start : NodeName.t = {value= "entry"; loc} in
     let this_var : VarName.t = {value= "__this"; loc} in
@@ -404,11 +451,17 @@ module TransformClosures = struct
       ; label_loc= loc }
     in
     let params = this_var :: params in
-    let state = State.incr_fresh state in
+    let state = {state with fresh_ident= save_fresh_ident} in
     (state, {procdecl; nodes= [node]; start; params; locals= []; exit_loc= loc})
 end
 
 let remove_effects_in_subexprs lang decls_env _module =
+  let fresh_closure_counter =
+    let counter = ref (-1) in
+    fun () ->
+      incr counter ;
+      !counter
+  in
   let rec flatten_exp loc (exp : Exp.t) state : Exp.t * State.t =
     match exp with
     | Var _ | Lvar _ | Const _ | Typ _ ->
@@ -434,8 +487,6 @@ let remove_effects_in_subexprs lang decls_env _module =
           (Var fresh, State.push_instr new_instr state |> State.incr_fresh)
     | Closure {proc; captured; params} ->
         let captured, state = flatten_exp_list loc captured state in
-        let id_object = state.State.fresh_ident in
-        let state = State.incr_fresh state in
         let signature = TransformClosures.signature_body lang proc captured params in
         let closure =
           match TextualDecls.get_procdesc decls_env signature with
@@ -444,10 +495,10 @@ let remove_effects_in_subexprs lang decls_env _module =
           | None ->
               L.die InternalError "TextualBasicVerication should make this situation impossible"
         in
-        let typename =
-          TransformClosures.typename ~closure ~enclosing:state.State.pdesc (Ident.to_int id_object)
-            loc
-        in
+        let id_closure = fresh_closure_counter () in
+        let typename = TransformClosures.typename _module.Module.sourcefile id_closure loc in
+        let id_object = state.State.fresh_ident in
+        let state = State.incr_fresh state in
         let instrs, fields =
           TransformClosures.closure_building_instrs id_object loc typename closure captured
         in
@@ -456,6 +507,7 @@ let remove_effects_in_subexprs lang decls_env _module =
         in
         let struct_ = TransformClosures.type_declaration typename fields in
         let state = State.incr_fresh state in
+        let loc = if Lang.equal lang Python then Location.decr_line loc else loc in
         let state, call_procdecl =
           TransformClosures.closure_call_procdesc loc typename state closure fields params
         in
@@ -541,7 +593,7 @@ let remove_effects_in_subexprs lang decls_env _module =
     ({pdesc with nodes= List.rev rev_nodes}, closure_declarations)
   in
   let module_, closure_declarations = module_fold_procs ~init:[] ~f:flatten_pdesc _module in
-  {module_ with decls= closure_declarations @ module_.decls}
+  ({module_ with decls= closure_declarations @ module_.decls}, List.length closure_declarations > 0)
 
 
 let remove_if_terminator module_ =
@@ -719,7 +771,7 @@ let remove_if_terminator module_ =
 let let_propagation module_ =
   let get id ident_map =
     try Ident.Map.find id ident_map
-    with Caml.Not_found ->
+    with Stdlib.Not_found ->
       L.die InternalError "Textual.let_propagation.get failed: unknown identifier %a" Ident.pp id
   in
   let build_equations pdesc : Exp.t Ident.Map.t =
@@ -804,7 +856,7 @@ let out_of_ssa module_ =
       in
       fun node ->
         try NodeName.Map.find node map
-        with Caml.Not_found -> L.die InternalError "Textual.remove_ssa_params internal error"
+        with Stdlib.Not_found -> L.die InternalError "Textual.remove_ssa_params internal error"
     in
     (* Compute which nodes are handlers. This should *really* be done upfront in hackc but for now just see
        which ones are listed as handlers for some other other node. We'll assume that handlers are disjoint from
@@ -878,3 +930,20 @@ let out_of_ssa module_ =
     {pdesc with nodes}
   in
   module_map_procs ~f:transform module_
+
+
+let run lang module_ =
+  let errors, decls_env = TextualDecls.make_decls module_ in
+  if not (List.is_empty errors) then
+    L.die InternalError
+      "to_sil conversion should not be performed if TextualDecls verification has raised any \
+       errors before." ;
+  let module_, new_decls_were_added =
+    (* note: because && and || operators are lazy we must remove them before moving calls *)
+    module_ |> remove_if_terminator |> remove_effects_in_subexprs lang decls_env
+  in
+  let decls_env =
+    if new_decls_were_added then TextualDecls.make_decls module_ |> snd else decls_env
+  in
+  let module_ = module_ |> let_propagation |> FixHackWrapper.transform |> out_of_ssa in
+  (module_, decls_env)

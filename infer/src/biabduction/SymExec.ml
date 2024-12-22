@@ -15,7 +15,7 @@ module F = Format
 
 let rec fldlist_assoc fld = function
   | [] ->
-      raise Caml.Not_found
+      raise Stdlib.Not_found
   | {Struct.name= fld'; typ= x} :: l ->
       if Fieldname.equal fld fld' then x else fldlist_assoc fld l
 
@@ -33,7 +33,7 @@ let unroll_type tenv (typ : Typ.t) (off : Predicates.offset) =
   | Tstruct name, Off_fld (fld, _) -> (
     match Tenv.lookup tenv name with
     | Some {fields; statics} -> (
-      try fldlist_assoc fld (fields @ statics) with Caml.Not_found -> fail Fieldname.pp fld )
+      try fldlist_assoc fld (fields @ statics) with Stdlib.Not_found -> fail Fieldname.pp fld )
     | None ->
         fail Fieldname.pp fld )
   | Tarray {elt}, Off_index _ ->
@@ -438,7 +438,7 @@ let resolve_method tenv class_name proc_name =
         (Typ.Name.name class_name) ;
       proc_name
   | Ok method_info ->
-      Tenv.MethodInfo.get_procname method_info
+      Tenv.MethodInfo.get_proc_name method_info
 
 
 let resolve_typename prop receiver_exp =
@@ -1628,7 +1628,7 @@ and proc_call callee_pname callee_summary
   let actuals = comb actual_pars formal_types in
   (* In case we call an objc instance method we add an extra spec
      where the receiver is null and the semantics of the call is nop *)
-  match (!Language.curr_language, callee_attributes.ProcAttributes.clang_method_kind) with
+  match (Language.get_language (), callee_attributes.ProcAttributes.clang_method_kind) with
   | Language.Clang, ClangMethodKind.OBJC_INSTANCE ->
       handle_objc_instance_method_call actual_pars pre tenv (fst ret_id_typ) caller_pdesc
         callee_pname path (fun () ->

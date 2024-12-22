@@ -145,10 +145,7 @@ module Basic = struct
    fun {analysis_data= {proc_desc}; location} astate ->
     let open SatUnsat.Import in
     match
-      AbductiveDomain.Summary.of_post
-        (Procdesc.get_proc_name proc_desc)
-        (Procdesc.get_attributes proc_desc)
-        location astate
+      AbductiveDomain.Summary.of_post (Procdesc.get_attributes proc_desc) location astate
       >>| AccessResult.ignore_leaks >>| AccessResult.of_abductive_summary_result
       >>| AccessResult.with_summary
     with
@@ -190,20 +187,27 @@ module Basic = struct
   (** Pretend the function call is a call to an "unknown" function, i.e. a function for which we
       don't have the implementation. This triggers a bunch of heuristics, e.g. to havoc arguments we
       suspect are passed by reference. *)
-  let unknown_call skip_reason args : model_no_non_disj =
+  let unknown_call_without_formals ?(force_pure = false) skip_reason actuals : model_no_non_disj =
    fun {path; callee_procname; analysis_data= {tenv}; location; ret} astate ->
+    let formals_opt =
+      IRAttributes.load callee_procname |> Option.map ~f:ProcAttributes.get_pvar_formals
+    in
+    let reason =
+      if force_pure then CallEvent.SkippedKnownCall callee_procname else CallEvent.Model skip_reason
+    in
+    let<++> astate =
+      PulseCallOperations.unknown_call tenv path location reason ~force_pure (Some callee_procname)
+        ~ret ~actuals ~formals_opt astate
+    in
+    astate
+
+
+  let unknown_call ?(force_pure = false) skip_reason args : model_no_non_disj =
     let actuals =
       List.map args ~f:(fun {ProcnameDispatcher.Call.FuncArg.arg_payload= actual; typ} ->
           (actual, typ) )
     in
-    let formals_opt =
-      IRAttributes.load callee_procname |> Option.map ~f:ProcAttributes.get_pvar_formals
-    in
-    let<++> astate =
-      PulseCallOperations.unknown_call tenv path location (Model skip_reason) (Some callee_procname)
-        ~ret ~actuals ~formals_opt astate
-    in
-    astate
+    unknown_call_without_formals ~force_pure skip_reason actuals
 
 
   let id_first_arg_from_list ~desc args : model_no_non_disj =
@@ -416,8 +420,8 @@ module Basic = struct
       discarding some abstract values that were potentially created to evaluate [exp] when the model
       was called. *)
   let assert_ {ProcnameDispatcher.Call.FuncArg.exp= condition} : model_no_non_disj =
-   fun {path; location} astate ->
-    let<++> astate, _ = PulseOperations.prune path location ~condition astate in
+   fun {analysis_data= {proc_desc}; path; location} astate ->
+    let<++> astate, _ = PulseOperations.prune proc_desc path location ~condition astate in
     astate
 
 
@@ -455,6 +459,8 @@ module Basic = struct
                  ~desc:"modelled as returning the first argument due to configuration option"
     ; +match_regexp_opt Config.pulse_model_skip_pattern
       &::.*++> unknown_call "modelled as skip due to configuration option"
+    ; +match_regexp_opt Config.pulse_model_unknown_pure
+      &::.*++> unknown_call ~force_pure:true "modelled unknown pure due to configuration option"
     ; +match_taint_source Config.pulse_taint_skip_sources
       &::.*++> unknown_call "modelled as skip due to configuration option" ]
     |> List.map ~f:(fun matcher ->

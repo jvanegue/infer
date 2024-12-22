@@ -155,6 +155,8 @@ let compare = Graph.compare Edges.compare
 
 let equal = Graph.equal Edges.equal
 
+let add v edges heap = if Edges.is_empty edges then Graph.remove v heap else Graph.add v edges heap
+
 module type S = sig
   type key
 
@@ -170,6 +172,9 @@ module type S = sig
     val mapi : t -> f:(key -> out_of_map_t -> in_map_t) -> t
 
     val canonicalize : get_var_repr:(AbstractValue.t -> AbstractValue.t) -> t -> t
+
+    val merge :
+      f:(key -> out_of_map_t option -> out_of_map_t option -> in_map_t option) -> t -> t -> t
   end
 
   include PrettyPrintable.PPMonoMap with type key := key and type value = Edges.t

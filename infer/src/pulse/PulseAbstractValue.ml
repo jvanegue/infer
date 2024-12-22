@@ -11,21 +11,21 @@ type t = int [@@deriving compare, equal, hash]
 
 let initial_next_fresh = 1
 
-let next_fresh = ref initial_next_fresh
+let next_fresh = DLS.new_key (fun () -> initial_next_fresh)
 
 let mk_fresh () =
-  let l = !next_fresh in
-  incr next_fresh ;
+  let l = DLS.get next_fresh in
+  DLS.set next_fresh (l + 1) ;
   l
 
 
 let initial_next_fresh_restricted = -1
 
-let next_fresh_restricted = ref initial_next_fresh_restricted
+let next_fresh_restricted = DLS.new_key (fun () -> initial_next_fresh_restricted)
 
 let mk_fresh_restricted () =
-  let v = !next_fresh_restricted in
-  decr next_fresh_restricted ;
+  let v = DLS.get next_fresh_restricted in
+  DLS.set next_fresh_restricted (v - 1) ;
   v
 
 let is_restricted v = v < 0
@@ -62,7 +62,7 @@ module Map = struct
 end
 
 let () =
-  AnalysisGlobalState.register_ref next_fresh ~init:(fun () -> initial_next_fresh) ;
-  AnalysisGlobalState.register_ref next_fresh_restricted ~init:(fun () ->
+  AnalysisGlobalState.register_dls next_fresh ~init:(fun () -> initial_next_fresh) ;
+  AnalysisGlobalState.register_dls next_fresh_restricted ~init:(fun () ->
       initial_next_fresh_restricted ) ;
   ()

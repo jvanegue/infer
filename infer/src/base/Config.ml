@@ -62,6 +62,14 @@ type pulse_taint_config =
   ; policies: Pulse_config_t.taint_policies
   ; data_flow_kinds: string list }
 
+type pulse_hack_builder_pattern =
+  { class_name: string [@yojson.key "class"]
+  ; finalizers: string list
+  ; immediately_non_discardable_class: string option [@yojson.option] }
+[@@deriving of_yojson]
+
+type pulse_hack_builder_patterns = pulse_hack_builder_pattern list [@@deriving of_yojson]
+
 (* List of ([build system], [executable name]). Several executables may map to the same build
    system. In that case, the first one in the list will be used for printing, eg, in which mode
    infer is running. *)
@@ -101,7 +109,7 @@ let string_of_build_system build_system =
 
 let build_system_of_exe_name name =
   try List.Assoc.find_exn ~equal:String.equal (List.Assoc.inverse build_system_exe_assoc) name
-  with Not_found_s _ | Caml.Not_found ->
+  with Not_found_s _ | Stdlib.Not_found ->
     L.(die UserError)
       "Unsupported build command '%s'.@\n\
        If this is an alias for another build system that infer supports, you can use@\n\
@@ -1292,12 +1300,6 @@ and compaction_if_heap_greater_equal_to_GB =
      in Gigabytes. Defaults to 8"
 
 
-and compaction_minimum_interval_s =
-  CLOpt.mk_int ~long:"compaction-minimum-interval-s" ~default:15 ~meta:"int"
-    "An analysis worker will only trigger compaction if this amount of time (in seconds) has \
-     elapsed since last compaction. Defaults to 15"
-
-
 and compilation_database =
   CLOpt.mk_path_list ~long:"compilation-database"
     ~in_help:InferCommand.[(Capture, manual_clang)]
@@ -1318,6 +1320,11 @@ and complete_capture_from =
      database specified with $(b, --results-dir)) (which must exist) will be completed from the \
      input database and according to the $(b, missing-*) files in the results directory.  The exit \
      code will be equal to the number of rows added to the capture database."
+
+
+and compute_captured_context =
+  CLOpt.mk_bool ~long:"compute-captured-context" ~default:true
+    "Compute context information for captured variables in Objective-C blocks"
 
 
 and config_impact_config_field_patterns =
@@ -2209,6 +2216,12 @@ and modeled_expensive =
        performance critical checker." )
 
 
+and multicore =
+  CLOpt.mk_bool ~long:"multicore" ~default:false
+    ~in_help:InferCommand.[(Analyze, manual_generic)]
+    "[EXPERIMENTAL] uses multi-threading for analysis, currently partially or not implemented."
+
+
 and never_returning_null =
   let long = "never-returning-null" in
   ( long
@@ -2597,6 +2610,12 @@ and pulse_model_skip_pattern_list =
     "Regex of methods that should be modelled as \"skip\" in Pulse"
 
 
+and pulse_model_unknown_pure =
+  CLOpt.mk_string_list ~long:"pulse-model-unknown-pure"
+    ~in_help:InferCommand.[(Analyze, manual_pulse)]
+    "Regex of methods that should be modelled as unknown pure in Pulse"
+
+
 and pulse_model_unreachable =
   CLOpt.mk_string_list ~long:"pulse-model-unreachable"
     ~in_help:InferCommand.[(Analyze, manual_clang)]
@@ -2690,6 +2709,13 @@ and pulse_nullsafe_report_npe_as_separate_issue_type =
     ~in_help:InferCommand.[(Analyze, manual_pulse)]
     "Report null dereference issues on files marked @Nullsafe as a separate \
      NULLPTR_DEREFERENCE_IN_NULLSAFE_CLASS issue type."
+
+
+and pulse_over_approximate_reasoning =
+  CLOpt.mk_bool ~long:"pulse-over-approximate-reasoning"
+    ~in_help:InferCommand.[(Analyze, manual_pulse)]
+    "[EXPERIMENTAL] add over-approximate reasoning on top of the under-approximate, disjunctive \
+     reasoning of Pulse."
 
 
 and pulse_prevent_non_disj_top =
@@ -3215,22 +3241,23 @@ and scope_leakage_config =
     |}
 
 
-and scuba_execution_id =
+and _scuba_execution_id =
   CLOpt.mk_int64_opt ~long:"scuba-execution-id"
-    "Execution ID attached to all samples logged to scuba"
+    "[DOES NOTHING] Execution ID attached to all samples logged to scuba"
 
 
-and scuba_logging = CLOpt.mk_bool ~long:"scuba-logging" "(direct) logging to scuba"
+and _scuba_logging = CLOpt.mk_bool ~long:"scuba-logging" "[DOES NOTHING] (direct) logging to scuba"
 
-and scuba_normals =
+and _scuba_normals =
   CLOpt.mk_string_map ~long:"scuba-normal"
-    "add an extra string (normal) field to be set for each sample of scuba, format <name>=<value>"
+    "[DOES NOTHING] add an extra string (normal) field to be set for each sample of scuba, format \
+     <name>=<value>"
 
 
-and scuba_tags =
+and _scuba_tags =
   CLOpt.mk_string_map ~long:"scuba-tags"
-    "add an extra set of strings (tagset) field to be set for each sample of scuba, format \
-     <name>=(<value>,<value>,<value>|NONE)"
+    "[DOES NOTHING] add an extra set of strings (tagset) field to be set for each sample of scuba, \
+     format <name>=(<value>,<value>,<value>|NONE)"
 
 
 and select =
@@ -3722,7 +3749,7 @@ let post_parsing_initialization command_opt =
         match inferconfig_file with
         | Some inferconfig ->
             Printf.sprintf "version %s/inferconfig %s" Version.commit
-              (Caml.Digest.to_hex (Caml.Digest.file inferconfig))
+              (Stdlib.Digest.to_hex (Stdlib.Digest.file inferconfig))
         | None ->
             Version.commit
       in
@@ -3758,7 +3785,7 @@ let post_parsing_initialization command_opt =
     in
     let suggest_keep_going = should_print_backtrace_default && not !keep_going in
     let backtrace =
-      if is_infer_exit_zero then "" else Caml.Printexc.raw_backtrace_to_string raw_backtrace
+      if is_infer_exit_zero then "" else Stdlib.Printexc.raw_backtrace_to_string raw_backtrace
     in
     let print_exception () =
       let error prefix msg =
@@ -3794,7 +3821,7 @@ let post_parsing_initialization command_opt =
     Epilogues.run () ;
     Stdlib.exit exitcode
   in
-  Caml.Printexc.set_uncaught_exception_handler uncaught_exception_handler ;
+  Stdlib.Printexc.set_uncaught_exception_handler uncaught_exception_handler ;
   F.set_margin !margin ;
   let set_gc_params () =
     let ctrl = Gc.get () in
@@ -4048,9 +4075,9 @@ and classpath = !classpath
 
 and compaction_if_heap_greater_equal_to_GB = !compaction_if_heap_greater_equal_to_GB
 
-and compaction_minimum_interval_s = !compaction_minimum_interval_s
-
 and complete_capture_from = !complete_capture_from
+
+and compute_captured_context = !compute_captured_context
 
 and config_impact_config_field_patterns =
   RevList.rev_map !config_impact_config_field_patterns ~f:Str.regexp
@@ -4198,12 +4225,14 @@ and global_tenv = !global_tenv
 and hackc_binary = !hackc_binary
 
 and hack_builder_patterns =
-  let open Yojson.Safe.Util in
   let json = !hack_builder_patterns in
-  let class_of j = j |> member "class" |> to_string in
-  let finalizers j = j |> member "finalizers" |> to_list |> List.map ~f:to_string in
-  let pattern j = (class_of j, finalizers j) in
-  json |> to_list |> List.map ~f:pattern
+  match json with
+  | `List [] ->
+      []
+  | json -> (
+    try pulse_hack_builder_patterns_of_yojson json
+    with _ ->
+      L.die UserError "Failed parsing hack-builder-patterns from %a!@\n" Yojson.Safe.pp json )
 
 
 and hack_builtin_models = !hack_builtin_models
@@ -4363,6 +4392,8 @@ and merge_report = RevList.to_list !merge_report
 and merge_summaries = RevList.to_list !merge_summaries
 
 and modeled_expensive = match modeled_expensive with k, r -> (k, !r)
+
+and multicore = !multicore
 
 and never_returning_null = match never_returning_null with k, r -> (k, !r)
 
@@ -4537,6 +4568,8 @@ and pulse_model_transfer_ownership_namespace, pulse_model_transfer_ownership =
   RevList.rev_partition_map ~f:aux models
 
 
+and pulse_model_unknown_pure = join_patterns_list (RevList.to_list !pulse_model_unknown_pure)
+
 and pulse_model_unreachable = RevList.to_list !pulse_model_unreachable
 
 and pulse_models_for_erlang = RevList.to_list !pulse_models_for_erlang
@@ -4550,6 +4583,8 @@ and pulse_nullsafe_report_npe = !pulse_nullsafe_report_npe
 and pulse_nullsafe_report_npe_as_separate_issue_type =
   !pulse_nullsafe_report_npe_as_separate_issue_type
 
+
+and pulse_over_approximate_reasoning = !pulse_over_approximate_reasoning
 
 and pulse_prevent_non_disj_top = !pulse_prevent_non_disj_top
 
@@ -4670,7 +4705,7 @@ and racerd_always_report_java = !racerd_always_report_java
 
 and racerd_guardedby = !racerd_guardedby
 
-and racerd_ignore_classes = RevList.to_list !racerd_ignore_classes |> String.Set.of_list
+and racerd_ignore_classes = RevList.to_list !racerd_ignore_classes |> IString.Set.of_list
 
 and reactive_mode = !reactive
 
@@ -4724,12 +4759,6 @@ and sarif = !sarif
 and scheduler = !scheduler
 
 and scope_leakage_config = !scope_leakage_config
-
-and scuba_logging = !scuba_logging
-
-and scuba_normals = !scuba_normals
-
-and scuba_tags = String.Map.map !scuba_tags ~f:(fun v -> String.split v ~on:',')
 
 and select =
   match !select with
@@ -4932,17 +4961,6 @@ let clang_frontend_action_string =
 let java_package_is_external package =
   RevList.exists external_java_packages ~f:(fun (prefix : string) ->
       String.is_prefix package ~prefix )
-
-
-let scuba_execution_id =
-  if scuba_logging then
-    match !scuba_execution_id with
-    | None ->
-        Random.self_init () ;
-        Some (Random.int64 Int64.max_value)
-    | Some _ as some_value ->
-        some_value
-  else None
 
 
 let is_originator =

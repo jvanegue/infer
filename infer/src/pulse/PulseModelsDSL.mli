@@ -80,7 +80,12 @@ module Syntax : sig
     -> ValueOrigin.t ProcnameDispatcher.Call.FuncArg.t list
     -> unit model_monad
 
+  val python_call : Procname.t -> (string * aval) list -> aval model_monad
+
   val apply_hack_closure : aval -> aval list -> aval model_monad
+
+  val apply_python_closure :
+    aval -> (ProcAttributes.t option -> aval list model_monad) -> aval model_monad
 
   val get_data : model_data model_monad
 
@@ -124,6 +129,8 @@ module Syntax : sig
 
   val add_static_type : Typ.name -> aval -> unit model_monad
 
+  val get_static_type : aval -> Typ.name option model_monad
+
   val deep_copy : ?depth_max:int -> aval -> aval model_monad
 
   val check_valid :
@@ -145,17 +152,19 @@ module Syntax : sig
 
   val access : access_mode -> aval -> Access.t -> aval model_monad
 
-  val load_access : ?no_access:bool -> aval -> Access.t -> aval model_monad
+  val load_access : ?no_access:bool -> ?deref:bool -> aval -> Access.t -> aval model_monad
 
   val load : aval -> aval model_monad
   (** read the Dereference access from the value *)
+
+  val and_dynamic_type_is : aval -> Typ.t -> unit model_monad
 
   val get_dynamic_type :
     ask_specialization:bool -> aval -> Formula.dynamic_type_data option model_monad
 
   val new_ : Exp.t -> aval model_monad
 
-  val constructor : Typ.Name.t -> (string * aval) list -> aval model_monad
+  val constructor : ?deref:bool -> Typ.Name.t -> (string * aval) list -> aval model_monad
   (** [constructor_dsl typ_name fields] builds a fresh object of type [typ_name] and initializes its
       fields using list [fields] *)
 
@@ -168,7 +177,7 @@ module Syntax : sig
 
   val write_field : ref:aval -> Fieldname.t -> aval -> unit model_monad
 
-  val store_field : ref:aval -> Fieldname.t -> aval -> unit model_monad
+  val store_field : ?deref:bool -> ref:aval -> Fieldname.t -> aval -> unit model_monad
 
   val store : ref:aval -> aval -> unit model_monad
 

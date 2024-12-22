@@ -79,6 +79,20 @@ val pp : Format.formatter -> t -> unit
 
 val mk_initial : Tenv.t -> ProcAttributes.t -> t
 
+val are_same_values_as_pre_formals : Procdesc.t -> AbstractValue.t list -> t -> bool
+
+val mk_join_state :
+     pre:PulseBaseStack.t * PulseBaseMemory.t * PulseBaseAddressAttributes.t
+  -> post:PulseBaseStack.t * PulseBaseMemory.t * PulseBaseAddressAttributes.t
+  -> Formula.t
+  -> Decompiler.t
+  -> need_dynamic_type_specialization:AbstractValue.Set.t
+  -> PulseTopl.state
+  -> TransitiveInfo.t
+  -> PulseMutualRecursion.Set.t
+  -> SkippedCalls.t
+  -> t
+
 (** Safe version of {!PulseBaseStack} *)
 module Stack : sig
   val add : Var.t -> PulseBaseStack.value -> t -> t
@@ -89,16 +103,29 @@ module Stack : sig
     ?pre_or_post:[`Pre | `Post] -> (Var.t -> PulseBaseStack.value -> 'a -> 'a) -> t -> 'a -> 'a
   (** [pre_or_post] defaults to [`Post] *)
 
-  val find_opt : Var.t -> t -> PulseBaseStack.value option
+  val find_opt : ?pre_or_post:[`Pre | `Post] -> Var.t -> t -> PulseBaseStack.value option
 
   val eval : ValueHistory.t -> Var.t -> t -> t * ValueOrigin.t
   (** return the value of the variable in the stack or create a fresh one if needed *)
 
-  val mem : Var.t -> t -> bool
+  val mem : [`Pre | `Post] -> Var.t -> t -> bool
 
   val exists : (Var.t -> PulseBaseStack.value -> bool) -> t -> bool
 
   val keys : t -> Var.t list
+
+  val fold_merge :
+       [`Pre | `Post]
+    -> t
+    -> t
+    -> init:'acc
+    -> f:
+         (   'acc
+          -> Var.t
+          -> PulseBaseStack.value option
+          -> PulseBaseStack.value option
+          -> 'acc * PulseBaseStack.value option )
+    -> 'acc * PulseBaseStack.t
 end
 
 (** Safe version of {!PulseBaseMemory} *)
@@ -133,6 +160,21 @@ module Memory : sig
     -> f:(PulseAccess.t * (AbstractValue.t * ValueHistory.t) -> bool)
     -> bool
   (** [pre_or_post] defaults to [`Post] *)
+
+  val fold_merge_edges :
+       [`Pre | `Post]
+    -> t * (AbstractValue.t * ValueHistory.t) option
+    -> t * (AbstractValue.t * ValueHistory.t) option
+    -> init:'acc
+    -> f:
+         (   'acc
+          -> Access.t
+          -> PulseBaseMemory.Edges.value option
+          -> PulseBaseMemory.Edges.value option
+          -> 'acc * PulseBaseMemory.Edges.value option )
+    -> 'acc * PulseBaseMemory.value
+  (** merge the stacks of the given astates into one and set the stack of the first abstract state
+      to be the merged stack*)
 end
 
 (** Safe version of {!PulseBaseAddressAttributes} *)
@@ -149,7 +191,7 @@ module AddressAttributes : sig
   val add_all : AbstractValue.t -> Attributes.t -> t -> t
   (** [add_one] on each attribute in the set *)
 
-  val find_opt : AbstractValue.t -> t -> Attributes.t option
+  val find_opt : [`Pre | `Post] -> AbstractValue.t -> t -> Attributes.t option
 
   val check_valid :
        PathContext.t
@@ -188,12 +230,11 @@ module AddressAttributes : sig
 
   val java_resource_release : AbstractValue.t -> t -> t
 
-  val hack_async_await : AbstractValue.t -> t -> t
+  val await_awaitable : AbstractValue.t -> t -> t
 
   val remove_hack_builder : AbstractValue.t -> t -> t [@@warning "-unused-value-declaration"]
 
   val set_hack_builder : AbstractValue.t -> Attribute.Builder.t -> t -> t
-  [@@warning "-unused-value-declaration"]
 
   val get_hack_builder : AbstractValue.t -> t -> Attribute.Builder.t option
   [@@warning "-unused-value-declaration"]
@@ -314,6 +355,12 @@ val reachable_addresses_from :
   -> AbstractValue.Set.t
 (** Compute the set of abstract addresses that are reachable from given abstract addresses. *)
 
+val has_reachable_in_inner_pre_heap : AbstractValue.t list -> t -> bool
+(** [true] if there is a value in the provided list that is reachable from the pre-condition after
+    some non-trivial steps in the pre heap, i.e. the value is gotten from at least one dereference
+    from the parameters of the current procedure. Used to detect likely-harmless recursive calls
+    since heap progress has been made. *)
+
 val get_unreachable_attributes : t -> AbstractValue.t list
 (** collect the addresses that have attributes but are unreachable in the current post-condition *)
 
@@ -321,7 +368,7 @@ val finalize_all_hack_builders : t -> t
 
 val mark_potential_leaks : Location.t -> dead_roots:Var.t list -> t -> t
 
-val add_recursive_call : Location.t -> Procname.t -> t -> t
+val add_recursive_call : Location.t -> Procname.t -> AbstractValue.t list -> t -> t
 
 val add_recursive_calls : PulseMutualRecursion.Set.t -> t -> t
 
@@ -398,13 +445,12 @@ module Summary : sig
   val add_need_dynamic_type_specialization : AbstractValue.t -> summary -> summary
 
   val of_post :
-       Procname.t
-    -> ProcAttributes.t
+       ProcAttributes.t
     -> Location.t
     -> t
     -> ( summary
        , [> `JavaResourceLeak of summary * t * JavaClassName.t * Trace.t * Location.t
-         | `HackUnawaitedAwaitable of summary * t * Trace.t * Location.t
+         | `UnawaitedAwaitable of summary * t * Trace.t * Location.t
          | `HackUnfinishedBuilder of summary * t * Trace.t * Location.t * HackClassName.t
          | `CSharpResourceLeak of summary * t * CSharpClassName.t * Trace.t * Location.t
          | `MemoryLeak of summary * t * Attribute.allocator * Trace.t * Location.t
@@ -452,6 +498,8 @@ module Summary : sig
       0) or there is sharing in the heap. Both represent implicit assumptions that the program must
       have made. *)
 
+  val unsafe_from_join : t -> summary
+
   type t = summary [@@deriving compare, equal, yojson_of]
 
   val get_transitive_info : t -> TransitiveInfo.t
@@ -481,5 +529,5 @@ end
 module CanonValue : sig
   include PulseCanonValue.S with type astate = t
 
-  val downcast : t -> AbstractValue.t [@@inline always]
+  val downcast : t -> AbstractValue.t
 end

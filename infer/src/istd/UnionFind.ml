@@ -16,15 +16,15 @@ end
 
 module Make
     (X : Element)
-    (XSet : Caml.Set.S with type elt = X.t)
-    (XMap : Caml.Map.S with type key = X.t) =
+    (XSet : Stdlib.Set.S with type elt = X.t)
+    (XMap : Stdlib.Map.S with type key = X.t) =
 struct
   module XSet = Iter.Set.Adapt (XSet)
 
   (** the union-find backing data structure: maps elements to their representatives *)
   module UF : sig
     (** to get a little bit of type safety *)
-    type repr = private X.t
+    type repr = private X.t [@@deriving compare, equal]
 
     type t [@@deriving compare, equal]
 
@@ -41,9 +41,9 @@ struct
         [uf], assuming the [repr] is correct and the class does not intersect with any existing
         elements of [uf] *)
 
-    module Map : Caml.Map.S with type key = repr
+    module Map : Stdlib.Map.S with type key = repr
   end = struct
-    type repr = X.t
+    type repr = X.t [@@deriving compare, equal]
 
     type t = X.t XMap.t [@@deriving compare, equal]
 
@@ -74,7 +74,7 @@ struct
     module Map = XMap
   end
 
-  type repr = UF.repr
+  type repr = UF.repr [@@deriving compare, equal]
 
   module Classes = struct
     let find classes (x : UF.repr) = UF.Map.find_opt x classes |> Option.value ~default:XSet.empty
@@ -195,17 +195,42 @@ struct
 
 
   let filter ~f uf =
+    let is_singleton clazz =
+      match XSet.min_elt_opt clazz with
+      | None ->
+          false
+      | Some min ->
+          X.equal (XSet.max_elt clazz) min
+    in
     let classes =
-      UF.Map.filter_map
-        (fun repr clazz ->
+      UF.Map.fold
+        (fun repr clazz classes ->
           let clazz = XSet.filter f clazz in
-          if XSet.is_empty clazz && not (f (repr :> X.t)) then None else Some clazz )
-        uf.classes
+          if XSet.is_empty clazz then
+            (* empty or singleton equivalence class, no need to keep it *)
+            classes
+          else if f (repr :> X.t) then
+            (* keep the old representative *)
+            UF.Map.add repr clazz classes
+          else if is_singleton clazz then
+            (* singleton equivalence class, no need to keep it *)
+            classes
+          else
+            (* the class is not empty so it has a min element that can serve as the new
+               representative *)
+            let new_repr = XSet.min_elt clazz in
+            let clazz = XSet.remove new_repr clazz in
+            UF.Map.add ((* HACK: unsafe cast to [repr] *) UF.find UF.empty new_repr) clazz classes
+          )
+        uf.classes UF.Map.empty
     in
     (* rebuild [reprs] directly from [classes]: does path compression and garbage collection on the
        old [reprs] *)
-    of_classes classes
+    let reprs = UF.Map.fold UF.add_disjoint_class classes UF.empty in
+    {reprs; classes}
 
+
+  let remove x uf = filter uf ~f:(fun y -> not (X.equal x y))
 
   let fold_elements uf ~init ~f =
     fold_congruences uf ~init ~f:(fun acc (repr, xs) ->

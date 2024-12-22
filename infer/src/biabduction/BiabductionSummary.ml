@@ -150,16 +150,16 @@ end
 (***** End of module Jprop *****)
 
 module Visitedset = struct
-  include Caml.Set.Make (struct
+  include Stdlib.Set.Make (struct
     type t = Procdesc.Node.id * int list
 
     let compare (node_id1, _) (node_id2, _) = Procdesc.Node.compare_id node_id1 node_id2
   end)
 
   let pp fmt visitedset =
-    let collect_lines (_, ns) acc = List.fold ns ~f:Int.Set.add ~init:acc in
-    let lines = fold collect_lines visitedset Int.Set.empty in
-    Pp.seq F.pp_print_int fmt (Int.Set.elements lines)
+    let collect_lines (_, ns) acc = List.fold ns ~f:(fun acc i -> IInt.Set.add i acc) ~init:acc in
+    let lines = fold collect_lines visitedset IInt.Set.empty in
+    Pp.seq F.pp_print_int fmt (IInt.Set.elements lines)
 end
 
 (** A spec consists of:

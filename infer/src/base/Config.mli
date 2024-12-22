@@ -281,9 +281,9 @@ val command : InferCommand.t
 
 val compaction_if_heap_greater_equal_to_GB : int
 
-val compaction_minimum_interval_s : int
-
 val complete_capture_from : string option
+
+val compute_captured_context : bool
 
 val config_impact_config_field_patterns : Str.regexp list
 
@@ -413,7 +413,12 @@ val global_tenv : bool
 
 val hackc_binary : string option
 
-val hack_builder_patterns : (string * string list) list
+type pulse_hack_builder_pattern =
+  {class_name: string; finalizers: string list; immediately_non_discardable_class: string option}
+
+type pulse_hack_builder_patterns = pulse_hack_builder_pattern list
+
+val hack_builder_patterns : pulse_hack_builder_patterns
 
 val hack_builtin_models : string
 
@@ -552,6 +557,8 @@ val merge_summaries : string list
 
 val modeled_expensive : string * Yojson.Safe.t
 
+val multicore : bool [@@warning "-unused-value-declaration"]
+
 val never_returning_null : string * Yojson.Safe.t
 
 val noescaping_function_list : string list
@@ -672,6 +679,8 @@ val pulse_model_transfer_ownership : string list
 
 val pulse_model_transfer_ownership_namespace : (string * string) list
 
+val pulse_model_unknown_pure : Str.regexp option
+
 val pulse_model_unreachable : string list
 
 val pulse_models_for_erlang : string list
@@ -683,6 +692,8 @@ val pulse_monitor_transitive_missed_captures : bool
 val pulse_nullsafe_report_npe : bool
 
 val pulse_nullsafe_report_npe_as_separate_issue_type : bool
+
+val pulse_over_approximate_reasoning : bool
 
 val pulse_prevent_non_disj_top : bool
 
@@ -750,7 +761,7 @@ val racerd_always_report_java : bool
 
 val racerd_guardedby : bool
 
-val racerd_ignore_classes : String.Set.t
+val racerd_ignore_classes : IString.Set.t
 
 val reactive_mode : bool
 
@@ -803,12 +814,6 @@ val sarif : bool
 val scheduler : scheduler
 
 val scope_leakage_config : Yojson.Safe.t
-
-val scuba_logging : bool
-
-val scuba_normals : string String.Map.t
-
-val scuba_tags : string list String.Map.t
 
 val select : [`All | `Select of int] option
 
@@ -946,9 +951,6 @@ val toplevel_results_dir : string
 
 val java_package_is_external : string -> bool
 (** Check if a Java package is external to the repository *)
-
-val scuba_execution_id : Int64.t option
-(** a random number to (hopefully) uniquely identify this run *)
 
 val is_originator : bool
 (** is the current process (forked from) the root of the Infer process tree *)

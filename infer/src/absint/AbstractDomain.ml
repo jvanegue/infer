@@ -129,9 +129,21 @@ module BottomLiftedUtils = struct
         if phys_equal a' a then astate else NonBottom a'
 
 
+  let join domain_join astate1 astate2 =
+    if phys_equal astate1 astate2 then astate1
+    else
+      match (astate1, astate2) with
+      | Bottom, _ ->
+          astate2
+      | _, Bottom ->
+          astate1
+      | NonBottom a1, NonBottom a2 ->
+          PhysEqual.optim2 ~res:(NonBottom (domain_join a1 a2)) astate1 astate2
+
+
   let pp_bottom f = F.pp_print_string f SpecialChars.up_tack
 
-  let pp ~pp f = function Bottom -> pp_bottom f | NonBottom astate -> pp f astate
+  let pp pp f = function Bottom -> pp_bottom f | NonBottom astate -> pp f astate
 end
 
 module BottomLifted (Domain : S) = struct
@@ -143,17 +155,7 @@ module BottomLifted (Domain : S) = struct
 
   let leq = BottomLiftedUtils.leq ~leq:Domain.leq
 
-  let join astate1 astate2 =
-    if phys_equal astate1 astate2 then astate1
-    else
-      match (astate1, astate2) with
-      | Bottom, _ ->
-          astate2
-      | _, Bottom ->
-          astate1
-      | NonBottom a1, NonBottom a2 ->
-          PhysEqual.optim2 ~res:(NonBottom (Domain.join a1 a2)) astate1 astate2
-
+  let join = BottomLiftedUtils.join Domain.join
 
   let widen ~prev:prev0 ~next:next0 ~num_iters =
     if phys_equal prev0 next0 then prev0
@@ -169,7 +171,7 @@ module BottomLifted (Domain : S) = struct
 
   let map = BottomLiftedUtils.map
 
-  let pp = BottomLiftedUtils.pp ~pp:Domain.pp
+  let pp = BottomLiftedUtils.pp Domain.pp
 end
 
 module TopLiftedUtils = struct
@@ -608,7 +610,7 @@ module MapOfPPMap (M : PrettyPrintable.PPMap) (ValueDomain : S) = struct
     else
       M.for_all
         (fun k lhs_v ->
-          try ValueDomain.leq ~lhs:lhs_v ~rhs:(M.find k rhs) with Caml.Not_found -> false )
+          try ValueDomain.leq ~lhs:lhs_v ~rhs:(M.find k rhs) with Stdlib.Not_found -> false )
         lhs
 
 
@@ -670,7 +672,7 @@ module InvertedMap (Key : PrettyPrintable.PrintableOrderedType) (ValueDomain : S
     if phys_equal lhs rhs then true
     else
       try for_all (fun k rhs_v -> ValueDomain.leq ~lhs:(find k lhs) ~rhs:rhs_v) rhs
-      with Caml.Not_found -> false
+      with Stdlib.Not_found -> false
 
 
   let inter ~f astate1 astate2 =

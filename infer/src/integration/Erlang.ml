@@ -34,7 +34,7 @@ let parse_translate_store ?(base_dir = None) result_dir =
   let otp_modules =
     match Utils.read_file otp_modules_file with
     | Ok modules ->
-        String.Set.of_list modules
+        IString.Set.of_list modules
     | Error err ->
         L.die InternalError "Error while loading list of OTP modules from file %s: %s@."
           otp_modules_file err
@@ -175,7 +175,7 @@ let process_beams ~project_root beam_list_path =
 
 
 let parse_buck_arguments args =
-  let is_option s = Caml.String.starts_with ~prefix:"--" s in
+  let is_option s = Stdlib.String.starts_with ~prefix:"--" s in
   let global_options, args = List.split_while args ~f:is_option in
   let args =
     match args with
@@ -209,9 +209,11 @@ let simplify_targets targets =
   let targets = Set.elements (String.Set.of_list targets) in
   let ellipsis_suffix = "/..." in
   let ellipsis_patterns, targets =
-    List.partition_tf ~f:(Caml.String.ends_with ~suffix:ellipsis_suffix) targets
+    List.partition_tf ~f:(Stdlib.String.ends_with ~suffix:ellipsis_suffix) targets
   in
-  let colon_patterns, targets = List.partition_tf ~f:(Caml.String.ends_with ~suffix:":") targets in
+  let colon_patterns, targets =
+    List.partition_tf ~f:(Stdlib.String.ends_with ~suffix:":") targets
+  in
   let make_regex len patterns =
     match patterns with
     | [] ->

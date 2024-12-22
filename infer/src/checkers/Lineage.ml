@@ -70,10 +70,11 @@ module Local = struct
       | ConstantString of string
       | Cell of (Cell.t[@sexp.opaque])
     [@@deriving compare, equal, sexp, hash]
+
+    let pp _ _ = assert false
   end
 
   include T
-  include Comparable.Make (T)
 
   let pp fmt local =
     match local with
@@ -88,10 +89,10 @@ module Local = struct
 
 
   module Set = struct
-    include Set
+    include PrettyPrintable.MakeHashSexpPPSet (T)
 
     (** Shortcut for adding a Cell-variant local *)
-    let add_cell set cell = add set (Cell cell)
+    let add_cell set cell = add (Cell cell) set
   end
 end
 
@@ -433,13 +434,13 @@ end = struct
     module FieldPathSet = struct
       (* Sets of field paths, that shall be associated to an argument index *)
 
-      module M = Set.Make_tree (FieldPath)
+      module M = PrettyPrintable.MakeHashSexpPPSet (FieldPath)
       include M
 
       let pp ~arg_index =
         (* Prints: $argN#foo#bar $argN#other#field *)
         let pp_field_path = Fmt.using (fun path -> arg_index & path) F.arg_path in
-        IFmt.Labelled.iter ~sep:Fmt.sp M.iter pp_field_path
+        IFmt.Labelled.iter ~sep:Fmt.sp (fun a ~f -> M.iter f a) pp_field_path
     end
 
     (* Marshallable maps from integer indices. Note: using an array instead of Map could improve the
@@ -469,15 +470,15 @@ end = struct
         | None ->
             FieldPathSet.singleton arg_field_path
         | Some field_path_set ->
-            FieldPathSet.add field_path_set arg_field_path )
+            FieldPathSet.add arg_field_path field_path_set )
 
 
     let fold t ~f ~init =
       IntMap.fold
         ~f:(fun ~key:arg_index ~data:field_path_set acc ->
           FieldPathSet.fold
-            ~f:(fun acc arg_field_path -> f ~arg_index ~arg_field_path acc)
-            ~init:acc field_path_set )
+            (fun arg_field_path acc -> f ~arg_index ~arg_field_path acc)
+            field_path_set acc )
         ~init t
   end
 
@@ -938,23 +939,23 @@ module Out = struct
     [@@deriving compare, equal, hash, sexp]
   end
 
-  let channel_ref = ref None
+  let channel_key = DLS.new_key (fun () -> None)
 
   let get_pid_channel () =
     (* We keep the old simple-lineage output dir for historical reasons and should change it to
        lineage once no external infra code depends on it anymore *)
     let output_dir = Filename.concat Config.results_dir "simple-lineage" in
     Unix.mkdir_p output_dir ;
-    match !channel_ref with
+    match DLS.get channel_key with
     | None ->
         let filename = Format.asprintf "lineage-%a.json" Pid.pp (Unix.getpid ()) in
         let channel = Filename.concat output_dir filename |> Out_channel.create in
         let close_channel () =
-          Option.iter !channel_ref ~f:Out_channel.close_no_err ;
-          channel_ref := None
+          DLS.get channel_key |> Option.iter ~f:Out_channel.close_no_err ;
+          DLS.set channel_key None
         in
         Epilogues.register ~f:close_channel ~description:"close output channel for lineage" ;
-        channel_ref := Some channel ;
+        DLS.set channel_key (Some channel) ;
         channel
     | Some channel ->
         channel
@@ -1010,7 +1011,7 @@ module Out = struct
       of_sequence
         (Sequence.map
            ~f:(fun c -> Z.of_int (int_of_char c))
-           (Sequence.of_seq (Caml.String.to_seq s)) )
+           (Sequence.of_seq (Stdlib.String.to_seq s)) )
 
 
     let of_procname procname : t = of_string (Procname.hashable_name procname)
@@ -1514,7 +1515,7 @@ end = struct
 
     let local_set local_set : unit t =
      fun shapes node f astate ->
-      Set.fold ~f:(fun acc one_local -> local one_local shapes node f acc) ~init:astate local_set
+      Local.Set.fold (fun one_local acc -> local one_local shapes node f acc) local_set astate
 
 
     let atom atom_name : unit t = local (ConstantAtom atom_name)

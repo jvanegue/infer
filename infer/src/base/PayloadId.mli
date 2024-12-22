@@ -16,6 +16,7 @@ type t =
   | ConfigImpactAnalysis
   | Cost
   | DisjunctiveDemo
+  | StaticConstructorStallChecker
   | LabResourceLeaks
   | LithoRequiredProps
   | Pulse

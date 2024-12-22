@@ -44,10 +44,10 @@ end = struct
         F.pp_print_string fmt "unsupported"
     | Supported {stack; pvar} ->
         Pvar.pp Pp.text fmt pvar ;
-        List.iter stack ~f:(fun access -> F.fprintf fmt " -> %a" Access.pp access)
+        List.rev stack |> List.iter ~f:(fun access -> F.fprintf fmt " -> %a" Access.pp access)
 
 
-  let from_pvar pvar = Supported {stack= []; pvar}
+  let from_pvar pvar = Supported {stack= [Access.Dereference]; pvar}
 
   let unsupported = Unsupported
 
@@ -63,15 +63,16 @@ end = struct
         None
     | Supported {stack; pvar} ->
         (* Note: Specialization.HeapPath.t are reversed *)
-        List.fold_left stack ~init:(Some (HeapPath.Pvar pvar)) ~f:(fun opt_path access ->
-            Option.bind opt_path ~f:(fun path ->
-                match access with
-                | Access.FieldAccess fieldname ->
-                    Some (HeapPath.FieldAccess (fieldname, path))
-                | Access.Dereference ->
-                    Some (HeapPath.Dereference path)
-                | _ ->
-                    None ) )
+        List.rev stack
+        |> List.fold_left ~init:(Some (HeapPath.Pvar pvar)) ~f:(fun opt_path access ->
+               Option.bind opt_path ~f:(fun path ->
+                   match access with
+                   | Access.FieldAccess fieldname ->
+                       Some (HeapPath.FieldAccess (fieldname, path))
+                   | Access.Dereference ->
+                       Some (HeapPath.Dereference path)
+                   | _ ->
+                       None ) )
 end
 
 type callee_index_to_visit =
@@ -938,7 +939,8 @@ let apply_post_from_callee_post path callee_proc_name call_location callee_summa
 
 
 let report_mutual_recursion_cycle
-    ({InterproceduralAnalysis.add_errlog; proc_desc; err_log} as analysis_data) cycle =
+    ({InterproceduralAnalysis.add_errlog; proc_desc; err_log} as analysis_data) cycle
+    ~is_call_with_same_values =
   let proc_name = Procdesc.get_proc_name proc_desc in
   PulseMutualRecursion.iter_rotations cycle ~f:(fun cycle ->
       let inner_call = PulseMutualRecursion.get_inner_call cycle in
@@ -959,28 +961,57 @@ let report_mutual_recursion_cycle
           L.d_printfln "reporting on procedure %a (foreign=%b) at %a" Procname.pp inner_call
             is_foreign_procedure Location.pp_file_pos location ;
           PulseReport.report report_analysis_data ~is_suppressed:false ~latent:false
-            (MutualRecursionCycle {cycle; location}) ;
+            (MutualRecursionCycle {cycle; location; is_call_with_same_values}) ;
           if is_foreign_procedure then add_errlog inner_call err_log )
 
 
 let record_recursive_calls ({InterproceduralAnalysis.proc_desc} as analysis_data) callee_proc_name
-    call_loc callee_summary call_state =
-  let callee_recursive_calls =
-    PulseMutualRecursion.Set.filter_map
-      (fun cycle ->
-        let cycle = PulseMutualRecursion.add_call callee_proc_name call_loc cycle in
-        if
-          Procname.equal
-            (PulseMutualRecursion.get_inner_call cycle)
-            (Procdesc.get_proc_name proc_desc)
-        then (
-          report_mutual_recursion_cycle analysis_data cycle ;
-          None )
-        else Some cycle )
-      (AbductiveDomain.Summary.get_recursive_calls callee_summary)
-  in
-  let astate = AbductiveDomain.add_recursive_calls callee_recursive_calls call_state.astate in
-  {call_state with astate}
+    call_loc actuals callee_summary call_state =
+  let actuals_values = List.map actuals ~f:(fun ((actual, _), _) -> actual) in
+  if Procname.is_hack_xinit (Procdesc.get_proc_name proc_desc) then (
+    L.d_printfln "Not recording recursive calls for Hack xinit caller function %a" Procname.pp
+      (Procdesc.get_proc_name proc_desc) ;
+    call_state )
+  else if Procname.is_hack_xinit callee_proc_name then (
+    (* shouldn't get there normally since we are careful never to record a recursive cycle for xinit
+       functions in the first place *)
+    L.d_printfln "Not recording recursive calls for Hack xinit callee function %a" Procname.pp
+      callee_proc_name ;
+    call_state )
+  else if AbductiveDomain.has_reachable_in_inner_pre_heap actuals_values call_state.astate then (
+    L.d_printfln
+      "Not recording recursive calls for function %a since heap progress has been made to compute \
+       actuals"
+      Procname.pp callee_proc_name ;
+    call_state )
+  else
+    let callee_recursive_calls =
+      PulseMutualRecursion.Set.filter_map
+        (fun cycle ->
+          match
+            PulseMutualRecursion.add_call
+              (raw_map_of_to_caller_subst call_state.subst)
+              callee_proc_name call_loc cycle
+          with
+          | None ->
+              None
+          | Some cycle ->
+              if
+                Procname.equal
+                  (PulseMutualRecursion.get_inner_call cycle)
+                  (Procdesc.get_proc_name proc_desc)
+              then (
+                let is_call_with_same_values =
+                  AbductiveDomain.are_same_values_as_pre_formals proc_desc actuals_values
+                    call_state.astate
+                in
+                report_mutual_recursion_cycle ~is_call_with_same_values analysis_data cycle ;
+                None )
+              else Some cycle )
+        (AbductiveDomain.Summary.get_recursive_calls callee_summary)
+    in
+    let astate = AbductiveDomain.add_recursive_calls callee_recursive_calls call_state.astate in
+    {call_state with astate}
 
 
 let record_skipped_calls callee_proc_name call_loc callee_summary call_state =
@@ -1090,7 +1121,7 @@ let read_return_value {PathContext.timestamp} callee_proc_name call_loc
         ) )
 
 
-let apply_post analysis_data path callee_proc_name call_location callee_summary call_state =
+let apply_post analysis_data path callee_proc_name call_location actuals callee_summary call_state =
   PerfEvent.(log (fun logger -> log_begin_event logger ~name:"pulse call post" ())) ;
   let r =
     call_state
@@ -1099,7 +1130,7 @@ let apply_post analysis_data path callee_proc_name call_location callee_summary 
     >>= apply_post_from_callee_post path callee_proc_name call_location callee_summary
     >>| add_attributes `Post path callee_proc_name call_location
           (AbductiveDomain.Summary.get_post callee_summary).attrs
-    >>| record_recursive_calls analysis_data callee_proc_name call_location callee_summary
+    >>| record_recursive_calls analysis_data callee_proc_name call_location actuals callee_summary
     >>| record_skipped_calls callee_proc_name call_location callee_summary
     >>| record_transitive_info analysis_data callee_proc_name call_location callee_summary
     >>| read_return_value path callee_proc_name call_location callee_summary
@@ -1265,26 +1296,28 @@ let apply_summary analysis_data path ~callee_proc_name call_location ~callee_sum
           let pre = AbductiveDomain.Summary.get_pre callee_summary in
           let* astate =
             check_all_valid path callee_proc_name call_location ~pre call_state
-            |> AccessResult.of_result
+            |> AccessResult.of_result path
           in
-          (* if at that stage [call_state.first_error] is set but we haven't error'd then there is
-             a problem; give up because something is wrong *)
+          (* if at that stage [call_state.first_error] is set but we haven't error'd then there is a
+             problem; give up because something is wrong, except in over-approximation mode where we
+             don't want to lose our precious single state because of this *)
           ( match call_state.first_error with
-          | None ->
-              ()
-          | Some v ->
+          | Some v when not path.PathContext.is_non_disj ->
               L.d_printfln
                 "huho, we found an error on accessing invalid address %a when applying the \
                  precondition but did not actually report an error. Abort!"
                 AbstractValue.pp v ;
               (* HACK: abuse [PathCondition], sorry *)
-              raise (Contradiction PathCondition) ) ;
+              raise (Contradiction PathCondition)
+          | _ ->
+              () ) ;
           let* astate = check_config_usage_at_call call_location ~pre call_state.subst astate in
           (* reset [visited] *)
           let call_state = {call_state with astate; visited= AddressSet.empty} in
           (* apply the postcondition *)
           let* call_state, return_caller =
-            apply_post analysis_data path callee_proc_name call_location callee_summary call_state
+            apply_post analysis_data path callee_proc_name call_location actuals callee_summary
+              call_state
           in
           let astate =
             if Topl.is_active () then

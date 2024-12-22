@@ -23,13 +23,13 @@ module type PrintableEquatableType = sig
 end
 
 module type PrintableOrderedType = sig
-  include Caml.Set.OrderedType
+  include Stdlib.Set.OrderedType
 
   include PrintableType with type t := t
 end
 
 module type HashableSexpablePrintableOrderedType = sig
-  include Caml.Set.OrderedType
+  include Stdlib.Set.OrderedType
 
   include PrintableType with type t := t
 
@@ -39,13 +39,13 @@ module type HashableSexpablePrintableOrderedType = sig
 end
 
 module type PrintableEquatableOrderedType = sig
-  include Caml.Set.OrderedType
+  include Stdlib.Set.OrderedType
 
   include PrintableEquatableType with type t := t
 end
 
 module type PPSet = sig
-  include Caml.Set.S
+  include Stdlib.Set.S
 
   val is_singleton_or_more : t -> elt IContainer.singleton_or_more
 
@@ -153,7 +153,7 @@ module type MonoMap = sig
 end
 
 module type PPMap = sig
-  include Caml.Map.S
+  include Stdlib.Map.S
 
   val fold_map : 'a t -> init:'b -> f:('b -> 'a -> 'b * 'c) -> 'b * 'c t
 
@@ -187,7 +187,7 @@ let pp_collection_common ?hov ~pp_item fmt c =
 let pp_collection ~pp_item fmt c = pp_collection_common ~pp_item fmt c
 
 module MakePPSet (Ord : PrintableOrderedType) = struct
-  include Caml.Set.Make (Ord)
+  include Stdlib.Set.Make (Ord)
 
   let is_singleton_or_more s =
     if is_empty s then IContainer.Empty
@@ -223,7 +223,7 @@ module MakeHashSexpPPSet (Ord : HashableSexpablePrintableOrderedType) = struct
 end
 
 module MakePPMap (Ord : PrintableOrderedType) = struct
-  include Caml.Map.Make (Ord)
+  include Stdlib.Map.Make (Ord)
 
   let fold_mapi m ~init ~f =
     let acc = ref init in
@@ -377,6 +377,8 @@ module type PPUniqRankSet = sig
 
   val union_prefer_left : t -> t -> t
 
+  val merge : t -> t -> f:(elt option -> elt option -> elt option) -> t
+
   val filter : t -> f:(elt -> bool) -> t
 
   val filter_map : t -> f:(elt -> elt option) -> t
@@ -464,6 +466,8 @@ module MakePPUniqRankSet
 
   let union_prefer_left m1 m2 = Map.union (fun _rank value1 _value2 -> Some value1) m1 m2
 
+  let merge m1 m2 ~f = Map.merge (fun _rank value1 value2 -> f value1 value2) m1 m2
+
   let filter map ~f = Map.filter (fun _ v -> f v) map
 
   let filter_map map ~f =
@@ -476,4 +480,44 @@ module MakePPUniqRankSet
             assert (Rank.equal rank (Val.to_rank value')) ;
             Some value' )
       map
+end
+
+module type ConcurrentMap = sig
+  type key
+
+  type 'a t
+
+  val empty : unit -> 'a t
+
+  val clear : 'a t -> unit
+
+  val add : 'a t -> key -> 'a -> unit
+
+  val filter : 'a t -> (key -> 'a -> bool) -> unit
+
+  val find_opt : 'a t -> key -> 'a option
+
+  val remove : 'a t -> key -> unit
+end
+
+module MakeConcurrentMap (Map : Stdlib.Map.S) : ConcurrentMap with type key = Map.key = struct
+  type key = Map.key
+
+  type 'a t = Error_checking_mutex.t * 'a Map.t Atomic.t
+
+  let empty () = (Error_checking_mutex.create (), Atomic.make Map.empty)
+
+  let update_in_mutex (mutex, a) ~f =
+    Error_checking_mutex.critical_section mutex ~f:(fun () -> Atomic.get a |> f |> Atomic.set a)
+
+
+  let clear (t : 'a t) = update_in_mutex t ~f:(fun _ -> Map.empty)
+
+  let filter (t : 'a t) f = update_in_mutex t ~f:(Map.filter f)
+
+  let add t k v = update_in_mutex t ~f:(Map.add k v)
+
+  let find_opt (_, atomic_map) key = Atomic.get atomic_map |> Map.find_opt key
+
+  let remove t key = update_in_mutex t ~f:(Map.remove key)
 end

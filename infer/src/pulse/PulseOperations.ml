@@ -28,7 +28,7 @@ let check_addr_access path ?must_be_valid_reason access_mode location (address, 
                    ; access_trace
                    ; must_be_valid_reason }
              ; astate } )
-    |> AccessResult.of_result
+    |> AccessResult.of_result path
   in
   match access_mode with
   | Read ->
@@ -38,7 +38,7 @@ let check_addr_access path ?must_be_valid_reason access_mode location (address, 
                { diagnostic=
                    Diagnostic.ReadUninitialized {typ; calling_context= []; trace= access_trace}
                ; astate } )
-      |> AccessResult.of_result_f ~f:(fun _ ->
+      |> AccessResult.of_result_f path ~f:(fun _ ->
              (* do not report further uninitialized reads errors on this value *)
              AddressAttributes.initialize address astate )
   | Write ->
@@ -118,7 +118,7 @@ end
 
 let conservatively_initialize_args arg_values astate =
   let reachable_values =
-    AbductiveDomain.reachable_addresses_from (Caml.List.to_seq arg_values) astate `Post
+    AbductiveDomain.reachable_addresses_from (Stdlib.List.to_seq arg_values) astate `Post
   in
   AbstractValue.Set.fold AddressAttributes.initialize reachable_values astate
 
@@ -340,58 +340,94 @@ let eval_to_operand path location exp astate =
       (astate, `ValueOrigin value_origin)
 
 
-let prune path location ~condition astate =
+let is_pvar vo astate ~f =
+  match Decompiler.find (ValueOrigin.value vo) astate with
+  | SourceExpr ((PVar pvar, [Dereference]), _) ->
+      f pvar
+  | _ ->
+      false
+
+
+let is_this vo astate = is_pvar vo astate ~f:Pvar.is_this
+
+let is_non_this_param pdesc vo astate =
+  is_pvar vo astate ~f:(fun pvar ->
+      (not (Pvar.is_this pvar))
+      && List.exists (Procdesc.get_pvar_formals pdesc) ~f:(fun (formal, _) ->
+             Pvar.equal formal pvar ) )
+
+
+let is_constructor pdesc = Procname.is_constructor (Procdesc.get_proc_name pdesc)
+
+let is_infeasible pdesc ~negated bop lhs_op rhs_op astate =
+  match ((negated, (bop : Binop.t)), lhs_op, rhs_op) with
+  | (false, Eq | true, Ne), `ValueOrigin lhs, `ValueOrigin rhs ->
+      (* [this == param] is alwasy false inside a constructor. *)
+      ( (is_this lhs astate && is_non_this_param pdesc rhs astate)
+      || (is_non_this_param pdesc lhs astate && is_this rhs astate) )
+      && is_constructor pdesc
+  | _, _, _ ->
+      false
+
+
+let prune pdesc path location ~condition astate =
   let rec prune_aux ~negated exp astate =
     match (exp : Exp.t) with
     | BinOp (bop, exp_lhs, exp_rhs) ->
         (* TODO: eval to value origin and place an Invalidation event in the corresponding value history *)
         let** astate, lhs_op = eval_to_operand path location exp_lhs astate in
         let** astate, rhs_op = eval_to_operand path location exp_rhs astate in
-        let is_bop_equal = match (bop, negated) with Eq, false | Ne, true -> true | _ -> false in
-        L.d_printfln "is_bop_equal: %b" is_bop_equal ;
-        let astate =
-          match (lhs_op, rhs_op) with
-          | `ValueOrigin p, `Constant (Const.Cint null)
-          | `Constant (Const.Cint null), `ValueOrigin p
-            when is_bop_equal && IntLit.isnull null ->
-              L.d_printfln "comparison to null detected, recording attribute on %a" AbstractValue.pp
-                (ValueOrigin.value p) ;
-              let compared_to_null = Invalidation.ComparedToNullInThisProcedure location in
-              AbductiveDomain.add_event_to_value_origin path location
-                (Invalidated (compared_to_null, location, path.PathContext.timestamp))
-                p astate
-              |> AbductiveDomain.AddressAttributes.invalidate (ValueOrigin.addr_hist p)
-                   compared_to_null location
-          | _ ->
-              L.d_printfln "not a comparison to null: %a %a %a (negated: %b, is_bop_equal: %b)"
-                Exp.pp exp_lhs Binop.pp bop Exp.pp exp_rhs negated is_bop_equal ;
-              astate
-        in
-        let to_op : _ -> PulseArithmetic.operand = function
-          | `Constant c ->
-              ConstOperand c
-          | `ValueOrigin vo ->
-              AbstractValueOperand (ValueOrigin.value vo)
-        in
-        let to_hist = function
-          | `Constant _ ->
-              ValueHistory.epoch
-          | `ValueOrigin vo ->
-              ValueOrigin.hist vo
-        in
-        let++ astate =
-          PulseArithmetic.prune_binop ~negated bop ~ifkind:true (to_op lhs_op) (to_op rhs_op) astate
-        in
-        let hist =
-          match (to_hist lhs_op, to_hist rhs_op) with
-          | ValueHistory.Epoch, hist | hist, ValueHistory.Epoch ->
-              (* if one history is empty then just propagate the other one (which could also be
-                 empty) *)
-              hist
-          | lhs_hist, rhs_hist ->
-              ValueHistory.binary_op bop lhs_hist rhs_hist
-        in
-        (astate, hist)
+
+        if is_infeasible pdesc ~negated bop lhs_op rhs_op astate then Unsat
+        else
+          let is_bop_equal =
+            match (bop, negated) with Eq, false | Ne, true -> true | _ -> false
+          in
+          L.d_printfln "is_bop_equal: %b" is_bop_equal ;
+          let astate =
+            match (lhs_op, rhs_op) with
+            | `ValueOrigin p, `Constant (Const.Cint null)
+            | `Constant (Const.Cint null), `ValueOrigin p
+              when is_bop_equal && IntLit.isnull null ->
+                L.d_printfln "comparison to null detected, recording attribute on %a"
+                  AbstractValue.pp (ValueOrigin.value p) ;
+                let compared_to_null = Invalidation.ComparedToNullInThisProcedure location in
+                AbductiveDomain.add_event_to_value_origin path location
+                  (Invalidated (compared_to_null, location, path.PathContext.timestamp))
+                  p astate
+                |> AbductiveDomain.AddressAttributes.invalidate (ValueOrigin.addr_hist p)
+                     compared_to_null location
+            | _ ->
+                L.d_printfln "not a comparison to null: %a %a %a (negated: %b, is_bop_equal: %b)"
+                  Exp.pp exp_lhs Binop.pp bop Exp.pp exp_rhs negated is_bop_equal ;
+                astate
+          in
+          let to_op : _ -> PulseArithmetic.operand = function
+            | `Constant c ->
+                ConstOperand c
+            | `ValueOrigin vo ->
+                AbstractValueOperand (ValueOrigin.value vo)
+          in
+          let to_hist = function
+            | `Constant _ ->
+                ValueHistory.epoch
+            | `ValueOrigin vo ->
+                ValueOrigin.hist vo
+          in
+          let++ astate =
+            PulseArithmetic.prune_binop ~negated bop ~ifkind:true (to_op lhs_op) (to_op rhs_op) astate
+          in
+          let hist =
+            match (to_hist lhs_op, to_hist rhs_op) with
+            | ValueHistory.Epoch, hist | hist, ValueHistory.Epoch ->
+                (* if one history is empty then just propagate the other one (which could also be
+                   empty) *)
+                hist
+            | lhs_hist, rhs_hist ->
+                ValueHistory.binary_op bop lhs_hist rhs_hist
+          in
+          (astate, hist)
+
     | UnOp (LNot, exp', _) ->
         prune_aux ~negated:(not negated) exp' astate
     | exp ->
@@ -472,7 +508,7 @@ let add_static_type_objc_class tenv typ address location astate =
 
 let havoc_id id hist astate =
   (* Topl needs to track the return value of a method; even if nondet now, it may be pruned later. *)
-  if Topl.is_active () || Stack.mem (Var.of_id id) astate then
+  if Topl.is_active () || Stack.mem `Post (Var.of_id id) astate then
     write_id id (AbstractValue.mk_fresh (), hist) astate
   else astate
 
@@ -498,9 +534,9 @@ let havoc_deref_field path location addr_trace field trace_obj astate =
     astate
 
 
-let hack_python_propagates_type_on_load tenv path loc rhs_exp addr astate =
-  ( if Language.curr_language_is Hack || Language.curr_language_is Python then
-      (* The Hack and Python frontends do not propagate types from declarations to usage,
+let hack_propagates_type_on_load tenv path loc rhs_exp addr astate =
+  ( if Language.curr_language_is Hack then
+      (* The Hack frontend do not propagate types from declarations to usage,
          so we redo part of the work ourself *)
       let open IOption.Let_syntax in
       match rhs_exp with
@@ -707,14 +743,14 @@ let rec deep_copy ?depth_max ({PathContext.timestamp} as path) location addr_his
       in
       let astate = PulseArithmetic.copy_type_constraints (fst addr_hist_src) (fst copy) astate in
       let astate =
-        AddressAttributes.find_opt (fst addr_hist_src) astate
+        AddressAttributes.find_opt `Post (fst addr_hist_src) astate
         |> Option.value_map ~default:astate ~f:(fun src_attrs ->
                AddressAttributes.add_all (fst copy) src_attrs astate )
       in
       (astate, copy)
 
 
-let check_address_escape escape_location proc_desc address history astate =
+let check_address_escape escape_location proc_desc path address history astate =
   let is_assigned_to_global address astate =
     let points_to_address pointer address astate =
       Memory.find_edge_opt pointer Dereference astate
@@ -725,7 +761,7 @@ let check_address_escape escape_location proc_desc address history astate =
       astate
   in
   let check_address_of_cpp_temporary () =
-    AddressAttributes.find_opt address astate
+    AddressAttributes.find_opt `Post address astate
     |> Option.value_map ~default:(Result.Ok ()) ~f:(fun attrs ->
            IContainer.iter_result ~fold:Attributes.fold attrs ~f:(fun attr ->
                match attr with
@@ -767,7 +803,7 @@ let check_address_escape escape_location proc_desc address history astate =
   let+ () =
     let open Result.Monad_infix in
     check_address_of_cpp_temporary () >>= check_address_of_stack_variable
-    |> AccessResult.of_result_f ~f:(fun _ -> ())
+    |> AccessResult.of_result_f path ~f:(fun _ -> ())
   in
   astate
 
@@ -875,19 +911,19 @@ let get_closure_captured_actuals path location ~captured_actuals astate =
   (astate, List.rev captured_actuals)
 
 
-type call_kind = [`Closure of (Exp.t * CapturedVar.t) list | `Var of Ident.t | `ResolvedProcname]
+type call_kind = ClosureCall of (Exp.t * CapturedVar.t) list | VarCall of Ident.t | ResolvedCall
 
-let get_captured_actuals procname path location ~captured_formals ~call_kind ~actuals astate =
+let get_captured_actuals procname path location call_kind ~captured_formals ~actuals astate =
   let is_lambda_or_block = Procname.is_cpp_lambda procname || Procname.is_objc_block procname in
   if Procname.is_objc_block procname || Procname.is_erlang procname then
     match call_kind with
-    | `Closure captured_actuals ->
+    | ClosureCall captured_actuals ->
         get_closure_captured_actuals path location ~captured_actuals astate
-    | `Var id ->
+    | VarCall id ->
         let+* astate, actual_closure = eval path Read location (Exp.Var id) astate in
         get_var_captured_actuals path location ~is_lambda_or_block ~captured_formals ~actual_closure
           astate
-    | `ResolvedProcname -> (
+    | ResolvedCall -> (
       match actuals with
       | (actual_closure, _) :: _ ->
           Sat

@@ -61,6 +61,9 @@ module type DisjReady = sig
     -> Sil.instr
     -> DisjDomain.t list * NonDisjDomain.t
 
+  val exec_instr_non_disj :
+    NonDisjDomain.t -> analysis_data -> CFG.Node.t -> Sil.instr -> NonDisjDomain.t
+
   val remember_dropped_disjuncts : DisjDomain.t list -> NonDisjDomain.t -> NonDisjDomain.t
 
   val pp_session_name : CFG.Node.t -> Format.formatter -> unit
@@ -68,5 +71,7 @@ module type DisjReady = sig
   val back_edge:  DisjDomain.t list -> DisjDomain.t list -> int -> DisjDomain.t list * int
 
   val pp_disjunct : Pp.print_kind -> Format.formatter -> DisjDomain.t -> unit
+
+  val pp_non_disj : Pp.print_kind -> Format.formatter -> NonDisjDomain.t -> unit
 
 end

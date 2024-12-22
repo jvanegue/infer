@@ -30,6 +30,7 @@ type category =
   | RuntimeException
   | SensitiveDataFlow
   | UngatedCode
+  | UserDefinedProperty
 [@@deriving compare, equal, enumerate]
 
 val string_of_severity : severity -> string
@@ -183,6 +184,8 @@ val dead_store : t
 
 val deadlock : t
 
+val static_constructor_stall : t
+
 val divide_by_zero : t
 
 val do_not_report : t
@@ -211,6 +214,8 @@ val inferbo_alloc_may_be_big : t
 val inferbo_alloc_may_be_negative : t
 
 val infinite_cost_call : kind:CostKind.t -> t
+
+val infinite_recursion : t
 
 val inherently_dangerous_function : t
 
@@ -243,6 +248,8 @@ val leak_unknown_origin : t
 val lockless_violation : t
 
 val lock_consistency_violation : t
+
+val lock_on_ui_thread : t
 
 val expensive_loop_invariant_call : t
 

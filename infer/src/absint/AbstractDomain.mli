@@ -6,6 +6,7 @@
  *)
 
 open! IStd
+module F = Format
 
 (** {1 Abstract domains and domain combinators} *)
 
@@ -111,7 +112,11 @@ module BottomLifted (Domain : S) : sig
 end
 
 module BottomLiftedUtils : sig
-  val pp_bottom : Format.formatter -> unit
+  val join : ('t -> 't -> 't) -> 't bottom_lifted -> 't bottom_lifted -> 't bottom_lifted
+
+  val pp_bottom : F.formatter -> unit
+
+  val pp : (F.formatter -> 't -> unit) -> F.formatter -> 't bottom_lifted -> unit
 end
 
 (** Create a domain with Top element from a pre-domain *)
@@ -124,7 +129,7 @@ module TopLifted (Domain : S) : sig
 end
 
 module TopLiftedUtils : sig
-  val pp_top : Format.formatter -> unit
+  val pp_top : F.formatter -> unit
 end
 
 (** Create a domain with Bottom and Top elements from a pre-domain *)
@@ -181,10 +186,10 @@ module StackedUtils : sig
     -> int
 
   val pp :
-       pp_below:(Format.formatter -> 'b -> unit)
-    -> pp:(Format.formatter -> 'v -> unit)
-    -> pp_above:(Format.formatter -> 'a -> unit)
-    -> Format.formatter
+       pp_below:(F.formatter -> 'b -> unit)
+    -> pp:(F.formatter -> 'v -> unit)
+    -> pp_above:(F.formatter -> 'a -> unit)
+    -> F.formatter
     -> ('b, 'v, 'a) below_above
     -> unit
 
@@ -210,7 +215,7 @@ end
 module MinReprSet (Element : PrettyPrintable.PrintableOrderedType) : sig
   type elt = Element.t
 
-  include Caml.Set.OrderedType
+  include Stdlib.Set.OrderedType
 
   include WithBottom with type t := t
 

@@ -12,9 +12,6 @@ include Core
 (* easier to write Unix than Core_unix *)
 module Unix = Core_unix
 
-(* use Re.Str instead of Str *)
-module Str = Re.Str
-
 (* we don't care about the _unix distinction *)
 module Filename = struct
   include Filename
@@ -26,6 +23,9 @@ module Sys = struct
   include Sys
   include Sys_unix
 end
+
+(* easy access to sub-module *)
+module DLS = Domain.DLS
 
 (* Compare police: generic compare mostly disabled. *)
 let compare = No_polymorphic_compare.compare

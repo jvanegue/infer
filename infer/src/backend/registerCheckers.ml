@@ -91,6 +91,11 @@ let all_checkers =
   [ {checker= SelfInBlock; callbacks= [(intraprocedural SelfInBlock.checker, Clang)]}
   ; { checker= ParameterNotNullChecked
     ; callbacks= [(intraprocedural ParameterNotNullChecked.checker, Clang)] }
+  ; { checker= StaticConstructorStallChecker
+    ; callbacks=
+        [ ( interprocedural Payloads.Fields.static_constructor_stall_checker
+              StaticConstructorStallChecker.checker
+          , Clang ) ] }
   ; { checker= BufferOverrunAnalysis
     ; callbacks=
         (let bo_analysis =
@@ -202,7 +207,7 @@ let all_checkers =
         (let annot_reach =
            interprocedural Payloads.Fields.annot_map AnnotationReachability.checker
          in
-         [(annot_reach, Erlang); (annot_reach, Java)] ) }
+         [(annot_reach, Clang); (annot_reach, Erlang); (annot_reach, Java)] ) }
   ; { checker= ConfigImpactAnalysis
     ; callbacks=
         (let checker =
@@ -259,7 +264,7 @@ let register checkers =
   List.iter ~f:register_one checkers
 
 
-module LanguageSet = Caml.Set.Make (Language)
+module LanguageSet = Stdlib.Set.Make (Language)
 
 let pp_checker fmt {checker; callbacks} =
   let langs_of_callbacks =

@@ -233,6 +233,9 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
   let create_call_instr trans_state (return_type : Typ.t) function_sil params_sil sil_loc call_flags
       ~is_inherited_ctor =
     let ret_id_typ = (Ident.create_fresh Ident.knormal, return_type) in
+    let call_flags =
+      {call_flags with CallFlags.cf_is_objc_getter_setter= trans_state.is_objc_getter_setter_call}
+    in
     let ret_id', params, initd_exps, ret_exps, call_flags =
       (* Assumption: should_add_return_param will return true only for struct types *)
       if CType_decl.should_add_return_param return_type then
@@ -1003,7 +1006,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
           let exp = enum_const_eval context enum_constant_pointer prev_enum_constant_opt zero in
           CAst_utils.update_enum_map_exn enum_constant_pointer exp ;
           exp
-    with Not_found_s _ | Caml.Not_found -> zero
+    with Not_found_s _ | Stdlib.Not_found -> zero
 
 
   and enum_constant_trans trans_state decl_ref =
@@ -2100,7 +2103,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
     if not (CGeneral_utils.is_cpp_translation context.translation_unit_context) then None
     else
       match
-        CContext.StmtMap.find context.CContext.vars_to_destroy stmt_info.Clang_ast_t.si_pointer
+        CContext.StmtMap.find_opt stmt_info.Clang_ast_t.si_pointer context.CContext.vars_to_destroy
       with
       | None ->
           L.(debug Capture Verbose) "@\nNo variables going out of scope here.@\n" ;
@@ -3084,9 +3087,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
 
 
   and init_dynamic_array trans_state array_exp_typ array_stmt_info dynlength_stmt_pointer =
-    let dynlength_stmt =
-      Int.Table.find_exn ClangPointers.pointer_stmt_table dynlength_stmt_pointer
-    in
+    let dynlength_stmt = IInt.Hash.find ClangPointers.pointer_stmt_table dynlength_stmt_pointer in
     let dynlength_stmt_info, _ = Clang_ast_proj.get_stmt_tuple dynlength_stmt in
     let trans_state_pri = PriorityNode.try_claim_priority_node trans_state array_stmt_info in
     let dynlength_trans_result = instruction trans_state_pri dynlength_stmt in
@@ -3332,7 +3333,14 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
         assert false
 
 
-  and objCPropertyRefExpr_trans trans_state stmt_list =
+  and objCPropertyRefExpr_trans trans_state stmt_list
+      (property_ref_expr : Clang_ast_t.obj_c_property_ref_expr_info) =
+    let trans_state =
+      { trans_state with
+        is_objc_getter_setter_call=
+          property_ref_expr.oprei_is_messaging_getter || property_ref_expr.oprei_is_messaging_setter
+      }
+    in
     match stmt_list with [stmt] -> instruction trans_state stmt | _ -> assert false
 
 
@@ -3360,31 +3368,48 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
         expression. The rest of the list has a semantic caracterization of the expression and
         defines how that expression is going to be implemented at runtime.
       + The semantic description is composed by a list of OpaqueValueExpr that define the various
-        expressions involved and one finale expression that define how the final value of the
+        expressions involved and one final expression that define how the final value of the
         PseudoObjectExpr is obtained.
 
       All the OpaqueValueExpr will be part of the last expression. So they can be skipped. For
       example: [x.f = a] when [f] is a property will be translated with a call to [f]'s setter
-      [x f:a] the [stmt_list] will be [x.f = a; x; a; CallToSetter]. Among all element of the list
+      [x f:a] the [stmt_list] will be [x.f = a; x; a; CallToSetter]. Among all elements of the list
       we only need to translate the CallToSetter which is how [x.f = a] is actually implemented by
-      the runtime.*)
+      the runtime. *)
   and pseudoObjectExpr_trans trans_state stmt_list =
     L.(debug Capture Verbose)
       "  priority node free = '%s'@\n@\n"
       (string_of_bool (PriorityNode.is_priority_free trans_state)) ;
-    let rec do_semantic_elements el =
+    let recognize_syntactic_element (syntactic_element : Clang_ast_t.stmt) trans_state =
+      match syntactic_element with
+      (* getters look like this *)
+      | ObjCPropertyRefExpr (_, _, _, {oprei_is_messaging_getter; oprei_is_messaging_setter})
+      (* setters look like that *)
+      | BinaryOperator
+          ( _
+          , [ ObjCPropertyRefExpr (_, _, _, {oprei_is_messaging_getter; oprei_is_messaging_setter})
+            ; _ ]
+          , _
+          , _ ) ->
+          { trans_state with
+            is_objc_getter_setter_call= oprei_is_messaging_getter || oprei_is_messaging_setter }
+      | _ ->
+          trans_state
+    in
+    let rec do_semantic_elements trans_state el =
       let open Clang_ast_t in
       match el with
       | OpaqueValueExpr _ :: el' ->
-          do_semantic_elements el'
+          do_semantic_elements trans_state el'
       | stmt :: _ ->
           instruction trans_state stmt
       | _ ->
           assert false
     in
     match stmt_list with
-    | _ :: semantic_form ->
-        do_semantic_elements semantic_form
+    | syntactic_element :: semantic_form ->
+        let trans_state = recognize_syntactic_element syntactic_element trans_state in
+        do_semantic_elements trans_state semantic_form
     | _ ->
         assert false
 
@@ -5037,8 +5062,8 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
         declStmt_trans trans_state decl_list stmt_info
     | DeclRefExpr (stmt_info, _, _, decl_ref_expr_info) ->
         declRefExpr_trans trans_state stmt_info decl_ref_expr_info
-    | ObjCPropertyRefExpr (_, stmt_list, _, _) ->
-        objCPropertyRefExpr_trans trans_state stmt_list
+    | ObjCPropertyRefExpr (_, stmt_list, _, property_ref_expr) ->
+        objCPropertyRefExpr_trans trans_state stmt_list property_ref_expr
     | CXXThisExpr (stmt_info, _, expr_info) ->
         cxxThisExpr_trans trans_state stmt_info expr_info
     | OpaqueValueExpr (stmt_info, _, _, opaque_value_expr_info) ->

@@ -81,7 +81,7 @@ let parse_custom_models () =
   match Config.annotation_reachability_custom_models with
   (* The default value for JSON options is an empty list and not an empty object *)
   | `List [] ->
-      String.Map.empty
+      IString.Map.empty
   | json ->
       json |> Yojson.Safe.Util.to_assoc
       |> List.map ~f:(fun (key, val_arr) ->
@@ -89,7 +89,7 @@ let parse_custom_models () =
              , val_arr |> Yojson.Safe.Util.to_list
                |> List.map ~f:Yojson.Safe.Util.to_string
                |> List.map ~f:Str.regexp ) )
-      |> String.Map.of_alist_exn
+      |> Stdlib.List.to_seq |> IString.Map.of_seq
 
 
 let check_attributes check tenv pname =
@@ -111,7 +111,7 @@ let check_modeled_annotation models annot pname =
   let method_name =
     Procname.to_string ~verbosity:(if Procname.is_erlang pname then Verbose else FullNameOnly) pname
   in
-  Option.exists (String.Map.find models annot.Annot.class_name) ~f:(fun methods ->
+  Option.exists (IString.Map.find_opt annot.Annot.class_name models) ~f:(fun methods ->
       List.exists methods ~f:(fun r -> Str.string_match r method_name 0) )
 
 
@@ -163,14 +163,17 @@ module AnnotationSpec = struct
     ; sanitizer_predicate: predicate  (** decide if something is a sanitizer *)
     ; sink_annotation: Annot.t  (** used as key in the domain (sink -> procedure -> callsite) *)
     ; source_annotation_list: Annot.t list  (** decide if something is a source *)
+    ; name: string  (** Short name to be added at the beginning of the report *)
     ; description: string  (** Extra description to be added to the issue report *)
     ; issue_type: IssueType.t
-    ; models: Str.regexp list IStd.String.Map.t  (** model functions as if they were annotated *)
+    ; models: Str.regexp list IString.Map.t  (** model functions as if they were annotated *)
     ; pre_check: Domain.t InterproceduralAnalysis.t -> unit
           (** additional check before reporting *) }
 end
 
 let prepend_if_not_empty str prefix = if String.equal str "" then "" else prefix ^ str
+
+let append_if_not_empty str suffix = if String.equal str "" then "" else str ^ suffix
 
 let report_src_to_snk_path {InterproceduralAnalysis.proc_desc; tenv; err_log} src
     (spec : AnnotationSpec.t) loc trace snk_pname =
@@ -215,16 +218,17 @@ let report_src_to_snk_path {InterproceduralAnalysis.proc_desc; tenv; err_log} sr
   let src_annot_str = src.Annot.class_name in
   let access_or_call = if is_dummy_field_pname snk_pname then "accesses" else "calls" in
   let spec_description = prepend_if_not_empty spec.description ". " in
+  let spec_name = append_if_not_empty spec.name ". " in
   (* A direct call has a trace of length 3: source def + callsite + sink def *)
   let transitive = if List.length trace > 3 then "transitively " else "" in
   let description =
     if is_dummy_constructor snk then
       let constr_str = str_of_pname ~withclass:true snk_pname in
-      Format.asprintf "Method %a annotated with %a allocates %a via %a%s" MF.pp_monospaced
-        (str_of_pname src_pname) MF.pp_monospaced ("@" ^ src_annot_str) MF.pp_monospaced constr_str
-        MF.pp_monospaced ("new " ^ constr_str) spec_description
+      Format.asprintf "%sMethod %a annotated with %a allocates %a via %a%s" spec_name
+        MF.pp_monospaced (str_of_pname src_pname) MF.pp_monospaced ("@" ^ src_annot_str)
+        MF.pp_monospaced constr_str MF.pp_monospaced ("new " ^ constr_str) spec_description
     else
-      Format.asprintf "Method %a (%s %a%s%s) %s%s %a (%s %a%s%s)%s" MF.pp_monospaced
+      Format.asprintf "%sMethod %a (%s %a%s%s) %s%s %a (%s %a%s%s)%s" spec_name MF.pp_monospaced
         (str_of_pname src_pname) (get_kind src src_pname) MF.pp_monospaced ("@" ^ src_annot_str)
         (get_details src src_pname) (get_class_details src src_pname) transitive access_or_call
         MF.pp_monospaced
@@ -305,7 +309,7 @@ let find_paths_to_snk ({InterproceduralAnalysis.proc_desc; tenv} as analysis_dat
       let fst_call_site =
         (* Just pick one path forward (per sink procedure) to avoid path explosion *)
         try Domain.CallSites.min_elt call_sites
-        with Caml.Not_found -> L.die InternalError "Callsite map should not be empty"
+        with Stdlib.Not_found -> L.die InternalError "Callsite map should not be empty"
       in
       (* Report the issue where the source makes the first call *)
       let report_loc = CallSite.loc fst_call_site.call_site in
@@ -317,8 +321,9 @@ let report_src_and_sink {InterproceduralAnalysis.proc_desc; err_log} src (spec :
   let proc_name = Procdesc.get_proc_name proc_desc in
   let loc = Procdesc.get_loc proc_desc in
   let spec_description = prepend_if_not_empty spec.description ". " in
+  let spec_name = append_if_not_empty spec.name ". " in
   let description =
-    Format.asprintf "Method %a is annotated with both %a and %a%s" MF.pp_monospaced
+    Format.asprintf "%sMethod %a is annotated with both %a and %a%s" spec_name MF.pp_monospaced
       (str_of_pname proc_name) MF.pp_monospaced ("@" ^ src.Annot.class_name) MF.pp_monospaced
       ("@" ^ spec.sink_annotation.class_name)
       spec_description
@@ -332,6 +337,8 @@ let check_srcs_and_find_snk ({InterproceduralAnalysis.proc_desc; tenv} as analys
   let proc_name = Procdesc.get_proc_name proc_desc in
   let check_one_src_and_find_snk src =
     if method_overrides_annot src spec.models tenv proc_name then (
+      L.d_printfln "%s: Finding paths from source (`@%s`) `%a`" spec.kind src.Annot.class_name
+        Procname.pp proc_name ;
       (* If there are callsites to sinks, find/report such paths. *)
       Option.iter (Domain.find_opt spec.sink_annotation annot_map) ~f:(fun sink_map ->
           find_paths_to_snk analysis_data src spec sink_map ) ;
@@ -346,7 +353,7 @@ let check_srcs_and_find_snk ({InterproceduralAnalysis.proc_desc; tenv} as analys
 
 
 module StandardAnnotationSpec = struct
-  let from_annotations str_src_annots str_snk_annot str_sanitizer_annots description models =
+  let from_annotations str_src_annots str_snk_annot str_sanitizer_annots name description models =
     let src_list = List.map str_src_annots ~f:annotation_of_str in
     let sanitizer_annots = List.map str_sanitizer_annots ~f:annotation_of_str in
     let snk = annotation_of_str str_snk_annot in
@@ -358,6 +365,7 @@ module StandardAnnotationSpec = struct
           List.exists sanitizer_annots ~f:(fun s -> method_overrides_annot s models tenv pname) )
     ; sink_annotation= snk
     ; source_annotation_list= src_list
+    ; name
     ; description
     ; issue_type= IssueType.checkers_annotation_reachability_error
     ; models
@@ -375,9 +383,10 @@ module NoAllocationAnnotationSpec = struct
         (fun tenv pname -> check_attributes Annotations.ia_is_ignore_allocations tenv pname)
     ; sink_annotation= dummy_constructor_annot
     ; source_annotation_list= [no_allocation_annot]
+    ; name= ""
     ; description= ""
     ; issue_type= IssueType.checkers_allocates_memory
-    ; models= String.Map.empty
+    ; models= IString.Map.empty
     ; pre_check= (fun _ -> ()) }
 end
 
@@ -415,9 +424,10 @@ module ExpensiveAnnotationSpec = struct
     ; sanitizer_predicate= (fun _ _ -> false)
     ; sink_annotation= expensive_annot
     ; source_annotation_list= [performance_critical_annot]
+    ; name= ""
     ; description= ""
     ; issue_type= IssueType.checkers_calls_expensive_method
-    ; models= String.Map.empty
+    ; models= IString.Map.empty
     ; pre_check=
         (fun ({InterproceduralAnalysis.proc_desc; tenv} as analysis_data) ->
           let proc_name = Procdesc.get_proc_name proc_desc in
@@ -442,22 +452,22 @@ module MakeTransferFunctions (CFG : ProcCfg.S) = struct
     && not (spec.sanitizer_predicate tenv caller_pname)
 
 
-  let check_call tenv ~caller_pname ~callee_pname call_site_info astate specs =
+  let check_direct_call tenv ~caller_pname ~callee_pname call_site_info astate specs =
     List.fold ~init:astate specs ~f:(fun astate (spec : AnnotationSpec.t) ->
         if is_sink tenv spec ~caller_pname ~callee_pname then (
-          L.d_printfln "%s: Adding sink call `%a -> %a`" spec.kind Procname.pp caller_pname
-            Procname.pp callee_pname ;
+          L.d_printfln "%s: Adding direct call `%a -> %a` to sink `@%s`" spec.kind Procname.pp
+            caller_pname Procname.pp callee_pname spec.sink_annotation.Annot.class_name ;
           Domain.add_call_site spec.sink_annotation callee_pname call_site_info astate )
         else astate )
 
 
-  let merge_callee_map {analysis_data= {proc_desc; tenv; analyze_dependency}; specs} call_site_info
-      ~callee_pname astate =
+  let add_transitive_calls {analysis_data= {proc_desc; tenv; analyze_dependency}; specs}
+      call_site_info ~callee_pname astate =
     match analyze_dependency callee_pname with
     | Error _ ->
         astate
     | Ok callee_call_map ->
-        L.d_printf "Applying summary for `%a`@\n" Procname.pp callee_pname ;
+        L.d_printf "Applying summary of callee `%a`@\n" Procname.pp callee_pname ;
         let add_call_site annot sink calls astate =
           if Domain.CallSites.is_empty calls then astate
           else
@@ -468,8 +478,8 @@ module MakeTransferFunctions (CFG : ProcCfg.S) = struct
             let caller_pname = Procdesc.get_proc_name proc_desc in
             List.fold ~init:astate specs ~f:(fun astate (spec : AnnotationSpec.t) ->
                 if is_sink tenv spec ~caller_pname ~callee_pname:sink then (
-                  L.d_printf "%s: Adding sink call from `%a`'s summary `%a -> %a`@\n" spec.kind
-                    Procname.pp callee_pname Procname.pp caller_pname Procname.pp sink ;
+                  L.d_printf "%s: Adding transitive call `%a -> %a` to sink `@%s`@\n" spec.kind
+                    Procname.pp caller_pname Procname.pp sink spec.sink_annotation.Annot.class_name ;
                   Domain.add_call_site annot sink call_site_info astate )
                 else astate )
         in
@@ -487,8 +497,8 @@ module MakeTransferFunctions (CFG : ProcCfg.S) = struct
           { call_site= CallSite.make callee_pname call_loc
           ; is_in_loop= Control.GuardNodes.mem node loop_nodes }
         in
-        check_call tenv ~callee_pname ~caller_pname call_site_info astate specs
-        |> merge_callee_map analysis_data call_site_info ~callee_pname
+        check_direct_call tenv ~callee_pname ~caller_pname call_site_info astate specs
+        |> add_transitive_calls analysis_data call_site_info ~callee_pname
     | Sil.Load {e= Exp.Lfield (_, fieldname, typ); loc} ->
         (* Pretend that field access is a call to a fake method (containing the name of the field) *)
         let caller_pname = Procdesc.get_proc_name proc_desc in
@@ -497,8 +507,7 @@ module MakeTransferFunctions (CFG : ProcCfg.S) = struct
           { call_site= CallSite.make callee_pname loc
           ; is_in_loop= Control.GuardNodes.mem node loop_nodes }
         in
-        check_call tenv ~callee_pname ~caller_pname call_site_info astate specs
-        |> merge_callee_map analysis_data call_site_info ~callee_pname
+        check_direct_call tenv ~callee_pname ~caller_pname call_site_info astate specs
     | _ ->
         astate
 
@@ -513,6 +522,7 @@ type custom_spec =
   { sources: string list
   ; sinks: string list
   ; sanitizers: string list [@yojson.default []]
+  ; name: string [@yojson.default ""]
   ; description: string [@yojson.default ""] }
 [@@deriving of_yojson]
 
@@ -520,10 +530,10 @@ type custom_specs = custom_spec list [@@deriving of_yojson]
 
 let parse_custom_specs () =
   let models = parse_custom_models () in
-  let make_standard_spec_from_custom_spec {sources; sinks; sanitizers; description} =
+  let make_standard_spec_from_custom_spec {sources; sinks; sanitizers; name; description} =
     List.map
       ~f:(fun sink ->
-        StandardAnnotationSpec.from_annotations sources sink sanitizers description models )
+        StandardAnnotationSpec.from_annotations sources sink sanitizers name description models )
       sinks
   in
   let custom_specs =
@@ -556,8 +566,11 @@ let checker ({InterproceduralAnalysis.proc_desc} as analysis_data) : Domain.t op
   let specs = expensive_specs @ no_alloc_specs @ custom_specs in
   let proc_data = {TransferFunctions.analysis_data; loop_nodes; specs} in
   let post = Analyzer.compute_post proc_data ~initial proc_desc in
-  Option.iter post ~f:(fun annot_map ->
-      List.iter specs ~f:(fun spec ->
-          spec.AnnotationSpec.pre_check analysis_data ;
-          check_srcs_and_find_snk analysis_data spec annot_map ) ) ;
+  let pp_name f = F.pp_print_string f "annotation reachability reporting" in
+  AnalysisCallbacks.html_debug_new_node_session (Procdesc.get_exit_node proc_desc)
+    ~pp_name ~kind:`ExecNode ~f:(fun () ->
+      Option.iter post ~f:(fun annot_map ->
+          List.iter specs ~f:(fun spec ->
+              spec.AnnotationSpec.pre_check analysis_data ;
+              check_srcs_and_find_snk analysis_data spec annot_map ) ) ) ;
   post

@@ -8,7 +8,7 @@
 open! IStd
 module F = Format
 module L = Logging
-module Hashtbl = Caml.Hashtbl
+module Hashtbl = Stdlib.Hashtbl
 
 module Lang = struct
   type t = Java | Hack | Python [@@deriving equal]
@@ -37,6 +37,8 @@ module Location = struct
 
   let known ~line ~col = Known {line; col}
 
+  let decr_line = function Unknown -> Unknown | Known {line; col} -> Known {line= line - 1; col}
+
   let pp fmt = function
     | Known {line; col} ->
         F.fprintf fmt "line %d, column %d" line col
@@ -51,7 +53,7 @@ module Location = struct
         F.fprintf fmt "<unknown line>"
 
 
-  module Set = Caml.Set.Make (T)
+  module Set = Stdlib.Set.Make (T)
 end
 
 module SourceFile = struct
@@ -78,7 +80,7 @@ exception TextualTransformError of transform_error list
 module type NAME = sig
   type t = {value: string; loc: Location.t [@compare.ignore]} [@@deriving compare, equal, hash]
 
-  val of_string : string -> t
+  val of_string : ?loc:Location.t -> string -> t
 
   val pp : F.formatter -> t -> unit
 
@@ -88,9 +90,9 @@ module type NAME = sig
 
   module HashSet : HashSet.S with type elt = t
 
-  module Map : Caml.Map.S with type key = t
+  module Map : Stdlib.Map.S with type key = t
 
-  module Set : Caml.Set.S with type elt = t
+  module Set : Stdlib.Set.S with type elt = t
 end
 
 module Name : NAME = struct
@@ -103,7 +105,10 @@ module Name : NAME = struct
 
   let replace_dot_with_2colons str = String.substr_replace_all str ~pattern:"." ~with_:"::"
 
-  let of_string str = {value= replace_dot_with_2colons str; loc= Location.Unknown}
+  let of_string ?loc str =
+    let loc = Option.value loc ~default:Location.Unknown in
+    {value= replace_dot_with_2colons str; loc}
+
 
   let pp fmt name = F.pp_print_string fmt name.value
 
@@ -111,8 +116,8 @@ module Name : NAME = struct
 
   module Hashtbl = Hashtbl.Make (T)
   module HashSet = HashSet.Make (T)
-  module Map = Caml.Map.Make (T)
-  module Set = Caml.Set.Make (T)
+  module Map = Stdlib.Map.Make (T)
+  module Set = Stdlib.Set.Make (T)
 end
 
 module ProcName : NAME = Name
@@ -245,6 +250,10 @@ module Attr = struct
     String.equal name "kind" && List.equal String.equal values ["typedef"]
 
 
+  let is_closure_wrapper {name; values} =
+    String.equal name "closure_wrapper" && List.is_empty values
+
+
   let is_const {name; values} = String.equal name "constant" && List.is_empty values
 
   let is_curry {name; values} = String.equal name "curry" && List.is_empty values
@@ -262,6 +271,14 @@ module Attr = struct
   let is_static {name; values} = String.equal name "static" && List.is_empty values
 
   let is_variadic {name; values} = String.equal name "variadic" && List.is_empty values
+
+  let mk_python_args values = {name= "args"; values; loc= Location.Unknown}
+
+  let find_python_args {name; values} = if String.equal name "args" then Some values else None
+
+  let mk_async = {name= "async"; values= []; loc= Location.Unknown}
+
+  let mk_closure_wrapper = {name= "closure_wrapper"; values= []; loc= Location.Unknown}
 
   let pp fmt {name; values} =
     if List.is_empty values then F.fprintf fmt ".%s" name
@@ -318,9 +335,9 @@ module Ident : sig
 
   val pp : F.formatter -> t -> unit
 
-  module Map : Caml.Map.S with type key = t
+  module Map : Stdlib.Map.S with type key = t
 
-  module Set : Caml.Set.S with type elt = t
+  module Set : Stdlib.Set.S with type elt = t
 
   (* We assume idents are totally ordered.
      [next id] returns an ident that is strictly greater than [id] wrt this order. *)

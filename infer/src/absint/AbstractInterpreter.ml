@@ -187,9 +187,9 @@ module DisjunctiveMetadata = struct
      of metadata since otherwise we would need to carry the metadata around the analysis while being
      careful to avoid double-counting. With a reference this is simpler to achieve as we can simply
      update it whenever a relevant action is taken (eg dropping a disjunct). *)
-  let proc_metadata = ref empty
+  let proc_metadata = DLS.new_key (fun () -> empty)
 
-  let () = AnalysisGlobalState.register_ref ~init:(fun () -> empty) proc_metadata
+  let () = AnalysisGlobalState.register_dls ~init:(fun () -> empty) proc_metadata
 
   (* This is used to remember the CFG node otherwise we would need to carry the node around in widen
      and join as well as other places that may need to access the current CFG node during analysis *)
@@ -214,11 +214,12 @@ module DisjunctiveMetadata = struct
          
                    
   let add_dropped_disjuncts dropped_disjuncts =
-    proc_metadata :=
-      {!proc_metadata with dropped_disjuncts= !proc_metadata.dropped_disjuncts + dropped_disjuncts}
+    Utils.with_dls proc_metadata ~f:(fun proc_metadata ->
+        {proc_metadata with dropped_disjuncts= proc_metadata.dropped_disjuncts + dropped_disjuncts} )
 
   let incr_interrupted_loops () =
-    proc_metadata := {!proc_metadata with interrupted_loops= !proc_metadata.interrupted_loops + 1}
+    Utils.with_dls proc_metadata ~f:(fun proc_metadata ->
+        {proc_metadata with interrupted_loops= proc_metadata.interrupted_loops + 1} )
 
   let record_cfg_stats {dropped_disjuncts; interrupted_loops} =
     Stats.add_pulse_disjuncts_dropped dropped_disjuncts ;
@@ -389,7 +390,7 @@ struct
             F.fprintf f "#%d: @[%a@]@;" i (T.pp_disjunct pp_kind) disjunct )
       in
       F.fprintf f "@[<v>%d disjuncts:@;%a%a@]" (List.length disjuncts) pp_disjuncts disjuncts
-        (Pp.html_collapsible_block ~name:"Non-disjunctive state" pp_kind T.NonDisjDomain.pp)
+        (Pp.html_collapsible_block ~name:"Non-disjunctive state" pp_kind (T.pp_non_disj pp_kind))
         non_disj
 
 
@@ -441,7 +442,13 @@ struct
 
   let filter_disjuncts ~f ((l, nd) : Domain.t) =
     let filtered = List.filter l ~f in
-    if List.is_empty filtered && not (List.is_empty l) then ([], T.NonDisjDomain.bottom)
+    if
+      List.is_empty filtered
+      && (* TODO(non-disj): once [nd] detects unreachability accurately we can replace the last
+            condition with something like [not (T.NonDisjDomain.is_executable nd)] that tests if we
+            can carry on executing using the non-disjunctive state *)
+      not (List.is_empty l)
+    then ([], T.NonDisjDomain.bottom)
     else (filtered, nd)
 
 
@@ -456,7 +463,7 @@ struct
 
   let use_balanced_disjunct_strategy () = Config.pulse_balanced_disjuncts_strategy
 
-  let exec_instr (pre_disjuncts, non_disj) analysis_data node _ instr =
+  let exec_instr (pre_disjuncts, pre_non_disj) analysis_data node _ instr =
     (* [remaining_disjuncts] is the number of remaining disjuncts taking into account disjuncts
        already recorded in the post of a node (and therefore that will stay there).  It is always
        set from [exec_node_instrs], so [remaining_disjuncts] should always be [Some _]. *)
@@ -485,7 +492,7 @@ struct
                 (* check timeout once per disjunct to execute instead of once for all disjuncts *)
                 Timer.check_timeout () ;
                 let disjuncts', non_disj' =
-                  T.exec_instr ~limit (pre_disjunct, non_disj) analysis_data node instr
+                  T.exec_instr ~limit (pre_disjunct, pre_non_disj) analysis_data node instr
                 in
                 ( if Config.write_html then
                     let n = List.length disjuncts' in
@@ -497,9 +504,10 @@ struct
                 let post_disj', n, new_dropped = Domain.join_up_to ~limit ~into:post disjuncts' in
                 ((post_disj', non_disj' :: non_disj_astates), new_dropped @ dropped, n, limit - n) ) )
     in
+    let post_non_disj = T.exec_instr_non_disj pre_non_disj analysis_data node instr in
     let non_disj =
-      if List.is_empty disjuncts then non_disj
-      else List.fold ~init:T.NonDisjDomain.bottom ~f:T.NonDisjDomain.join non_disj_astates
+      if List.is_empty disjuncts then post_non_disj
+      else List.fold ~init:post_non_disj ~f:T.NonDisjDomain.join non_disj_astates
     in
     let non_disj = add_dropped_disjuncts dropped non_disj in
     (disjuncts, non_disj)
@@ -615,7 +623,7 @@ module AbstractInterpreterCommon (TransferFunctions : NodeTransferFunctions) = s
 
 
   (** reference to log errors only at the innermost recursive call *)
-  let logged_error = ref false
+  let logged_error = DLS.new_key (fun () -> false)
 
   let dump_html f pre post_result =
     let pp_post_error f (exn, _, instr) =
@@ -664,11 +672,11 @@ module AbstractInterpreterCommon (TransferFunctions : NodeTransferFunctions) = s
               let post = TransferFunctions.exec_instr pre proc_data node idx instr in
               Timer.check_timeout () ;
               (* don't forget to reset this so we output messages for future errors too *)
-              logged_error := false ;
+              DLS.set logged_error false ;
               Ok post
             with exn ->
               (* delay reraising to get a chance to write the debug HTML *)
-              let backtrace = Caml.Printexc.get_raw_backtrace () in
+              let backtrace = Stdlib.Printexc.get_raw_backtrace () in
               Error (exn, backtrace, instr) )
       in
       match result with
@@ -683,12 +691,12 @@ module AbstractInterpreterCommon (TransferFunctions : NodeTransferFunctions) = s
               (* this isn't an error; don't log it *)
               ()
           | _ ->
-              if not !logged_error then (
+              if not (DLS.get logged_error) then (
                 L.internal_error "In instruction %a@\n"
                   (Sil.pp_instr ~print_types:true Pp.text)
                   instr ;
-                logged_error := true ) ) ;
-          Caml.Printexc.raise_with_backtrace exn backtrace
+                DLS.set logged_error true ) ) ;
+          Stdlib.Printexc.raise_with_backtrace exn backtrace
     in
     (* hack to ensure that we call [exec_instr] on a node even if it has no instructions *)
     let instrs = if Instrs.is_empty instrs then Instrs.singleton Sil.skip_instr else instrs in
@@ -984,7 +992,7 @@ struct
   include MakeWTONode (DisjunctiveTransferFunctions)
 
   let get_cfg_metadata () =
-    let metadata = !DisjunctiveMetadata.proc_metadata in
+    let metadata = DLS.get DisjunctiveMetadata.proc_metadata in
     DisjunctiveMetadata.record_cfg_stats metadata ;
     metadata
 end

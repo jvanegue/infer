@@ -137,6 +137,14 @@ let hack_root_type_name = SilTyp.HackClass (HackClassName.make "$root")
 
 let python_mixed_type_name = SilTyp.PythonClass (PythonClassName.make "PyObject")
 
+let python_dict_type_name = SilTyp.PythonClass (PythonClassName.make "PyDict")
+
+let python_int_type_name = SilTyp.PythonClass (PythonClassName.make "PyInt")
+
+let python_none_type_name = SilTyp.PythonClass (PythonClassName.make "PyNone")
+
+let python_tuple_type_name = SilTyp.PythonClass (PythonClassName.make "PyTuple")
+
 let mk_python_mixed_type_textual loc = Typ.Struct TypeName.{value= "PyObject"; loc}
 
 let default_return_type (lang : Lang.t option) loc =
@@ -390,31 +398,30 @@ module ProcDeclBridge = struct
         SilProcname.make_hack ~class_name ~function_name:method_name ~arity
     | Python ->
         let class_name = python_class_name_to_sil t.qualified_name.enclosing_class in
-        let arity = Option.map t.formals_types ~f:List.length in
-        SilProcname.make_python ~class_name ~function_name:method_name ~arity
+        SilProcname.make_python ~class_name ~function_name:method_name
 
 
   let call_to_sil (lang : Lang.t) (callsig : ProcSig.t) t : SilProcname.t =
-    let arity = match callsig with Hack {arity} | Python {arity} -> arity | Other _ -> None in
-    (* When we translate function calls in Hack or Python, the ProcDecl we get from TextualDecls may have
-         unknown args. In such case we need to conjure up a procname with the arity matching that
-         of the call site signature. This way we'll be able to match a particular overload of the
-         procname with its definition from a different translation unit during the analysis
-         phase. *)
-    let improved_match name_to_sil make =
-      if Option.is_some t.formals_types then to_sil lang t
-      else
-        let class_name = name_to_sil t.qualified_name.enclosing_class in
-        let function_name = t.qualified_name.name.value in
-        make ~class_name ~function_name ~arity
-    in
     match lang with
     | Java ->
         to_sil lang t
     | Hack ->
+        (* When we translate function calls in Hack, the ProcDecl we get from TextualDecls may have
+           unknown args. In such case we need to conjure up a procname with the arity matching that
+           of the call site signature. This way we'll be able to match a particular overload of the
+           procname with its definition from a different translation unit during the analysis
+           phase. *)
+        let arity = match callsig with Hack {arity} | Python {arity} -> arity | Other _ -> None in
+        let improved_match name_to_sil make =
+          if Option.is_some t.formals_types then to_sil lang t
+          else
+            let class_name = name_to_sil t.qualified_name.enclosing_class in
+            let function_name = t.qualified_name.name.value in
+            make ~class_name ~function_name ~arity
+        in
         improved_match hack_class_name_to_sil Procname.make_hack
     | Python ->
-        improved_match python_class_name_to_sil Procname.make_python
+        to_sil lang t
 end
 
 module GlobalBridge = struct
@@ -1058,9 +1065,13 @@ module ProcDescBridge = struct
       TypBridge.to_sil lang ~attrs:procdecl.result_type.attributes procdecl.result_type.typ
     in
     let definition_loc = LocationBridge.to_sil sourcefile procdecl.qualified_name.name.loc in
-    let is_hack_async = List.exists procdecl.attributes ~f:Attr.is_async in
+    let is_async = List.exists procdecl.attributes ~f:Attr.is_async in
     let is_abstract = List.exists procdecl.attributes ~f:Attr.is_abstract in
+    let is_closure_wrapper = List.exists procdecl.attributes ~f:Attr.is_closure_wrapper in
     let is_hack_wrapper = List.exists procdecl.attributes ~f:Attr.is_hack_wrapper in
+    let python_args =
+      List.find_map procdecl.attributes ~f:Attr.find_python_args |> Option.value ~default:[]
+    in
     let hack_variadic_position =
       Option.value_map ~default:None procdecl.formals_types ~f:(fun formals_types ->
           List.findi formals_types ~f:(fun _ typ -> Typ.is_annotated typ ~f:Attr.is_variadic)
@@ -1071,10 +1082,12 @@ module ProcDescBridge = struct
     let pattributes =
       { (ProcAttributes.default (SourceFile.file sourcefile) sil_procname) with
         is_defined= true
-      ; is_hack_async
+      ; is_async
       ; is_abstract
+      ; is_closure_wrapper
       ; is_hack_wrapper
       ; hack_variadic_position
+      ; python_args
       ; formals
       ; locals
       ; ret_type= sil_ret_type
@@ -1195,64 +1208,46 @@ end
 module ModuleBridge = struct
   open Module
 
-  let to_sil module_ =
-    match lang module_ with
-    | None ->
-        raise
-          (TextualTransformError
-             [{loc= Location.Unknown; msg= lazy "Missing or unsupported source_language attribute"}]
-          )
-    | Some lang ->
-        let errors, decls_env = TextualDecls.make_decls module_ in
-        if not (List.is_empty errors) then
-          L.die InternalError
-            "to_sil conversion should not be performed if TextualDecls verification has raised any \
-             errors before." ;
-        let module_ =
-          let open TextualTransform in
-          (* note: because && and || operators are lazy we must remove them before moving calls *)
-          module_ |> remove_if_terminator
-          |> remove_effects_in_subexprs lang decls_env
-          |> let_propagation |> out_of_ssa
-        in
-        let all_proc_entries, types_used_as_enclosing_but_not_defined =
-          TextualDecls.get_proc_entries_by_enclosing_class decls_env
-        in
-        let cfgs = Cfg.create () in
-        let tenv = Tenv.create () in
-        TypeName.Set.iter
-          (fun name -> TypeNameBridge.to_sil lang name |> Tenv.mk_struct ~dummy:true tenv |> ignore)
-          types_used_as_enclosing_but_not_defined ;
-        List.iter module_.decls ~f:(fun decl ->
-            match decl with
-            | Global _ ->
-                ()
-            | Struct strct ->
-                let proc_entries =
-                  TypeName.Map.find_opt strct.name all_proc_entries |> Option.value ~default:[]
-                in
-                let source_file = Some (TextualDecls.source_file decls_env |> SourceFile.file) in
-                StructBridge.to_sil lang decls_env tenv proc_entries source_file strct
-            | Procdecl _ ->
-                ()
-            | Proc pdesc ->
-                if not (ProcDesc.is_ready_for_to_sil_conversion pdesc) then
-                  (* we only run SSA verification if the to_sil conversion  needs
-                     extra transformation, because some .sil files that are generated by
-                     Java examples are not in SSA *)
-                  SsaVerification.run pdesc ;
-                ProcDescBridge.to_sil lang decls_env cfgs pdesc ) ;
-        (* Register undefined types in tenv *)
-        let is_undefined_type tname =
-          (not (TypeName.Set.mem tname types_used_as_enclosing_but_not_defined))
-          && TextualDecls.get_struct decls_env tname |> Option.is_none
-        in
-        TextualDecls.get_undefined_types decls_env
-        |> Seq.iter (fun tname ->
-               if is_undefined_type tname then
-                 let sil_tname = TypeNameBridge.to_sil lang tname in
-                 Tenv.mk_struct ~dummy:true tenv sil_tname |> ignore ) ;
-        (cfgs, tenv, module_)
+  let to_sil lang module_ decls_env =
+    let all_proc_entries, types_used_as_enclosing_but_not_defined =
+      TextualDecls.get_proc_entries_by_enclosing_class decls_env
+    in
+    let cfgs = Cfg.create () in
+    let tenv = Tenv.create () in
+    TypeName.Set.iter
+      (fun name -> TypeNameBridge.to_sil lang name |> Tenv.mk_struct ~dummy:true tenv |> ignore)
+      types_used_as_enclosing_but_not_defined ;
+    List.iter module_.decls ~f:(fun decl ->
+        match decl with
+        | Global _ ->
+            ()
+        | Struct strct ->
+            let proc_entries =
+              TypeName.Map.find_opt strct.name all_proc_entries |> Option.value ~default:[]
+            in
+            let source_file = Some (TextualDecls.source_file decls_env |> SourceFile.file) in
+            StructBridge.to_sil lang decls_env tenv proc_entries source_file strct
+        | Procdecl _ ->
+            ()
+        | Proc pdesc ->
+            if not (ProcDesc.is_ready_for_to_sil_conversion pdesc) then
+              (* we only run SSA verification if the to_sil conversion  needs
+                 extra transformation, because some .sil files that are generated by
+                 Java examples are not in SSA *)
+              SsaVerification.run pdesc ;
+            ProcDescBridge.to_sil lang decls_env cfgs pdesc ) ;
+    (* Register undefined types in tenv *)
+    let is_undefined_type tname =
+      (not (TypeName.Set.mem tname types_used_as_enclosing_but_not_defined))
+      && TextualDecls.get_struct decls_env tname |> Option.is_none
+    in
+    if not (Lang.equal lang Python) then
+      TextualDecls.get_undefined_types decls_env
+      |> Seq.iter (fun tname ->
+             if is_undefined_type tname then
+               let sil_tname = TypeNameBridge.to_sil lang tname in
+               Tenv.mk_struct ~dummy:true tenv sil_tname |> ignore ) ;
+    (cfgs, tenv)
 
 
   let of_sil ~sourcefile ~lang tenv cfg =
@@ -1278,8 +1273,9 @@ end
 
 let proc_decl_to_sil lang procdecl = ProcDeclBridge.to_sil lang procdecl
 
-let module_to_sil module_ =
-  try Ok (ModuleBridge.to_sil module_) with Textual.TextualTransformError errors -> Error errors
+let module_to_sil lang module_ decls_env =
+  try Ok (ModuleBridge.to_sil lang module_ decls_env)
+  with Textual.TextualTransformError errors -> Error errors
 
 
 let pp_copyright fmt =

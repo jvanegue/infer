@@ -12,6 +12,7 @@ module CallEvent = PulseCallEvent
 module ConfigName = FbPulseConfigName
 module DecompilerExpr = PulseDecompilerExpr
 module Invalidation = PulseInvalidation
+module PathContext = PulsePathContext
 module TaintItem = PulseTaintItem
 module Trace = PulseTrace
 module TransitiveInfo = PulseTransitiveInfo
@@ -72,7 +73,7 @@ type retain_cycle_data = {expr: DecompilerExpr.t; location: Location.t option; t
 type resource =
   | CSharpClass of CSharpClassName.t
   | JavaClass of JavaClassName.t
-  | HackAsync
+  | Awaitable
   | HackBuilderResource of HackClassName.t
   | Memory of Attribute.allocator
 
@@ -90,7 +91,8 @@ type t =
   | ErlangError of ErlangError.t
   | InfiniteError of {location: Location.t}
   | HackCannotInstantiateAbstractClass of {type_name: Typ.Name.t; trace: Trace.t}
-  | MutualRecursionCycle of {cycle: PulseMutualRecursion.t; location: Location.t}
+  | MutualRecursionCycle of
+      {cycle: PulseMutualRecursion.t; location: Location.t; is_call_with_same_values: bool}
   | ReadonlySharedPtrParameter of
       {param: Var.t; typ: Typ.t; location: Location.t; used_locations: Location.t list}
   | ReadUninitialized of ReadUninitialized.t
@@ -129,7 +131,7 @@ type t =
 
 val pp : F.formatter -> t -> unit
 
-val aborts_execution : t -> bool
+val aborts_execution : PathContext.t -> t -> bool
 (** whether the presence of an error should abort the execution *)
 
 val get_message_and_suggestion : t -> string * string option

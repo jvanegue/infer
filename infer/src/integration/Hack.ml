@@ -173,7 +173,7 @@ end = struct
     let log_error sourcefile error =
       if Config.keep_going then (
         L.debug Capture Quiet "%a@\n" (pp_error sourcefile) error ;
-        ScubaLogging.log_message_with_location ~label:"hack_capture_failure"
+        StatsLogging.log_message_with_location ~label:"hack_capture_failure"
           ~loc:(SourceFile.to_rel_path (Textual.SourceFile.file sourcefile))
           ~message:(error_to_string sourcefile error) )
       else L.external_error "%a@\n" (pp_error sourcefile) error
@@ -388,7 +388,7 @@ let process_output_in_parallel ic =
 
 let process_output_sequentially hackc_stdout =
   let _, units = Unit.extract_units hackc_stdout in
-  let units = Caml.List.of_seq units in
+  let units = Stdlib.List.of_seq units in
   let acc_tenv = Tenv.create () in
   let n_captured, n_error =
     List.fold units ~init:(0, 0) ~f:(fun (n_captured, n_error) unit ->
@@ -488,22 +488,3 @@ let capture ~prog ~args =
     (* normalization already happened in the compile call through merging, no point repeating it *)
     Tenv.store_global ~normalize:false captured_tenv )
   else L.die UserError "hackc command line is missing %s subcommand" textual_subcommand
-
-
-let location_of_class_db db ~class_name =
-  (* TODO(vsiles): sanitize class_name *)
-  let query =
-    Printf.sprintf "SELECT PATH_SUFFIX FROM NAMING_FILE_INFO WHERE CLASSES = \"%s\";" class_name
-  in
-  let locations = ref [] in
-  let cb row =
-    Array.iter row ~f:(function None -> () | Some row -> locations := row :: !locations)
-  in
-  let error = Sqlite3.exec_no_headers db ~cb query in
-  (error, !locations)
-
-
-let location_of_class ~naming_table ~class_name =
-  let open Sqlite3 in
-  let& db = Sqlite3.db_open ~mode:`READONLY naming_table in
-  location_of_class_db db ~class_name

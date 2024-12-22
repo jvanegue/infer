@@ -195,13 +195,9 @@ module Hack : sig
 end
 
 module Python : sig
-  (* TODO: revamp this once modules are implemented *)
-  type t = private {class_name: PythonClassName.t option; function_name: string; arity: int option}
+  type t = private {class_name: PythonClassName.t option; function_name: string}
 
-  type kind =
-    | Fun of PythonClassName.t  (** Toplevel function name, or class constructor *)
-    | Init of PythonClassName.t  (** Initialized of a class, like [C.__init__] *)
-    | Other  (** Other methods *)
+  val get_class_name_as_a_string : t -> string option
 end
 
 (** Type of procedure names. *)
@@ -222,13 +218,6 @@ val compare_name : t -> t -> int
 val get_class_type_name : t -> Typ.Name.t option
 
 val get_class_name : t -> string option
-
-val python_classify : t -> Python.kind option
-(** Classify a Python name into a [Python.kind] *)
-
-val mk_python_init : t -> t
-(** Turns a Python **toplevel** name into a valid initializer. E.g. it is used to turn a statement
-    like [x = C(42)] into [C.__init__(x, 42)] *)
 
 val get_parameters : t -> Parameter.t list
 
@@ -277,9 +266,14 @@ include module type of struct
 end
 
 (** Hash tables with proc names as keys. *)
-module Hash : Caml.Hashtbl.S with type key = t
+module Hash : Stdlib.Hashtbl.S with type key = t
 
-module LRUHash : LRUHashtbl.S with type key = t
+include (* ocaml ignores the warning suppression at toplevel, hence the [include struct ... end] trick *)
+  sig
+  [@@@warning "-unused-module"]
+
+  module LRUHash : LRUHashtbl.S with type key = t
+end
 
 module HashQueue : Hash_queue.S with type key = t
 
@@ -334,8 +328,7 @@ val make_objc_copy : Typ.Name.t -> t
 val make_objc_copyWithZone : is_mutable:bool -> Typ.Name.t -> t
 (** Create an Objective-C method for copyWithZone: or mutableCopyWithZone: according to is_mutable. *)
 
-val make_python :
-  class_name:PythonClassName.t option -> function_name:string -> arity:int option -> t
+val make_python : class_name:PythonClassName.t option -> function_name:string -> t
 (** Create a Python procedure name. *)
 
 val empty_block : t
@@ -499,15 +492,22 @@ val is_erlang_call_unqualified : t -> bool
 
 val is_erlang_call_qualified : t -> bool
 
-val is_hack_builtins : t -> bool
-
-val is_hack_constinit : t -> bool
-
 val has_hack_classname : t -> bool
 
 val is_hack_async_name : t -> bool
 (* Checks if the function name starts with "gen", which is a (lint-checked) convention for it being async at Meta *)
 
+val is_hack_builtins : t -> bool
+
+val is_hack_constinit : t -> bool
+
 val is_hack_construct : t -> bool
+
+val is_hack_internal : t -> bool
+(* Check if the function is not a model nor one of the internal functions necessary for implementation *)
+
+val is_hack_invoke : t -> bool
+
+val is_hack_late_binding : t -> bool
 
 val is_hack_xinit : t -> bool

@@ -35,12 +35,14 @@ let add_one addr attribute attrs =
 
 
 let add addr attributes attrs =
-  match Graph.find_opt addr attrs with
-  | None ->
-      Graph.add addr attributes attrs
-  | Some old_attrs ->
-      let new_attrs = Attributes.union_prefer_left old_attrs attributes in
-      Graph.add addr new_attrs attrs
+  if Attributes.is_empty attributes then Graph.remove addr attrs
+  else
+    match Graph.find_opt addr attrs with
+    | None ->
+        Graph.add addr attributes attrs
+    | Some old_attrs ->
+        let new_attrs = Attributes.union_prefer_left old_attrs attributes in
+        Graph.add addr new_attrs attrs
 
 
 let fold = Graph.fold
@@ -50,6 +52,8 @@ let find_opt = Graph.find_opt
 let empty = Graph.empty
 
 let filter = Graph.filter
+
+let map = Graph.map
 
 (* for an abstract value v, where f_keep(v) == false, find an abstract value v_keep, where
    f_keep(v_keep) == true and where v_keep has taint propagated from v *)
@@ -147,7 +151,7 @@ let allocate allocator address location memory =
 
 let java_resource_release address memory = add_one address Attribute.JavaResourceReleased memory
 
-let hack_async_await address memory = add_one address Attribute.HackAsyncAwaited memory
+let await_awaitable address memory = add_one address Attribute.AwaitedAwaitable memory
 
 let csharp_resource_release address memory = add_one address Attribute.CSharpResourceReleased memory
 
@@ -384,6 +388,8 @@ module type S = sig
 
   val filter_with_discarded_addrs : (key -> bool) -> t -> t * AbstractValue.t list
 
+  val map : (Attributes.t -> Attributes.t) -> t -> t
+
   val find_opt : key -> t -> Attributes.t option
 
   val add_one : key -> Attribute.t -> t -> t
@@ -396,7 +402,7 @@ module type S = sig
 
   val java_resource_release : key -> t -> t
 
-  val hack_async_await : key -> t -> t
+  val await_awaitable : key -> t -> t
 
   val remove_hack_builder : key -> t -> t
 

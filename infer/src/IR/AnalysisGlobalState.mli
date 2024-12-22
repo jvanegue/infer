@@ -10,10 +10,10 @@ open! IStd
 (** {2 Global state for the backend analyses}
 
     While global state should be kept under control at possible (so try to introduce as little of it
-    as possible!), it is sometimes too convenient to ignore. This module lets us do it safely, at
-    least until infer becomes multicore. In particular, global state is appropriately and safely
-    stashed away and restored when the analysis of a procedure is suspended to go analyze another
-    procedure with ondemand (see the {!Backend.Ondemand} module). *)
+    as possible!), it is sometimes too convenient to ignore. This module lets us do it safely. In
+    particular, global state (really, domain-local state) is appropriately and safely stashed away
+    and restored when the analysis of a procedure is suspended to go analyze another procedure with
+    ondemand (see the {!Backend.Ondemand} module). *)
 
 type t
 
@@ -32,6 +32,12 @@ val register : init:(unit -> unit) -> save:(unit -> 'a) -> restore:('a -> unit) 
 
 val register_ref : init:(unit -> 'a) -> 'a ref -> unit
 (** special case of a value stored in a reference; [init] sets the ref to [init ()] *)
+
+val register_dls : init:(unit -> 'a) -> 'a DLS.key -> unit
+(** special case of a value stored in domain-local storage; [init] sets the ref to [init ()] *)
+
+val register_dls_with_proc_desc_and_tenv : init:(Procdesc.t -> Tenv.t -> 'a) -> 'a DLS.key -> unit
+(** special case of a value stored in domain local storage *)
 
 val register_ref_with_proc_desc_and_tenv : init:(Procdesc.t -> Tenv.t -> 'a) -> 'a ref -> unit
 (** same as [register_ref] but [init] takes a proc desc and a tenv *)

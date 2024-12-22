@@ -204,6 +204,16 @@ module Name : sig
 
   val is_python_class : t -> bool
 
+  val is_python_final : t -> bool
+
+  val is_python_module : t -> bool
+
+  val is_python_module_attribute : t -> bool
+
+  val get_python_module_name : t -> string option
+
+  val get_python_module_attribute_infos : t -> (t * string) option
+
   module C : sig
     val from_string : string -> t
 
@@ -279,7 +289,7 @@ module Name : sig
 
   module Map : PrettyPrintable.PPMap with type key = t
 
-  module Hash : Caml.Hashtbl.S with type key = t
+  module Hash : Stdlib.Hashtbl.S with type key = t
 end
 
 val equal : t -> t -> bool
@@ -353,6 +363,8 @@ val shared_pointer_matcher : QualifiedCppName.Match.quals_matcher
 val is_shared_pointer : t -> bool
 
 val is_folly_coro : t -> bool
+
+val thrift_field_refs : string list
 
 val is_thrift_field_ref : t -> bool
 

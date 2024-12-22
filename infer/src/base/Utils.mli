@@ -112,7 +112,7 @@ val rm_all_in_dir : ?except:string list -> string -> unit
 val iter_dir : string -> f:(string -> unit) -> unit
 (** iterate on each entry in the directory except for "." and ".." *)
 
-val better_hash : 'a -> Caml.Digest.t
+val better_hash : 'a -> Stdlib.Digest.t
 (** Hashtbl.hash only hashes the first 10 meaningful values, [better_hash] uses everything. *)
 
 val unlink_file_on_exit : string -> unit
@@ -127,7 +127,8 @@ val timeit : f:(unit -> 'a) -> 'a * Mtime.Span.t
 (** Returns the execution time of [f] together with its result *)
 
 val do_in_dir : dir:string -> f:(unit -> 'a) -> 'a
-(** executes [f] after cding into [dir] and then restores original cwd *)
+(** executes [f] after cding into [dir] and then restores original cwd. Uses a mutex to prevent
+    races on [chdir] in multicore mode. *)
 
 val get_available_memory_MB : unit -> int option
 (** On Linux systems, return [Some x] where [MemAvailable x] is in [/proc/meminfo]. Returns [None]
@@ -152,3 +153,6 @@ val zip_fold : init:'a -> f:('a -> Zip.in_file -> Zip.entry -> 'a) -> zip_filena
 val is_term_dumb : unit -> bool
 (** Check if the terminal is "dumb" or otherwise has very limited functionality. For example, Emacs'
     eshell reports itself as a dumb terminal. *)
+
+val with_dls : 'a DLS.key -> f:('a -> 'a) -> unit
+(** get value in domain local storage, pass to [f] and set to result *)

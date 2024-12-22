@@ -476,7 +476,7 @@ let mk_ptsto_exp_footprint analysis_data pname tenv orig_prop (lexp, typ) max_st
       raise (Exceptions.Dangling_pointer_dereference (false, err_desc, __POS__)) ) ;
   let off_foot, eqs = laundry_offset_for_footprint max_stamp off in
   let subtype =
-    match !Language.curr_language with
+    match Language.get_language () with
     | Clang ->
         Subtype.exact
     | Java ->
@@ -1134,7 +1134,7 @@ let attr_has_annot is_annotation tenv prop exp =
         None
   in
   try List.find_map ~f:attr_has_annot (Attribute.get_for_exp tenv prop exp)
-  with Not_found_s _ | Caml.Not_found -> None
+  with Not_found_s _ | Stdlib.Not_found -> None
 
 
 let is_strexp_pt_fld_with_annot tenv obj_str is_annotation typ deref_exp (fld, strexp) =

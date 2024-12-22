@@ -25,13 +25,13 @@ module type PrintableEquatableType = sig
 end
 
 module type PrintableOrderedType = sig
-  include Caml.Set.OrderedType
+  include Stdlib.Set.OrderedType
 
   include PrintableType with type t := t
 end
 
 module type HashableSexpablePrintableOrderedType = sig
-  include Caml.Set.OrderedType
+  include Stdlib.Set.OrderedType
 
   include PrintableType with type t := t
 
@@ -41,13 +41,13 @@ module type HashableSexpablePrintableOrderedType = sig
 end
 
 module type PrintableEquatableOrderedType = sig
-  include Caml.Set.OrderedType
+  include Stdlib.Set.OrderedType
 
   include PrintableEquatableType with type t := t
 end
 
 module type PPSet = sig
-  include Caml.Set.S
+  include Stdlib.Set.S
 
   val is_singleton_or_more : t -> elt IContainer.singleton_or_more
 
@@ -155,7 +155,7 @@ module type MonoMap = sig
 end
 
 module type PPMap = sig
-  include Caml.Map.S
+  include Stdlib.Map.S
 
   val fold_map : 'a t -> init:'b -> f:('b -> 'a -> 'b * 'c) -> 'b * 'c t
 
@@ -264,6 +264,8 @@ module type PPUniqRankSet = sig
   (** in case an element with the same rank is present both in [lhs] and [rhs], keep the one from
       [lhs] in [union_prefer_left lhs rhs] *)
 
+  val merge : t -> t -> f:(elt option -> elt option -> elt option) -> t
+
   val filter : t -> f:(elt -> bool) -> t
 
   val filter_map : t -> f:(elt -> elt option) -> t
@@ -275,3 +277,25 @@ module MakePPUniqRankSet
     (Rank : PrintableEquatableOrderedType)
     (Val : PrintableRankedType with type rank = Rank.t) :
   PPUniqRankSet with type elt = Val.t and type rank = Rank.t
+
+module type ConcurrentMap = sig
+  type key
+
+  type 'a t
+
+  val empty : unit -> 'a t
+
+  val clear : 'a t -> unit
+
+  val add : 'a t -> key -> 'a -> unit
+
+  val filter : 'a t -> (key -> 'a -> bool) -> unit
+
+  val find_opt : 'a t -> key -> 'a option
+
+  val remove : 'a t -> key -> unit
+end
+
+(** a simple thread safe map that uses an atomic reference to a persistent map plus a mutex to
+    sequentialize updates *)
+module MakeConcurrentMap (Map : Stdlib.Map.S) : ConcurrentMap with type key = Map.key

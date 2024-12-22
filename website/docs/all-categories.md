@@ -13,6 +13,7 @@ Issue types in this category:
 - [GUARDEDBY_VIOLATION](/docs/next/all-issue-types#guardedby_violation)
 - [INTERFACE_NOT_THREAD_SAFE](/docs/next/all-issue-types#interface_not_thread_safe)
 - [LOCK_CONSISTENCY_VIOLATION](/docs/next/all-issue-types#lock_consistency_violation)
+- [STATIC_CONSTRUCTOR_STALL](/docs/next/all-issue-types#static_constructor_stall)
 - [THREAD_SAFETY_VIOLATION](/docs/next/all-issue-types#thread_safety_violation)
 
 ## Logic error
@@ -32,6 +33,7 @@ Issue types in this category:
 - [CXX_STRING_CAPTURED_IN_BLOCK](/docs/next/all-issue-types#cxx_string_captured_in_block)
 - [NIL_MESSAGING_TO_NON_POD](/docs/next/all-issue-types#nil_messaging_to_non_pod)
 - [NIL_MESSAGING_TO_NON_POD_LATENT](/docs/next/all-issue-types#nil_messaging_to_non_pod_latent)
+- [NSSTRING_INTERNAL_PTR_CAPTURED_IN_BLOCK](/docs/next/all-issue-types#nsstring_internal_ptr_captured_in_block)
 - [PULSE_REFERENCE_STABILITY](/docs/next/all-issue-types#pulse_reference_stability)
 - [PULSE_UNINITIALIZED_VALUE](/docs/next/all-issue-types#pulse_uninitialized_value)
 - [STACK_VARIABLE_ADDRESS_ESCAPE](/docs/next/all-issue-types#stack_variable_address_escape)
@@ -67,10 +69,11 @@ Unnecessary (or blocking) computation is performed, potentially causing a perfor
 
 Issue types in this category:
 - [CHECKERS_ALLOCATES_MEMORY](/docs/next/all-issue-types#checkers_allocates_memory)
-- [CHECKERS_ANNOTATION_REACHABILITY_ERROR](/docs/next/all-issue-types#checkers_annotation_reachability_error)
+- [CHECKERS_CALLS_EXPENSIVE_METHOD](/docs/next/all-issue-types#checkers_calls_expensive_method)
 - [CONFIG_IMPACT](/docs/next/all-issue-types#config_impact)
 - [INEFFICIENT_KEYSET_ITERATOR](/docs/next/all-issue-types#inefficient_keyset_iterator)
 - [IPC_ON_UI_THREAD](/docs/next/all-issue-types#ipc_on_ui_thread)
+- [LOCK_ON_UI_THREAD](/docs/next/all-issue-types#lock_on_ui_thread)
 - [PULSE_CONST_REFABLE](/docs/next/all-issue-types#pulse_const_refable)
 - [PULSE_READONLY_SHARED_PTR_PARAM](/docs/next/all-issue-types#pulse_readonly_shared_ptr_param)
 - [PULSE_UNNECESSARY_COPY](/docs/next/all-issue-types#pulse_unnecessary_copy)
@@ -122,6 +125,7 @@ Issue types in this category:
 - [BAD_MAP_LATENT](/docs/next/all-issue-types#bad_map_latent)
 - [BAD_RECORD](/docs/next/all-issue-types#bad_record)
 - [BAD_RECORD_LATENT](/docs/next/all-issue-types#bad_record_latent)
+- [INFINITE_RECURSION](/docs/next/all-issue-types#infinite_recursion)
 - [MISSING_REQUIRED_PROP](/docs/next/all-issue-types#missing_required_prop)
 - [MUTUAL_RECURSION_CYCLE](/docs/next/all-issue-types#mutual_recursion_cycle)
 - [NIL_INSERTION_INTO_COLLECTION](/docs/next/all-issue-types#nil_insertion_into_collection)
@@ -158,8 +162,6 @@ Issue types in this category:
 - [SCOPE_LEAKAGE](/docs/next/all-issue-types#scope_leakage)
 - [SENSITIVE_DATA_FLOW](/docs/next/all-issue-types#sensitive_data_flow)
 - [TAINT_ERROR](/docs/next/all-issue-types#taint_error)
-- [TOPL_ERROR](/docs/next/all-issue-types#topl_error)
-- [TOPL_ERROR_LATENT](/docs/next/all-issue-types#topl_error_latent)
 
 ## Ungated code
 
@@ -167,4 +169,13 @@ Code must be under a gating mechanism but isn't.
 
 Issue types in this category:
 - [CONFIG_IMPACT_STRICT](/docs/next/all-issue-types#config_impact_strict)
+
+## User defined property
+
+A user defined (custom) property is violated.
+
+Issue types in this category:
+- [CHECKERS_ANNOTATION_REACHABILITY_ERROR](/docs/next/all-issue-types#checkers_annotation_reachability_error)
+- [TOPL_ERROR](/docs/next/all-issue-types#topl_error)
+- [TOPL_ERROR_LATENT](/docs/next/all-issue-types#topl_error_latent)
 

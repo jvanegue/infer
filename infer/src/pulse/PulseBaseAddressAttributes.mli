@@ -21,6 +21,8 @@ module type S = sig
 
   val filter_with_discarded_addrs : (key -> bool) -> t -> t * AbstractValue.t list
 
+  val map : (Attributes.t -> Attributes.t) -> t -> t
+
   val find_opt : key -> t -> Attributes.t option
 
   val add_one : key -> Attribute.t -> t -> t
@@ -33,7 +35,7 @@ module type S = sig
 
   val java_resource_release : key -> t -> t
 
-  val hack_async_await : key -> t -> t
+  val await_awaitable : key -> t -> t
 
   val remove_hack_builder : key -> t -> t
 

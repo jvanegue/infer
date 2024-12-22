@@ -17,13 +17,13 @@ module CellId = struct
 
   let pp = Int.pp
 
-  let next_id = ref 0
+  let next_id = DLS.new_key (fun () -> 0)
 
-  let () = AnalysisGlobalState.register_ref ~init:(fun () -> 0) next_id
+  let () = AnalysisGlobalState.register_dls ~init:(fun () -> 0) next_id
 
   let next () =
-    let id = !next_id in
-    incr next_id ;
+    let id = DLS.get next_id in
+    DLS.set next_id (id + 1) ;
     id
 
 
@@ -64,7 +64,7 @@ and t =
   | UnknownCall of {f: CallEvent.t; actuals: t list; location: Location.t; timestamp: Timestamp.t}
 [@@deriving compare, equal]
 
-module EventSet = Caml.Set.Make (struct
+module EventSet = Stdlib.Set.Make (struct
   type t = event [@@deriving compare]
 end)
 

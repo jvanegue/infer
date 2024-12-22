@@ -26,6 +26,7 @@ type category =
   | RuntimeException
   | SensitiveDataFlow
   | UngatedCode
+  | UserDefinedProperty
 [@@deriving compare, equal, enumerate]
 
 let string_of_severity = function
@@ -60,6 +61,8 @@ let string_of_category = function
       "Runtime exception"
   | UngatedCode ->
       "Ungated code"
+  | UserDefinedProperty ->
+      "User defined property"
 
 
 let category_documentation = function
@@ -88,6 +91,8 @@ let category_documentation = function
       "Sensitive data is flowing where it shouldn't."
   | UngatedCode ->
       "Code must be under a gating mechanism but isn't."
+  | UserDefinedProperty ->
+      "A user defined (custom) property is violated."
 
 
 (* Make sure we cannot create new issue types other than by calling [register_from_string]. This is because
@@ -459,14 +464,14 @@ let checkers_allocates_memory =
 
 
 let checkers_annotation_reachability_error =
-  register ~category:PerfRegression ~id:"CHECKERS_ANNOTATION_REACHABILITY_ERROR"
+  register ~category:UserDefinedProperty ~id:"CHECKERS_ANNOTATION_REACHABILITY_ERROR"
     ~hum:"Annotation Reachability Error" Error AnnotationReachability
     ~user_documentation:[%blob "./documentation/issues/CHECKERS_ANNOTATION_REACHABILITY_ERROR.md"]
 
 
 let checkers_calls_expensive_method =
-  register ~category:NoCategory ~id:"CHECKERS_CALLS_EXPENSIVE_METHOD" ~hum:"Expensive Method Called"
-    Error AnnotationReachability
+  register ~category:PerfRegression ~id:"CHECKERS_CALLS_EXPENSIVE_METHOD"
+    ~hum:"Expensive Method Called" Error AnnotationReachability
     ~user_documentation:[%blob "./documentation/issues/CHECKERS_CALLS_EXPENSIVE_METHOD.md"]
 
 
@@ -566,6 +571,15 @@ let deadlock =
     ~user_documentation:[%blob "./documentation/issues/DEADLOCK.md"]
 
 
+let static_constructor_stall =
+  register ~category:Concurrency ~enabled:false ~id:"STATIC_CONSTRUCTOR_STALL" Error
+    StaticConstructorStallChecker
+    ~user_documentation:
+      "Calling certain methods, for instance dispatch_once, during the static initialization of \
+       objects is risky. It could cause deadlocks, because other objects might not have been \
+       initialized yet."
+
+
 let divide_by_zero =
   register ~category:NoCategory ~enabled:false ~id:"DIVIDE_BY_ZERO" Error Biabduction (* TODO *)
     ~user_documentation:""
@@ -641,6 +655,14 @@ let inferbo_alloc_may_be_negative =
 
 let infinite_cost_call ~kind = register_cost ~enabled:false "INFINITE_%s" ~kind
 
+let infinite_recursion =
+  register ~enabled:false ~category:RuntimeException ~id:"INFINITE_RECURSION" Warning Pulse
+    ~user_documentation:
+      "A special case of [MUTUAL_RECURSION_CYCLE](#mutual_recursion_cycle) where we detected that \
+       the recursive call is made with the exact same values, which guarantees an infinite \
+       recursion."
+
+
 let inherently_dangerous_function =
   register_hidden ~id:"INHERENTLY_DANGEROUS_FUNCTION" Warning Biabduction
 
@@ -703,6 +725,11 @@ let leak_unknown_origin = register_hidden ~enabled:false ~id:"Leak_unknown_origi
 let lock_consistency_violation =
   register Warning ~id:"LOCK_CONSISTENCY_VIOLATION" ~category:Concurrency RacerD
     ~user_documentation:[%blob "./documentation/issues/LOCK_CONSISTENCY_VIOLATION.md"]
+
+
+let lock_on_ui_thread =
+  register ~hum:"Lock on UI Thread" ~id:"LOCK_ON_UI_THREAD" ~category:PerfRegression ~enabled:false
+    Warning Starvation ~user_documentation:[%blob "./documentation/issues/LOCK_ON_UI_THREAD.md"]
 
 
 let lockless_violation =
@@ -879,7 +906,8 @@ let pulse_unawaited_awaitable =
 
 let pulse_unfinished_builder =
   register ~enabled:false ~category:ResourceLeak ~id:"PULSE_UNFINISHED_BUILDER" Error Pulse
-    ~hum:"Unfinished Builder" ~user_documentation:"See [RESOURCE_LEAK](#resource_leak)"
+    ~hum:"Unfinished Builder"
+    ~user_documentation:[%blob "./documentation/issues/PULSE_UNFINISHED_BUILDER.md"]
 
 
 let pulse_uninitialized_const =
@@ -994,7 +1022,7 @@ let thread_safety_violation =
 
 
 let topl_error =
-  register_with_latent ~category:SensitiveDataFlow ~id:"TOPL_ERROR" Error Topl
+  register_with_latent ~category:UserDefinedProperty ~id:"TOPL_ERROR" Error Topl
     ~user_documentation:[%blob "./documentation/issues/TOPL_ERROR.md"]
 
 

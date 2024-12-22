@@ -536,16 +536,16 @@ let get env x =
 let set = List.Assoc.add ~equal:String.equal
 
 let make_field class_name field_name : Fieldname.t =
-  match !Language.curr_language with
+  match Language.get_language () with
   | Erlang -> (
     match ErlangTypeName.from_string class_name with
     | None ->
         L.die UserError "Unknown/unsupported Erlang type %s" class_name
     | Some typ ->
         Fieldname.make (ErlangType typ) field_name )
-  | _ ->
+  | lang ->
       L.die InternalError "Field access is not supported for current language (%s)"
-        (Language.to_string !Language.curr_language)
+        (Language.to_string lang)
 
 
 let deref_field_access pulse_state value class_name field_name : Formula.operand option =
@@ -716,7 +716,7 @@ let static_match_call tenv return arguments procname label : tcontext option =
 
 
 module Debug = struct
-  let dropped_disjuncts_count = ref 0
+  let dropped_disjuncts_count = DLS.new_key (fun () -> 0)
 
   let rec matched_transitions =
     lazy
@@ -743,9 +743,11 @@ module Debug = struct
         (F.pp_print_list pp) unseen
 
 
-  let () = AnalysisGlobalState.register_ref dropped_disjuncts_count ~init:(fun () -> 0)
+  let () = AnalysisGlobalState.register_dls dropped_disjuncts_count ~init:(fun () -> 0)
 
-  let get_dropped_disjuncts_count () = !dropped_disjuncts_count
+  let get_dropped_disjuncts_count () = DLS.get dropped_disjuncts_count
+
+  let set_dropped_disjuncts_count count = DLS.set dropped_disjuncts_count count
 end
 
 (** Returns a list of transitions whose pattern matches (e.g., event type matches). Each match
@@ -867,7 +869,7 @@ let apply_limits pulse_state state =
     let old_len = List.length state in
     let new_len = (Config.topl_max_disjuncts / 2) + 1 in
     if Config.trace_topl then
-      Debug.dropped_disjuncts_count := !Debug.dropped_disjuncts_count + old_len - new_len ;
+      Debug.set_dropped_disjuncts_count (Debug.get_dropped_disjuncts_count () + old_len - new_len) ;
     let add_score simple_state =
       let score = Constraint.size simple_state.pruned in
       if score > Config.topl_max_conjuncts then None else Some (score, simple_state)
@@ -1006,9 +1008,9 @@ let filter_for_summary pulse_state state = drop_infeasible pulse_state state
 let description_of_step_data step_data =
   ( match step_data with
   | SmallStep (Call {procname}) | LargeStep {procname} ->
-      F.fprintf F.str_formatter "@[call to %a@]" Procname.pp_verbose procname
+      F.fprintf (F.get_str_formatter ()) "@[call to %a@]" Procname.pp_verbose procname
   | SmallStep (ArrayWrite _) ->
-      F.fprintf F.str_formatter "@[write to array@]" ) ;
+      F.fprintf (F.get_str_formatter ()) "@[write to array@]" ) ;
   F.flush_str_formatter ()
 
 

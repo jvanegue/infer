@@ -539,10 +539,11 @@ OPTIONS
            infer-reportdiff(1).
 
        --no-default-checkers
-           Deactivates: Default checkers: --fragment-retains-view,
-           --inefficient-keyset-iterator, --liveness,
-           --parameter-not-null-checked, --pulse, --racerd, --siof,
-           --self-in-block, --starvation (Conversely: --default-checkers)
+           Deactivates: Default checkers: --static-constructor-stall-checker,
+           --fragment-retains-view, --inefficient-keyset-iterator,
+           --liveness, --parameter-not-null-checked, --pulse, --racerd,
+           --siof, --self-in-block, --starvation (Conversely:
+           --default-checkers)
            See also infer-analyze(1).
 
        --dependencies
@@ -652,6 +653,7 @@ OPTIONS
              INFERBO_ALLOC_MAY_BE_BIG (enabled by default),
              INFERBO_ALLOC_MAY_BE_NEGATIVE (enabled by default),
              INFINITE_EXECUTION_TIME (disabled by default),
+             INFINITE_RECURSION (disabled by default),
              INHERENTLY_DANGEROUS_FUNCTION (enabled by default),
              INTEGER_OVERFLOW_L1 (enabled by default),
              INTEGER_OVERFLOW_L2 (enabled by default),
@@ -666,6 +668,7 @@ OPTIONS
              LINEAGE_FLOW (enabled by default),
              LOCKLESS_VIOLATION (enabled by default),
              LOCK_CONSISTENCY_VIOLATION (enabled by default),
+             LOCK_ON_UI_THREAD (disabled by default),
              Leak_after_array_abstraction (enabled by default),
              Leak_in_footprint (enabled by default),
              Leak_unknown_origin (disabled by default),
@@ -745,6 +748,7 @@ OPTIONS
              SKIP_FUNCTION (disabled by default),
              STACK_VARIABLE_ADDRESS_ESCAPE (enabled by default),
              STARVATION (enabled by default),
+             STATIC_CONSTRUCTOR_STALL (disabled by default),
              STATIC_INITIALIZATION_ORDER_FIASCO (enabled by default),
              STRICT_MODE_VIOLATION (enabled by default),
              STRONG_SELF_NOT_CHECKED (enabled by default),
@@ -1295,6 +1299,12 @@ OPTIONS
            expensive by the performance critical checker.
            See also infer-analyze(1).
 
+       --multicore
+           Activates: [EXPERIMENTAL] uses multi-threading for analysis,
+           currently partially or not implemented. (Conversely:
+           --no-multicore)
+           See also infer-analyze(1).
+
        --never-returning-null json
            [Java only, all analyses] Matcher or list of matchers for
            functions that never return null.
@@ -1576,6 +1586,10 @@ OPTIONS
            Pulse. Accepted formats are method or namespace::method
            See also infer-analyze(1).
 
+       --pulse-model-unknown-pure +string
+           Regex of methods that should be modelled as unknown pure in Pulse
+           See also infer-analyze(1).
+
        --pulse-model-unreachable +string
            Methods to be modeled as unreachable.
            See also infer-analyze(1).
@@ -1638,6 +1652,12 @@ OPTIONS
        --pulse-only
            Activates: Enable pulse and disable all other checkers
            (Conversely: --no-pulse-only)
+           See also infer-analyze(1).
+
+       --pulse-over-approximate-reasoning
+           Activates: [EXPERIMENTAL] add over-approximate reasoning on top of
+           the under-approximate, disjunctive reasoning of Pulse.
+           (Conversely: --no-pulse-over-approximate-reasoning)
            See also infer-analyze(1).
 
        --pulse-recency-limit int
@@ -2218,6 +2238,18 @@ OPTIONS
            (Conversely: --no-starvation-only)
            See also infer-analyze(1).
 
+       --no-static-constructor-stall-checker
+           Deactivates: static-constructor-stall-checker checker: Detect if
+           dispatch_once is called from a static constructor. (Conversely:
+           --static-constructor-stall-checker)
+           See also infer-analyze(1).
+
+       --static-constructor-stall-checker-only
+           Activates: Enable static-constructor-stall-checker and disable all
+           other checkers (Conversely:
+           --no-static-constructor-stall-checker-only)
+           See also infer-analyze(1).
+
        --stats-dir-current path
            The infer-out/stats from the current run. Together with
            --stats-dir-previous, make infer reportdiff compute the difference
@@ -2618,11 +2650,6 @@ INTERNAL OPTIONS
            An analysis worker will trigger compaction if its heap size is
            equal or great to this value in Gigabytes. Defaults to 8
 
-       --compaction-minimum-interval-s int
-           An analysis worker will only trigger compaction if this amount of
-           time (in seconds) has elapsed since last compaction. Defaults to
-           15
-
        --compilation-database-escaped-reset
            Set --compilation-database-escaped to the empty list.
 
@@ -2631,6 +2658,10 @@ INTERNAL OPTIONS
 
        --complete-capture-from-reset
            Cancel the effect of --complete-capture-from.
+
+       --no-compute-captured-context
+           Deactivates: Compute context information for captured variables in
+           Objective-C blocks (Conversely: --compute-captured-context)
 
        --config-impact-config-field-patterns +regex
            Register known config fields that have a config value. The matched
@@ -3119,6 +3150,9 @@ INTERNAL OPTIONS
        --pulse-model-transfer-ownership-reset
            Set --pulse-model-transfer-ownership to the empty list.
 
+       --pulse-model-unknown-pure-reset
+           Set --pulse-model-unknown-pure to the empty list.
+
        --pulse-model-unreachable-reset
            Set --pulse-model-unreachable to the empty list.
 
@@ -3315,22 +3349,24 @@ INTERNAL OPTIONS
                
 
        --scuba-execution-id int64
-           Execution ID attached to all samples logged to scuba
+           [DOES NOTHING] Execution ID attached to all samples logged to
+           scuba
 
        --scuba-execution-id-reset
            Cancel the effect of --scuba-execution-id.
 
        --scuba-logging
-           Activates: (direct) logging to scuba (Conversely:
+           Activates: [DOES NOTHING] (direct) logging to scuba (Conversely:
            --no-scuba-logging)
 
        --scuba-normal +key=value
-           add an extra string (normal) field to be set for each sample of
-           scuba, format <name>=<value>
+           [DOES NOTHING] add an extra string (normal) field to be set for
+           each sample of scuba, format <name>=<value>
 
        --scuba-tags +key=value
-           add an extra set of strings (tagset) field to be set for each
-           sample of scuba, format <name>=(<value>,<value>,<value>|NONE)
+           [DOES NOTHING] add an extra set of strings (tagset) field to be
+           set for each sample of scuba, format
+           <name>=(<value>,<value>,<value>|NONE)
 
        --select-reset
            Cancel the effect of --select.

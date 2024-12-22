@@ -1429,7 +1429,7 @@ module Term = struct
 
 
   module VarMap = struct
-    include Caml.Map.Make (struct
+    include Stdlib.Map.Make (struct
       type nonrec t = t [@@deriving compare]
     end)
 
@@ -1884,7 +1884,7 @@ module Atom = struct
   let simplify_linear atom = map_terms atom ~f:Term.simplify_linear
 
   module Set = struct
-    include Caml.Set.Make (struct
+    include Stdlib.Set.Make (struct
       type nonrec t = t [@@deriving compare]
     end)
 
@@ -1900,7 +1900,7 @@ module Atom = struct
   end
 
   module Map = struct
-    include Caml.Map.Make (struct
+    include Stdlib.Map.Make (struct
       type nonrec t = t [@@deriving compare]
     end)
 
@@ -1937,7 +1937,7 @@ let pp_new_eqs fmt new_eqs =
 module MakeOccurrences (In : sig
   type t
 
-  module Set : Caml.Set.S with type elt = t
+  module Set : Stdlib.Set.S with type elt = t
 
   val pp_set : (F.formatter -> Var.t -> unit) -> F.formatter -> Set.t -> unit
 end) =
@@ -1984,7 +1984,7 @@ module TermDomainOrRange = struct
 
   type t = Term.t * domain_or_range [@@deriving compare]
 
-  module Set = Caml.Set.Make (struct
+  module Set = Stdlib.Set.Make (struct
     type nonrec t = t [@@deriving compare]
   end)
 
@@ -2027,6 +2027,8 @@ module InstanceOf = struct
 
   let pp_instance_fact fmt inf =
     match inf with
+    | Known {typ} when Language.curr_language_is Python ->
+        F.fprintf fmt "%a" (Typ.pp_full Pp.text) typ
     | Known {typ; source_file} ->
         F.fprintf fmt "%a, SourceFile %a" (Typ.pp_full Pp.text) typ (Pp.option SourceFile.pp)
           source_file
@@ -2308,6 +2310,10 @@ module Formula = struct
     val get_terminal_terms : t -> Term.Set.t
 
     (* val is_empty : t -> bool *)
+
+    val join : t -> t -> t
+
+    val remove_conditions_for_join : Atom.t list -> t -> t -> t
 
     val unsafe_mk :
          var_eqs:var_eqs
@@ -2645,20 +2651,28 @@ module Formula = struct
             L.die InternalError "Failed attempt to copy type constraints" )
 
 
-    let remove_term_eq t v phi =
-      Debug.p "remove_term_eq %a->%a in %a@\n" (Term.pp Var.pp) t Var.pp v (pp_with_pp_var Var.pp)
-        phi ;
+    let remove_term_eq_ t v term_eqs term_eqs_occurrences =
       let term_eqs_occurrences =
         match Term.get_as_linear t with
         | Some _ ->
-            phi.term_eqs_occurrences
+            term_eqs_occurrences
         | None ->
-            Term.fold_variables t ~init:phi.term_eqs_occurrences ~f:(fun occurrences v' ->
+            Term.fold_variables t ~init:term_eqs_occurrences ~f:(fun occurrences v' ->
                 TermMapOccurrences.remove v' ~occurred_in:(t, Domain) occurrences )
             |> TermMapOccurrences.remove v ~occurred_in:(t, Range)
             |> TermMapOccurrences.remove v ~occurred_in:(t, DomainAndRange)
       in
-      {phi with term_eqs= Term.VarMap.remove t phi.term_eqs; term_eqs_occurrences}
+      let term_eqs = Term.VarMap.remove t term_eqs in
+      (term_eqs, term_eqs_occurrences)
+
+
+    let remove_term_eq t v phi =
+      Debug.p "remove_term_eq %a->%a in %a@\n" (Term.pp Var.pp) t Var.pp v (pp_with_pp_var Var.pp)
+        phi ;
+      let term_eqs, term_eqs_occurrences =
+        remove_term_eq_ t v phi.term_eqs phi.term_eqs_occurrences
+      in
+      {phi with term_eqs; term_eqs_occurrences}
 
 
     let add_term_eq t v phi =
@@ -2670,7 +2684,7 @@ module Formula = struct
           let term_eqs_occurrences =
             match Term.get_as_linear t with
             | Some _ ->
-                phi.term_eqs_occurrences
+                TermMapOccurrences.add v ~occurs_in:(t, Range) phi.term_eqs_occurrences
             | None ->
                 let term_eqs_occurrences, added_to_range =
                   Term.fold_variables t ~init:(phi.term_eqs_occurrences, false)
@@ -2789,7 +2803,6 @@ module Formula = struct
       in
       {phi with term_conditions= Atom.Set.add atom phi.term_conditions; atoms_occurrences}      
 
-
     let rec and_termcond_atoms (phi:t) (atoms: Atom.t list) : t =
       match atoms with
       | hd::tl ->
@@ -2801,12 +2814,19 @@ module Formula = struct
       (* L.debug Analysis Quiet "JV: Adding term_conditions2 - Term \n"; *)
       {phi with term_conditions2= Term.Set.add term phi.term_conditions2}
            
-    let remove_atom atom phi =
+    let remove_atom_ atom atoms atoms_occurrences =
+
       let atoms_occurrences =
-        Atom.fold_variables atom ~init:phi.atoms_occurrences ~f:(fun occurrences v' ->
+        Atom.fold_variables atom ~init:atoms_occurrences ~f:(fun occurrences v' ->
             AtomMapOccurrences.remove v' ~occurred_in:atom occurrences )
       in
-      {phi with atoms= Atom.Set.remove atom phi.atoms; atoms_occurrences}
+      let atoms = Atom.Set.remove atom atoms in
+      (atoms, atoms_occurrences)
+
+
+    let remove_atom atom phi =
+      let atoms, atoms_occurrences = remove_atom_ atom phi.atoms phi.atoms_occurrences in
+      {phi with atoms; atoms_occurrences}
 
 
     let remove_from_linear_eqs_occurrences v phi =
@@ -2861,9 +2881,101 @@ module Formula = struct
       ; linear_eqs_occurrences
       ; tableau_occurrences
       ; term_eqs_occurrences
-      ; atoms_occurrences
       ; term_conditions
       ; term_conditions2 }
+      ; atoms_occurrences }
+
+    let join phi1 _phi2 =
+      (* TODO: do phi1 /\ phi2 *)
+      phi1
+
+
+    let scramble_var phi_rhs phi v =
+      let remove_if_different mem_lhs test_equal find remove lhs rhs =
+        if (not mem_lhs) || test_equal (find v lhs) (find v rhs) then (lhs, false)
+        else (remove v lhs, true)
+      in
+      let var_eqs, _removed =
+        remove_if_different true VarUF.equal_repr
+          (fun v var_eqs -> VarUF.find var_eqs v)
+          VarUF.remove phi.var_eqs phi_rhs.var_eqs
+      in
+      let const_eqs, _removed =
+        remove_if_different (Var.Map.mem v phi.const_eqs) (Option.equal Term.equal) Var.Map.find_opt
+          Var.Map.remove phi.const_eqs phi_rhs.const_eqs
+      in
+      let type_constraints, _removed =
+        remove_if_different
+          (Var.Map.mem v phi.type_constraints)
+          (Option.equal InstanceOf.equal_instance_fact)
+          Var.Map.find_opt Var.Map.remove phi.type_constraints phi_rhs.type_constraints
+      in
+      let linear_eqs, removed_linear_eqs =
+        remove_if_different (Var.Map.mem v phi.linear_eqs) (Option.equal LinArith.equal)
+          Var.Map.find_opt Var.Map.remove phi.linear_eqs phi_rhs.linear_eqs
+      in
+      let linear_eqs_occurrences =
+        if removed_linear_eqs then Var.Map.remove v phi.linear_eqs_occurrences
+        else phi.linear_eqs_occurrences
+      in
+      let tableau, removed_tableau =
+        remove_if_different (Var.Map.mem v phi.tableau) (Option.equal LinArith.equal)
+          Var.Map.find_opt Var.Map.remove phi.tableau phi_rhs.tableau
+      in
+      let tableau_occurrences =
+        if removed_tableau then Var.Map.remove v phi.tableau_occurrences
+        else phi.tableau_occurrences
+      in
+      let intervals, _removed =
+        remove_if_different (Var.Map.mem v phi.intervals) (Option.equal CItv.equal) Var.Map.find_opt
+          Var.Map.remove phi.intervals phi_rhs.intervals
+      in
+      let atoms, atoms_occurrences =
+        match Var.Map.find_opt v phi.atoms_occurrences with
+        | None ->
+            (phi.atoms, phi.atoms_occurrences)
+        | Some atoms_v ->
+            Atom.Set.fold
+              (fun atom_v (atoms, atoms_occurrences) ->
+                if Atom.Set.mem atom_v phi_rhs.atoms then (atoms, atoms_occurrences)
+                else remove_atom_ atom_v atoms atoms_occurrences )
+              atoms_v
+              (phi.atoms, phi.atoms_occurrences)
+      in
+      let term_eqs, term_eqs_occurrences =
+        match Var.Map.find_opt v phi.term_eqs_occurrences with
+        | None ->
+            (phi.term_eqs, phi.term_eqs_occurrences)
+        | Some term_eqs_v ->
+            TermDomainOrRange.Set.fold
+              (fun (term_v, _) (term_eqs, term_eqs_occurrences) ->
+                if Term.VarMap.find_opt term_v phi_rhs.term_eqs |> Option.exists ~f:(Var.equal v)
+                then (term_eqs, term_eqs_occurrences)
+                else remove_term_eq_ term_v v term_eqs term_eqs_occurrences )
+              term_eqs_v
+              (phi.term_eqs, phi.term_eqs_occurrences)
+      in
+      { var_eqs
+      ; const_eqs
+      ; type_constraints
+      ; linear_eqs
+      ; term_eqs
+      ; tableau
+      ; intervals
+      ; atoms
+      ; linear_eqs_occurrences
+      ; tableau_occurrences
+      ; term_eqs_occurrences
+      ; atoms_occurrences }
+
+
+    let remove_condition_for_join atom phi_lhs phi_rhs =
+      Atom.fold_variables atom ~init:phi_lhs ~f:(scramble_var phi_rhs)
+
+
+    let remove_conditions_for_join atoms phi_lhs phi_rhs =
+      List.fold atoms ~init:phi_lhs ~f:(fun phi atom -> remove_condition_for_join atom phi phi_rhs)
+
   end
 
   include Unsafe
@@ -4628,20 +4740,20 @@ module DeadVariables = struct
     (* a map where a vertex maps to the set of destination vertices *)
     (* unused but can be useful for debugging *)
     let _pp_graph fmt graph =
-      Caml.Hashtbl.iter (fun v vs -> F.fprintf fmt "%a->{%a}" Var.pp v Var.Set.pp vs) graph
+      Stdlib.Hashtbl.iter (fun v vs -> F.fprintf fmt "%a->{%a}" Var.pp v Var.Set.pp vs) graph
     in
     (* 16 because why not *)
-    let graph = Caml.Hashtbl.create 16 in
+    let graph = Stdlib.Hashtbl.create 16 in
     (* add [src->vs] to [graph] (but not the symmetric edges) *)
     let add_set src vs =
       let dest =
-        match Caml.Hashtbl.find_opt graph src with
+        match Stdlib.Hashtbl.find_opt graph src with
         | None ->
             vs
         | Some dest0 ->
             Var.Set.union vs dest0
       in
-      Caml.Hashtbl.replace graph src dest
+      Stdlib.Hashtbl.replace graph src dest
     in
     (* add edges between all pairs of [vs] *)
     let add_all vs = Var.Set.iter (fun v -> add_set v vs) vs in
@@ -4685,8 +4797,8 @@ module DeadVariables = struct
       in [graph]. *)
   let get_reachable_from graph vs =
     (* HashSet represented as a [Hashtbl.t] mapping items to [()], start with the variables in [vs] *)
-    let reachable = Caml.Hashtbl.create (Var.Set.cardinal vs) in
-    Var.Set.iter (fun v -> Caml.Hashtbl.add reachable v ()) vs ;
+    let reachable = Stdlib.Hashtbl.create (Var.Set.cardinal vs) in
+    Var.Set.iter (fun v -> Stdlib.Hashtbl.add reachable v ()) vs ;
     (* Do a Dijkstra-style graph transitive closure in [graph] starting from [vs]. At each step,
        [new_vs] contains the variables to explore next. Iterative to avoid blowing the stack. *)
     let new_vs = ref (Var.Set.elements vs) in
@@ -4694,17 +4806,17 @@ module DeadVariables = struct
       (* pop [new_vs] *)
       let[@warning "-partial-match"] (v :: rest) = !new_vs in
       new_vs := rest ;
-      Caml.Hashtbl.find_opt graph v
+      Stdlib.Hashtbl.find_opt graph v
       |> Option.iter ~f:(fun vs' ->
              Var.Set.iter
                (fun v' ->
-                 if not (Caml.Hashtbl.mem reachable v') then (
+                 if not (Stdlib.Hashtbl.mem reachable v') then (
                    (* [v'] seen for the first time: we need to explore it *)
-                   Caml.Hashtbl.replace reachable v' () ;
+                   Stdlib.Hashtbl.replace reachable v' () ;
                    new_vs := v' :: !new_vs ) )
                vs' )
     done ;
-    Caml.Hashtbl.to_seq_keys reachable |> Var.Set.of_seq
+    Stdlib.Hashtbl.to_seq_keys reachable |> Var.Set.of_seq
 
 
   (** Get rid of atoms when they contain only variables that do not appear in atoms mentioning
@@ -4959,3 +5071,53 @@ let pp_formula_explained pp_var fmt {phi} =
 let pp_conditions_explained pp_var fmt {conditions} =
   if not (Atom.Map.is_empty conditions) then
     F.fprintf fmt "@;∧ %a" (pp_conditions pp_var) conditions
+
+
+let join_conditions conditions_lhs conditions_rhs =
+  let conditions_join =
+    Atom.Map.merge
+      (fun _atom depth1 depth2 ->
+        (* keep only atoms present on both sides, with the min of their call depths *)
+        Option.both depth1 depth2 |> Option.map ~f:(fun (depth1, depth2) -> Int.min depth1 depth2)
+        )
+      conditions_lhs conditions_rhs
+  in
+  let atoms_not_in ~not_in:atoms_not_in atoms =
+    Atom.Map.merge
+      (fun _atom atom_depth not_in ->
+        match (atom_depth, not_in) with
+        | Some _, None ->
+            atom_depth
+        | None, _ | Some _, Some _ ->
+            None )
+      atoms atoms_not_in
+    |> Atom.Map.bindings |> List.map ~f:fst
+  in
+  let kill_conditions_lhs = atoms_not_in ~not_in:conditions_join conditions_lhs in
+  let kill_conditions_rhs = atoms_not_in ~not_in:conditions_join conditions_rhs in
+  (conditions_join, kill_conditions_lhs, kill_conditions_rhs)
+
+
+(* This relies on the idea that two formulas for the same procedure must be different only because
+   the path conditions are different. All other variables not involved in the path conditions are
+   the results of being created fresh to hold some intermediate values created by the program and so
+   can be handled with a conjunction (since they will appear only on one side).
+
+   Given that, the strategy is to compute the conditions that are common to both sides, and those
+   that are present only on one side need to be removed from the formulas. The removal of facts is
+   done brutally by forgetting all facts involving any variable present in these conditions. This
+   should be a valid over-approximation.
+
+   NOTE: It would be good to know which variables were created fresh in [phi1] and in [phi2] and
+   automatically keep information about these, since they cannot appear in the other formula and
+   their valuation doesn't matter for the formula where they don't belong. Instead, we rely on
+   conditions to tell which variables need to be forgotten about but that is over-approximate (and
+   fragile: it could be that some consequences are not completely cleaned up this way). *)
+let join {conditions= conditions_lhs; phi= phi_lhs} {conditions= conditions_rhs; phi= phi_rhs} =
+  let conditions_join, killed_conditions_lhs, killed_conditions_rhs =
+    join_conditions conditions_lhs conditions_rhs
+  in
+  let phi_lhs = Formula.remove_conditions_for_join killed_conditions_lhs phi_lhs phi_rhs in
+  let phi_rhs = Formula.remove_conditions_for_join killed_conditions_rhs phi_rhs phi_lhs in
+  let phi_join = Formula.join phi_lhs phi_rhs in
+  {conditions= conditions_join; phi= phi_join}

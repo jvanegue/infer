@@ -17,6 +17,7 @@ type t =
   ; config_impact_analysis: ConfigImpactAnalysis.Summary.t Lazy.t option
   ; cost: CostDomain.summary Lazy.t option
   ; disjunctive_demo: DisjunctiveDemo.domain Lazy.t option
+  ; static_constructor_stall_checker: StaticConstructorStallChecker.Summary.t Lazy.t option
   ; lab_resource_leaks: ResourceLeakDomain.summary Lazy.t option
   ; litho_required_props: LithoDomain.summary Lazy.t option
   ; pulse: PulseSummary.t Lazy.t option
@@ -64,6 +65,8 @@ let all_fields =
     ~config_impact_analysis:(fun f -> mk f ConfigImpactAnalysis ConfigImpactAnalysis.Summary.pp)
     ~cost:(fun f -> mk f Cost CostDomain.pp_summary)
     ~disjunctive_demo:(fun f -> mk f DisjunctiveDemo DisjunctiveDemo.pp_domain)
+    ~static_constructor_stall_checker:(fun f ->
+      mk f StaticConstructorStallChecker StaticConstructorStallChecker.Summary.pp )
     ~litho_required_props:(fun f -> mk f LithoRequiredProps LithoDomain.pp_summary)
     ~pulse:(fun f -> mk_full f Pulse PulseSummary.pp)
     ~purity:(fun f -> mk f Purity PurityDomain.pp_summary)
@@ -108,6 +111,7 @@ let empty =
   ; config_impact_analysis= None
   ; cost= None
   ; disjunctive_demo= None
+  ; static_constructor_stall_checker= None
   ; lab_resource_leaks= None
   ; litho_required_props= None
   ; pulse= None
@@ -206,8 +210,10 @@ module SQLite = struct
     Fields.make_creator ~annot_map:data_of_sqlite_column ~biabduction:data_of_sqlite_column
       ~buffer_overrun_analysis:data_of_sqlite_column ~buffer_overrun_checker:data_of_sqlite_column
       ~config_impact_analysis:data_of_sqlite_column ~cost:data_of_sqlite_column
-      ~disjunctive_demo:data_of_sqlite_column ~litho_required_props:data_of_sqlite_column
-      ~pulse:data_of_sqlite_column ~purity:data_of_sqlite_column ~racerd:data_of_sqlite_column
+      ~disjunctive_demo:data_of_sqlite_column
+      ~static_constructor_stall_checker:data_of_sqlite_column
+      ~litho_required_props:data_of_sqlite_column ~pulse:data_of_sqlite_column
+      ~purity:data_of_sqlite_column ~racerd:data_of_sqlite_column
       ~lab_resource_leaks:data_of_sqlite_column ~scope_leakage:data_of_sqlite_column
       ~siof:data_of_sqlite_column ~lineage:data_of_sqlite_column
       ~lineage_shape:data_of_sqlite_column ~starvation:data_of_sqlite_column
@@ -257,6 +263,7 @@ module SQLite = struct
     ; config_impact_analysis= load table ~proc_uid ConfigImpactAnalysis
     ; cost= load table ~proc_uid Cost
     ; disjunctive_demo= load table ~proc_uid DisjunctiveDemo
+    ; static_constructor_stall_checker= load table ~proc_uid StaticConstructorStallChecker
     ; lab_resource_leaks= load table ~proc_uid LabResourceLeaks
     ; litho_required_props= load table ~proc_uid LithoRequiredProps
     ; pulse= load table ~proc_uid Pulse

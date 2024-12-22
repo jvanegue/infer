@@ -11,7 +11,7 @@ open Javalib_pack
 module L = Logging
 
 let init_global_state source_file =
-  Language.curr_language := Language.Java ;
+  Language.set_language Java ;
   DB.Results_dir.init source_file ;
   Ident.NameGenerator.reset () ;
   JContext.reset_exn_node_table ()
@@ -101,7 +101,7 @@ let do_all_files classpath program =
   let translate_source_file basename package_opt source_file =
     if not (skip source_file) then do_source_file program tenv basename package_opt source_file
   in
-  if String.Map.is_empty sources then (
+  if IString.Map.is_empty sources then (
     L.(debug Capture Medium) "no source files found, capturing class files directly@." ;
     JBasics.ClassSet.iter
       (fun cn ->
@@ -113,8 +113,8 @@ let do_all_files classpath program =
             Option.iter ~f:(do_class tenv program cn) node )
       classes )
   else
-    String.Map.iteri
-      ~f:(fun ~key:basename ~data:file_entry ->
+    IString.Map.iter
+      (fun basename file_entry ->
         match file_entry with
         | JClasspath.Singleton source_file ->
             translate_source_file basename None source_file

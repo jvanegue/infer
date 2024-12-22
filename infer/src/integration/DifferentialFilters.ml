@@ -11,7 +11,7 @@ module L = Logging
 module FileRenamings = struct
   type renaming = {current: string; previous: string}
 
-  module CurrentToPreviousMap = Caml.Map.Make (String)
+  module CurrentToPreviousMap = Stdlib.Map.Make (String)
 
   type t = string CurrentToPreviousMap.t [@@deriving compare, equal]
 
@@ -61,7 +61,7 @@ module FileRenamings = struct
   let from_json_file file : t = from_json (In_channel.read_all file)
 
   let find_previous (t : t) current =
-    try CurrentToPreviousMap.find current t with Caml.Not_found -> current
+    try CurrentToPreviousMap.find current t with Stdlib.Not_found -> current
 
 
   module VISIBLE_FOR_TESTING_DO_NOT_USE_DIRECTLY = struct
@@ -117,7 +117,7 @@ let relative_complements ~compare ~pred l1 l2 =
 
 let skip_duplicated_types_on_filenames renamings (diff : Differential.t) : Differential.t =
   let compare (issue1, previous_file1) (issue2, previous_file2) =
-    [%compare: Caml.Digest.t option * string * string]
+    [%compare: Stdlib.Digest.t option * string * string]
       (issue1.Jsonbug_t.node_key, issue1.Jsonbug_t.bug_type, previous_file1)
       (issue2.Jsonbug_t.node_key, issue2.Jsonbug_t.bug_type, previous_file2)
   in
@@ -158,11 +158,11 @@ let incr_stat is_interesting_path file stat =
       stat.filtered_out_header <- stat.filtered_out_header + 1 )
 
 
-let log_to_scuba {all; filtered_out; filtered_out_header} =
+let log_stats {all; filtered_out; filtered_out_header} =
   let mk_entry ~label ~value =
     LogEntry.mk_count ~label:(Printf.sprintf "differential_filters.%s" label) ~value
   in
-  ScubaLogging.log_many
+  StatsLogging.log_many
     [ mk_entry ~label:"all" ~value:all
     ; mk_entry ~label:"filtered_out" ~value:filtered_out
     ; mk_entry ~label:"filtered_out_header" ~value:filtered_out_header ]
@@ -178,19 +178,21 @@ let interesting_paths_filter (interesting_paths : SourceFile.t list option) =
                if (not (SourceFile.is_invalid p)) && SourceFile.is_under_project_root p then
                  Some (SourceFile.to_string p)
                else None )
-        |> String.Set.of_list
+        |> IString.Set.of_list
       in
       fun ~do_log report ->
         let stat = {all= List.length report; filtered_out= 0; filtered_out_header= 0} in
         let filtered_report =
           List.filter
             ~f:(fun issue ->
-              let is_interesting_path = String.Set.mem interesting_paths_set issue.Jsonbug_t.file in
+              let is_interesting_path =
+                IString.Set.mem issue.Jsonbug_t.file interesting_paths_set
+              in
               if do_log then incr_stat is_interesting_path issue.Jsonbug_t.file stat ;
               is_interesting_path )
             report
         in
-        if do_log then log_to_scuba stat ;
+        if do_log then log_stats stat ;
         filtered_report
   | None ->
       fun ~do_log:_ -> Fn.id

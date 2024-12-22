@@ -87,7 +87,7 @@ let%test_module "remove_effects_in_subexprs transformation" =
 
     let%expect_test _ =
       let lang = Lang.Hack in
-      let module_ = parse_module input_text |> remove_effects_in_subexprs lang in
+      let module_, _ = parse_module input_text |> remove_effects_in_subexprs lang in
       F.printf "%a" Module.pp module_ ;
       [%expect
         {|
@@ -747,25 +747,25 @@ let%expect_test "closures" =
             ret __sil_plusa(n1, n2)
 
       } |}] ;
-  let module_ = remove_effects_in_subexprs Lang.Hack module_ in
+  let module_, _ = remove_effects_in_subexprs Lang.Hack module_ in
   F.printf "%a" Module.pp module_ ;
   [%expect
     {|
       .source_language = "hack"
 
-      type __Closure_C_add_in_D_foo_4 = {x: int; y: int}
+      type .final closure:dummy:0 = {x: int; y: int}
 
-      define __Closure_C_add_in_D_foo_4.call(__this: *__Closure_C_add_in_D_foo_4, p1: int, p2: float, p3: string) : int {
+      define .closure_wrapper closure:dummy:0.call(__this: *closure:dummy:0, p1: int, p2: float, p3: string) : int {
         #entry:
-            n6:*__Closure_C_add_in_D_foo_4 = load &__this
-            n7:int = load n6.?.x
-            n8:*__Closure_C_add_in_D_foo_4 = load &__this
-            n9:int = load n8.?.y
-            n10:int = load &p1
-            n11:float = load &p2
-            n12:string = load &p3
-            n13 = C.add(n7, n9, n10, n11, n12)
-            ret n13
+            n0:*closure:dummy:0 = load &__this
+            n1:int = load n0.?.x
+            n2:*closure:dummy:0 = load &__this
+            n3:int = load n2.?.y
+            n4:int = load &p1
+            n5:float = load &p2
+            n6:string = load &p3
+            n7 = C.add(n1, n3, n4, n5, n6)
+            ret n7
 
       }
 
@@ -782,18 +782,18 @@ let%expect_test "closures" =
         local y: *HackMixed
         #entry:
             n3:int = load &x
-            n4 = __sil_allocate(<__Closure_C_add_in_D_foo_4>)
+            n4 = __sil_allocate(<closure:dummy:0>)
             store n4.?.x <- n3:int
             store n4.?.y <- 1:int
             n0 = n4
             store &y <- n0:*HackMixed
-            n14:*HackMixed = load &y
-            n15:int = load &x
-            n16 = n14.?.call(n15, 1., null)
-            n1 = n16
-            n17:int = load &x
-            n18 = n0.?.call(n17, 2., null)
-            n2 = n18
+            n6:*HackMixed = load &y
+            n7:int = load &x
+            n8 = n6.?.call(n7, 1., null)
+            n1 = n8
+            n9:int = load &x
+            n10 = n0.?.call(n9, 2., null)
+            n2 = n10
             ret __sil_plusa(n1, n2)
 
       } |}] ;

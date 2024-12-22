@@ -12,6 +12,8 @@ module F = Format
 module ServerSocket = struct
   let socket_name = ResultsDirEntryName.db_writer_socket_name
 
+  let socket_path = Config.toplevel_results_dir ^/ socket_name
+
   let socket_addr = Unix.ADDR_UNIX socket_name
 
   let socket_domain = Unix.domain_of_sockaddr socket_addr
@@ -22,7 +24,7 @@ module ServerSocket = struct
       function. *)
   let in_results_dir ~f = Utils.do_in_dir ~dir:Config.toplevel_results_dir ~f
 
-  let socket_exists () = in_results_dir ~f:(fun () -> Sys.file_exists_exn socket_name)
+  let socket_exists () = Sys.file_exists_exn socket_path
 
   (* Error recuperation is done by attempting this function at module initialization time, and
      not using DbWriter at all in case it fails. See {!can_use_socket} below. *)
@@ -37,12 +39,10 @@ module ServerSocket = struct
     socket
 
 
-  let remove_socket_file () =
-    in_results_dir ~f:(fun () -> if socket_exists () then Unix.unlink socket_name)
-
+  let remove_socket_file () = if socket_exists () then Unix.unlink socket_path
 
   let remove_socket socket =
-    in_results_dir ~f:(fun () -> Unix.close socket) ;
+    Unix.close socket ;
     remove_socket_file ()
 
 
@@ -429,21 +429,20 @@ module Implementation = struct
     in
     let update_statement =
       let stmts =
-        List.fold PayloadId.database_fields ~init:String.Map.empty ~f:(fun acc payload_id ->
-            String.Map.add_exn ~key:payload_id
-              ~data:
-                (Database.register_statement AnalysisDatabase
-                   {|
+        List.fold PayloadId.database_fields ~init:IString.Map.empty ~f:(fun acc payload_id ->
+            IString.Map.add payload_id
+              (Database.register_statement AnalysisDatabase
+                 {|
                      UPDATE specs SET
                        report_summary = :report_summary,
                        summary_metadata = :summary_metadata,
                        %s = :value
                      WHERE proc_uid = :proc_uid
                    |}
-                   payload_id )
+                 payload_id )
               acc )
       in
-      fun payload_id -> String.Map.find_exn stmts (PayloadId.Variants.to_name payload_id)
+      fun payload_id -> IString.Map.find (PayloadId.Variants.to_name payload_id) stmts
     in
     fun analysis_req ~proc_uid ~proc_name ~merge_pulse_payload ~merge_report_summary
         ~merge_summary_metadata ->
@@ -489,7 +488,7 @@ module Implementation = struct
 
   let terminate () =
     let overwrites = IInt.Hash.fold (fun _hash count acc -> acc + count) specs_overwrite_counts 0 in
-    ScubaLogging.log_count ~label:"overwritten_specs" ~value:overwrites ;
+    StatsLogging.log_count ~label:"overwritten_specs" ~value:overwrites ;
     L.debug Analysis Quiet "Detected %d spec overwrites.@\n" overwrites
 
 
@@ -628,7 +627,7 @@ module Command = struct
         Implementation.update_report_summary ~proc_uid ~merge_report_summary
 end
 
-type response = Ack | Error of (exn * Caml.Printexc.raw_backtrace)
+type response = Ack | Error of (exn * Stdlib.Printexc.raw_backtrace)
 
 let server_pid : Pid.t option ref = ref None
 
@@ -643,7 +642,7 @@ module Server = struct
     let total_store = ExecutionDuration.total_useful_s !Implementation.store_sql_time in
     let store_pct = 100.0 *. total_store /. total_useful |> Float.round |> int_of_float in
     L.debug Analysis Quiet "%s= %d%%@\n" label store_pct ;
-    ScubaLogging.log_count ~label ~value:store_pct
+    StatsLogging.log_count ~label ~value:store_pct
 
 
   let rec server_loop ?(useful_time = ExecutionDuration.zero) socket =
@@ -656,7 +655,7 @@ module Server = struct
         Command.execute command ;
         Marshal.to_channel out_channel Ack []
       with exn ->
-        Marshal.to_channel out_channel (Error (exn, Caml.Printexc.get_raw_backtrace ())) [] ) ;
+        Marshal.to_channel out_channel (Error (exn, Stdlib.Printexc.get_raw_backtrace ())) [] ) ;
     Out_channel.flush out_channel ;
     In_channel.close in_channel ;
     let useful_time = ExecutionDuration.add_duration_since useful_time now in
@@ -693,7 +692,7 @@ module Server = struct
     | Ack ->
         ()
     | Error (exn, exn_backtrace) ->
-        Caml.Printexc.raise_with_backtrace exn exn_backtrace ) ;
+        Stdlib.Printexc.raise_with_backtrace exn exn_backtrace ) ;
     In_channel.close in_channel
 
 

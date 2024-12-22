@@ -1,0 +1,14 @@
+{
+  "scheduler": "callgraph",
+  "pulse-only": true,
+  "pulse-specialization-partial": true,
+  "pulse-taint-short-traces": true,
+  "pulse-taint-sources": [
+    { "procedure": "taint.source" }
+  ],
+  "pulse-taint-sinks": [
+    { "procedure": "taint.sink",
+      "taint_target": ["ArgumentPositions", [1]]
+    }
+  ]
+}

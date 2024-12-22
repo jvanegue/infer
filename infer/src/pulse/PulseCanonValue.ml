@@ -18,9 +18,9 @@ module type S = sig
 
   module Set : PrettyPrintable.PPSet with type elt = t
 
-  val downcast_set : Set.t -> AbstractValue.Set.t [@@inline always]
+  val downcast_set : Set.t -> AbstractValue.Set.t
 
-  val unsafe_cast_set : AbstractValue.Set.t -> Set.t [@@deprecated ""] [@@inline always]
+  val unsafe_cast_set : AbstractValue.Set.t -> Set.t [@@deprecated ""]
 
   type needs_canon
 
@@ -40,6 +40,8 @@ module type S = sig
 
   val canon_opt_fst : astate -> (needs_canon * 'a) option -> (t * 'a) option
 
+  val canon_opt_fst' : astate -> (AbstractValue.t * 'a) option -> (t * 'a) option
+
   val canon_opt_fst4' :
     astate -> (AbstractValue.t * 'a * 'b * 'c) option -> (t * 'a * 'b * 'c) option
 
@@ -50,13 +52,15 @@ module type S = sig
 
   val mk_fresh : unit -> t
 
-  val unsafe_cast : AbstractValue.t -> t [@@deprecated ""] [@@inline always]
+  val unsafe_cast : AbstractValue.t -> t [@@deprecated ""]
 
   module Stack : sig
     include
       PulseBaseStack.S with type value = needs_canon ValueOrigin.t_ and type t = PulseBaseStack.t
 
     val add : Var.t -> ValueOrigin.t -> t -> t
+
+    val merge : (Var.t -> value option -> value option -> ValueOrigin.t option) -> t -> t -> t
   end
 
   module Memory :
@@ -86,9 +90,9 @@ end) : S with type astate = AbductiveDomain.astate = struct
 
   module Set = AbstractValue.Set
 
-  let downcast_set = Fn.id
+  let downcast_set xs = xs [@@inline always]
 
-  let unsafe_cast_set = Fn.id
+  let unsafe_cast_set x = x [@@inline always]
 
   type needs_canon = AbstractValue.t
 
@@ -102,7 +106,7 @@ end) : S with type astate = AbductiveDomain.astate = struct
 
   let canon' = canon
 
-  let unsafe_cast = Fn.id
+  let unsafe_cast x = x [@@inline always]
 
   let canon_fst astate pair =
     let v, snd = pair in
@@ -135,6 +139,15 @@ end) : S with type astate = AbductiveDomain.astate = struct
         pair_opt
     | Some (v, snd) ->
         let v' = canon astate v in
+        if AbstractValue.equal v v' then pair_opt else Some (v', snd)
+
+
+  let canon_opt_fst' astate pair_opt =
+    match pair_opt with
+    | None ->
+        pair_opt
+    | Some (v, snd) ->
+        let v' = canon' astate v in
         if AbstractValue.equal v v' then pair_opt else Some (v', snd)
 
 

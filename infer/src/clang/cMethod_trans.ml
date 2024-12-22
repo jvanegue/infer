@@ -126,7 +126,7 @@ let should_create_procdesc cfg procname ~defined ~set_objc_accessor_attr =
         Procname.Hash.remove cfg procname ;
         true )
       else false
-  | exception Caml.Not_found ->
+  | exception Stdlib.Not_found ->
       true
 
 
@@ -245,6 +245,7 @@ let create_attributes_helper ?loc_instantiated ?(set_objc_accessor_attr = false)
   ; is_cpp_const_member_fun= ms.CMethodSignature.is_cpp_const_member_fun
   ; is_cpp_copy_ctor= ms.CMethodSignature.is_cpp_copy_ctor
   ; is_cpp_move_ctor= ms.CMethodSignature.is_cpp_move_ctor
+  ; is_static_ctor= ms.CMethodSignature.is_static_ctor
   ; is_cpp_copy_assignment= ms.CMethodSignature.is_cpp_copy_assignment
   ; is_cpp_deleted= ms.CMethodSignature.is_cpp_deleted
   ; is_cpp_implicit= ms.CMethodSignature.is_cpp_implicit
@@ -291,7 +292,7 @@ let create_local_procdesc ?loc_instantiated ?(set_objc_accessor_attr = false)
       match Procname.Hash.find cfg proc_name with
       | procdesc_prev ->
           Procdesc.get_captured procdesc_prev
-      | exception Caml.Not_found ->
+      | exception Stdlib.Not_found ->
           captured_mangled
     else captured_mangled
   in
@@ -332,7 +333,7 @@ let create_local_procdesc ?loc_instantiated ?(set_objc_accessor_attr = false)
                 {(Procdesc.get_attributes procdesc_prev) with captured= captured_mangled}
               in
               Procdesc.set_attributes procdesc_prev new_attributes
-          | exception Caml.Not_found ->
+          | exception Stdlib.Not_found ->
               () ) ;
     false )
 

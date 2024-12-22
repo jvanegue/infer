@@ -27,14 +27,16 @@ type allocator =
   | JavaResource of JavaClassName.t
   | CSharpResource of CSharpClassName.t
   | ObjCAlloc
-  | HackAsync
   | HackBuilderResource of HackClassName.t
+  | Awaitable (* used for Hack and Python *)
   | FileDescriptor
 [@@deriving equal]
 
 val pp_allocator : F.formatter -> allocator -> unit
 
 val is_hack_resource : allocator -> bool
+
+val is_python_resource : allocator -> bool
 
 (** Describes the source of taint in taint propagation.
 
@@ -93,6 +95,7 @@ end
 
 module ConfigUsage : sig
   type t = ConfigName of ConfigName.t | StringParam of {v: AbstractValue.t; config_type: string}
+  [@@deriving equal]
 end
 
 module Builder : sig
@@ -114,9 +117,13 @@ end
 module ConstKeys : sig
   type t
 
+  val is_empty : t -> bool
+
   val singleton : Fieldname.t -> Timestamp.t * Trace.t -> t
 
   val fold : (Fieldname.t -> Timestamp.t * Trace.t -> 'a -> 'a) -> t -> 'a -> 'a
+
+  val inter : t -> t -> t
 end
 
 type t =
@@ -146,7 +153,7 @@ type t =
   | MustNotBeTainted of TaintSink.t TaintSinkMap.t
   | JavaResourceReleased
   | CSharpResourceReleased
-  | HackAsyncAwaited
+  | AwaitedAwaitable
   | PropagateTaintFrom of taint_propagation_reason * taint_in list
   | ReturnedFromUnknown of AbstractValue.t list
   | SourceOriginOfCopy of {source: PulseAbstractValue.t; is_const_ref: bool}
@@ -168,7 +175,7 @@ type t =
           reporting leaks *)
   | UsedAsBranchCond of Procname.t * Location.t * Trace.t
   | WrittenTo of Timestamp.t * Trace.t
-[@@deriving compare]
+[@@deriving compare, equal]
 
 val pp : F.formatter -> t -> unit
 

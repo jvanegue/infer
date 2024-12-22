@@ -7,7 +7,7 @@
  *)
 
 open! IStd
-module Hashtbl = Caml.Hashtbl
+module Hashtbl = Stdlib.Hashtbl
 
 (** Printers for the analysis results *)
 
@@ -15,9 +15,9 @@ module L = Logging
 module F = Format
 
 (** Current formatter for the html output *)
-let curr_html_formatter = ref F.std_formatter
+let curr_html_formatter = DLS.new_key F.get_std_formatter
 
-let () = AnalysisGlobalState.register_ref ~init:(fun () -> F.std_formatter) curr_html_formatter
+let () = AnalysisGlobalState.register_dls ~init:F.get_std_formatter curr_html_formatter
 
 (** Return true if the node was visited during analysis *)
 let is_visited node =
@@ -71,13 +71,14 @@ end = struct
     let proc_name = Procdesc.Node.get_proc_name node in
     let nodeid = (Procdesc.Node.get_id node :> int) in
     let node_fname = Io_infer.Html.node_filename proc_name nodeid in
-    let needs_initialization, (fd, fmt) =
+    let needs_initialization, (fd, fmt_key) =
       let node_path = ["nodes"; node_fname] in
       let modified = Io_infer.Html.modified_during_analysis source node_path in
       if modified then (false, Io_infer.Html.open_out source node_path)
       else (true, Io_infer.Html.create source node_path)
     in
-    curr_html_formatter := fmt ;
+    let fmt = DLS.get fmt_key in
+    DLS.set curr_html_formatter fmt ;
     Hashtbl.add log_files (node_fname, source) fd ;
     if needs_initialization then (
       F.fprintf fmt "<center><h1>Cfg Node %a</h1></center>"
@@ -114,7 +115,7 @@ end = struct
 
 
   let finish_session node =
-    F.fprintf !curr_html_formatter "</div>@?" ;
+    F.fprintf (DLS.get curr_html_formatter) "</div>@?" ;
     let source = (Procdesc.Node.get_loc node).file in
     let node_fname =
       let proc_name = Procdesc.Node.get_proc_name node in
@@ -124,7 +125,7 @@ end = struct
     let fd = Hashtbl.find log_files (node_fname, source) in
     Unix.close fd ;
     Hashtbl.remove log_files (node_fname, source) ;
-    curr_html_formatter := F.std_formatter
+    DLS.set curr_html_formatter (F.get_std_formatter ())
 end
 
 module ProcsHtml : sig
@@ -136,7 +137,8 @@ end = struct
     let source = loc.file in
     let nodes = List.sort ~compare:Procdesc.Node.compare (Procdesc.get_nodes pdesc) in
     let linenum = loc.Location.line in
-    let fd, fmt = Io_infer.Html.create source [Procname.to_filename proc_name] in
+    let fd, fmt_key = Io_infer.Html.create source [Procname.to_filename proc_name] in
+    let fmt = DLS.get fmt_key in
     F.fprintf fmt "<center><h1>Procedure %a</h1></center>@\n"
       (Io_infer.Html.pp_line_link source
          ~text:(Some (Escape.escape_xml (Procname.to_string ~verbosity:Verbose proc_name)))
@@ -164,7 +166,7 @@ end = struct
       (Escape.escape_xml (F.asprintf "%a" ProcAttributes.pp (Procdesc.get_attributes pdesc)))
       Sexp.pp_hum
       (SpecializedProcname.sexp_of_t {proc_name; specialization= None}) ;
-    Io_infer.Html.close (fd, fmt)
+    Io_infer.Html.close (fd, fmt_key)
 end
 
 module FilesHtml : sig
@@ -184,9 +186,9 @@ end = struct
       in
       try
         let set = Hashtbl.find err_per_line err_data.loc.Location.line in
-        Hashtbl.replace err_per_line err_data.loc.Location.line (String.Set.add set err_str)
-      with Caml.Not_found ->
-        Hashtbl.add err_per_line err_data.loc.Location.line (String.Set.singleton err_str)
+        Hashtbl.replace err_per_line err_data.loc.Location.line (IString.Set.add err_str set)
+      with Stdlib.Not_found ->
+        Hashtbl.add err_per_line err_data.loc.Location.line (IString.Set.singleton err_str)
     in
     Errlog.iter add_err err_log ;
     err_per_line
@@ -202,7 +204,7 @@ end = struct
     Procdesc.init_wto proc_desc ;
     let process_node n =
       let lnum = (Procdesc.Node.get_loc n).Location.line in
-      let curr_nodes = try Hashtbl.find table_nodes_at_linenum lnum with Caml.Not_found -> [] in
+      let curr_nodes = try Hashtbl.find table_nodes_at_linenum lnum with Stdlib.Not_found -> [] in
       Hashtbl.replace table_nodes_at_linenum lnum (n :: curr_nodes)
     in
     List.iter ~f:process_node (Procdesc.get_nodes proc_desc) ;
@@ -215,7 +217,8 @@ end = struct
 
   let write_html_file filename procs =
     let fname_encoding = DB.source_file_encoding filename in
-    let fd, fmt = Io_infer.Html.create filename [".."; fname_encoding] in
+    let fd, fmt_key = Io_infer.Html.create filename [".."; fname_encoding] in
+    let fmt = DLS.get fmt_key in
     F.fprintf fmt "<center><h1>File %a </h1></center>@\n<table class=\"code\">@\n" SourceFile.pp
       filename ;
     let global_err_log = Errlog.empty () in
@@ -246,19 +249,19 @@ end = struct
                   else F.fprintf fmt "no summary for %s" proc_name_escaped
               | _ ->
                   () )
-      | exception Caml.Not_found ->
+      | exception Stdlib.Not_found ->
           () ) ;
       ( match Hashtbl.find table_err_per_line line_number with
       | errset ->
-          String.Set.iter errset ~f:(pp_err_message fmt)
-      | exception Caml.Not_found ->
+          IString.Set.iter (pp_err_message fmt) errset
+      | exception Stdlib.Not_found ->
           () ) ;
       F.fprintf fmt "</td></tr>@\n"
     in
     LineReader.iteri linereader filename ~f:print_one_line ;
     F.fprintf fmt "</table>@\n" ;
     Errlog.pp_html filename [fname_encoding] fmt global_err_log ;
-    Io_infer.Html.close (fd, fmt)
+    Io_infer.Html.close (fd, fmt_key)
 
 
   let is_allow_listed =
@@ -290,7 +293,7 @@ end = struct
                 if is_allow_listed file then (
                   let pdescs_in_file =
                     try Hashtbl.find pdescs_in_source file
-                    with Caml.Not_found -> Procname.Map.empty
+                    with Stdlib.Not_found -> Procname.Map.empty
                   in
                   let pdescs_in_file = Procname.Map.add proc_name proc_desc pdescs_in_file in
                   Hashtbl.replace pdescs_in_source file pdescs_in_file ;
@@ -306,7 +309,7 @@ end = struct
           match Hashtbl.find pdescs_in_source file with
           | pdescs_map ->
               Procname.Map.bindings pdescs_map |> List.map ~f:snd
-          | exception Caml.Not_found ->
+          | exception Stdlib.Not_found ->
               []
         in
         DB.Results_dir.init file ;
@@ -327,10 +330,10 @@ end
 
 (** Execute the delayed print actions *)
 let force_delayed_prints () =
-  F.pp_print_flush !curr_html_formatter () ;
+  F.pp_print_flush (DLS.get curr_html_formatter) () ;
   (* flush html stream *)
-  L.force_and_reset_delayed_prints !curr_html_formatter ;
-  F.pp_print_flush !curr_html_formatter ()
+  L.force_and_reset_delayed_prints (DLS.get curr_html_formatter) ;
+  F.pp_print_flush (DLS.get curr_html_formatter) ()
 
 
 (** Start a session, and create a new html file for the node if it does not exist yet *)

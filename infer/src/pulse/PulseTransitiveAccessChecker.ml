@@ -38,6 +38,7 @@ end = struct
   type context =
     { initial_caller_class_extends: string list option [@yojson.option]
     ; initial_caller_class_does_not_extend: string list option [@yojson.option]
+    ; procedures: procname_match_spec list option [@yojson.option]
     ; final_class_only: bool [@yojson.default false]
     ; annotations: string list option [@yojson.option]
     ; description: string
@@ -68,12 +69,15 @@ end = struct
         List.exists fieldnames_to_monitor ~f:(String.equal (Fieldname.get_field_name fieldname))
 
 
-  let procname_has_annotation procname annotations =
-    let match_one_annotation anno =
-      let has_annot ia = Annotations.ia_ends_with ia anno in
-      Annotations.pname_has_return_annot procname has_annot
+  let proc_name_has_annotation tenv proc_name annotations =
+    let match_one_annotation proc_name annotation =
+      let has_annot ia = Annotations.ia_ends_with ia annotation in
+      Annotations.pname_has_return_annot proc_name has_annot
     in
-    List.exists annotations ~f:match_one_annotation
+    PatternMatch.override_exists
+      (fun proc_name ->
+        List.exists annotations ~f:(fun annot -> match_one_annotation proc_name annot) )
+      tenv proc_name
 
 
   let procname_is_matched specs tenv procname =
@@ -89,7 +93,7 @@ end = struct
             class_name )
     in
     let regexp_match regexp name =
-      match Str.search_forward regexp name 0 with _ -> true | exception Caml.Not_found -> false
+      match Str.search_forward regexp name 0 with _ -> true | exception Stdlib.Not_found -> false
     in
     let match_class_name_regex regexp =
       Option.exists class_name ~f:(fun class_name ->
@@ -113,7 +117,7 @@ end = struct
                  List.mem ~equal:String.equal mn method_name )
           && map_or_true class_name_regex ~f:match_class_name_regex
           && map_or_true method_name_regex ~f:match_method_name_regex
-          && map_or_true annotations ~f:(procname_has_annotation procname)
+          && map_or_true annotations ~f:(proc_name_has_annotation tenv procname)
     in
     List.exists specs ~f:check_one_procname_spec
 
@@ -145,10 +149,10 @@ end = struct
     in
     let has_parents tenv type_name =
       let parents =
-        Tenv.fold_supers tenv type_name ~init:String.Set.empty ~f:(fun parent _ acc ->
-            String.Set.add acc (Typ.Name.name parent) )
+        Tenv.fold_supers tenv type_name ~init:IString.Set.empty ~f:(fun parent _ acc ->
+            IString.Set.add (Typ.Name.name parent) acc )
       in
-      fun classes -> List.exists classes ~f:(String.Set.mem parents)
+      fun classes -> List.exists classes ~f:(fun c -> IString.Set.mem c parents)
     in
     let check_extends tenv procname final_class_only initial_caller_class_extends =
       match Procname.get_class_type_name procname with
@@ -170,17 +174,20 @@ end = struct
     match context with
     | { initial_caller_class_extends= None
       ; initial_caller_class_does_not_extend= None
+      ; procedures= None
       ; annotations= None } ->
         false
     | { initial_caller_class_extends
       ; initial_caller_class_does_not_extend
       ; final_class_only
+      ; procedures
       ; annotations } ->
         let map_or_true = Option.value_map ~default:true in
         map_or_true initial_caller_class_extends ~f:(check_extends tenv procname final_class_only)
         && map_or_true initial_caller_class_does_not_extend
              ~f:(check_not_extends tenv procname final_class_only)
-        && map_or_true annotations ~f:(procname_has_annotation procname)
+        && map_or_true procedures ~f:(fun specs -> procname_is_matched specs tenv procname)
+        && map_or_true annotations ~f:(proc_name_has_annotation tenv procname)
 
 
   type context_metadata = {description: string; tag: string}
@@ -264,6 +271,13 @@ let report_errors ({InterproceduralAnalysis.tenv; proc_desc} as analysis_data)
         PulseReport.report analysis_data ~is_suppressed:false ~latent:false
           (TransitiveAccess
              {tag; description; call_trace; transitive_callees; transitive_missed_captures} )
+      in
+      let pre_post_list =
+        match NonDisjDomain.Summary.get_pre_post non_disj with
+        | Bottom ->
+            pre_post_list
+        | NonBottom pre_post ->
+            ContinueProgram pre_post :: pre_post_list
       in
       List.iter pre_post_list ~f:(function
         | ContinueProgram astate ->
