@@ -111,7 +111,7 @@ let pp fmt (exec_state: 'abductive_domain_t base_t) =
 (* Note: this will record the widen state once per analyzed object, which may not be enough *)
 (* TODO: Find out how to have one widen state key per loop *)                      
 let widenstate = ref None;; 
-let () = AnalysisGlobalState.register_ref ~init:(fun () -> Some (Caml.Hashtbl.create 16)) widenstate;;
+let () = AnalysisGlobalState.register_ref ~init:(fun () -> Some (Stdlib.Hashtbl.create 16)) widenstate;;
 
 let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
 
@@ -239,10 +239,10 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
           let termcond = Formula.extract_term_cond cond in
           let termcond2 = Formula.extract_term_cond2 cond in
           let prevstate = (if true then
-                             (Caml.Hashtbl.find_opt wstate (cfgnode,termcond,pathcond,termcond2))
+                             (Stdlib.Hashtbl.find_opt wstate (cfgnode,termcond,pathcond,termcond2))
                                (* Old mode - more FP *)
                            else
-                             (Caml.Hashtbl.find_opt wstate (cfgnode,Formula.Atom.Set.empty,pathcond,Formula.Term.Set.empty)))
+                             (Stdlib.Hashtbl.find_opt wstate (cfgnode,Formula.Atom.Set.empty,pathcond,Formula.Term.Set.empty)))
                         
           in
           match prevstate with
@@ -252,7 +252,7 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
                         else (cfgnode,Formula.Atom.Set.empty,pathcond,Formula.Term.Set.empty))
              in
              (* L.debug Analysis Quiet "PULSEINF: Recorded pathcond NOT in htable (ADDING) idx %d numiter %u \n" idx num_iters; *)
-             Caml.Hashtbl.add wstate key ();
+             Stdlib.Hashtbl.add wstate key ();
              record_pathcond tl
           | Some _ ->
              match (Formula.set_is_empty termcond),(Formula.map_is_empty pathcond),(Formula.termset_is_empty termcond2) with 

@@ -1447,7 +1447,7 @@ module Term = struct
 
   (* JV: Added as a submodule of module Term for PULSEINF *)
   module Set = struct
-    include Caml.Set.Make (struct
+    include Stdlib.Set.Make (struct
                 type nonrec t = t [@@deriving compare]
               end)
           
@@ -2881,9 +2881,10 @@ module Formula = struct
       ; linear_eqs_occurrences
       ; tableau_occurrences
       ; term_eqs_occurrences
+      ; atoms_occurrences 
       ; term_conditions
       ; term_conditions2 }
-      ; atoms_occurrences }
+ 
 
     let join phi1 _phi2 =
       (* TODO: do phi1 /\ phi2 *)
@@ -2966,7 +2967,9 @@ module Formula = struct
       ; linear_eqs_occurrences
       ; tableau_occurrences
       ; term_eqs_occurrences
-      ; atoms_occurrences }
+      ; atoms_occurrences
+      ; term_conditions
+      ; term_conditions2 }
 
 
     let remove_condition_for_join atom phi_lhs phi_rhs =

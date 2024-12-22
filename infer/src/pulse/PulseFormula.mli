@@ -57,7 +57,7 @@ module Term : sig
     | IsInt of t
  [@@deriving compare, equal, yojson_of]
 
- module Set : Caml.Set.S [@@deriving compare]
+ module Set : Stdlib.Set.S [@@deriving compare]
              
 end
      
@@ -71,8 +71,8 @@ module Atom : sig
 
   val equal : Term.t -> Term.t -> t
                 
-  module Set : Caml.Set.S [@@deriving compare]
-  module Map : Caml.Map.S [@@deriving compare]
+  module Set : Stdlib.Set.S [@@deriving compare]
+  module Map : Stdlib.Map.S [@@deriving compare]
 end
 
 module Formula : sig
