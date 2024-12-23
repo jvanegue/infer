@@ -2956,6 +2956,11 @@ module Formula = struct
               term_eqs_v
               (phi.term_eqs, phi.term_eqs_occurrences)
       in
+
+      (* pulseinf: Is there anything more to do here? *)
+      let term_conditions = (phi.term_conditions) in
+      let term_conditions2 = phi.term_conditions2 in
+      
       { var_eqs
       ; const_eqs
       ; type_constraints
