@@ -656,7 +656,7 @@ let inferbo_alloc_may_be_negative =
 let infinite_cost_call ~kind = register_cost ~enabled:false "INFINITE_%s" ~kind
 
 let infinite_recursion =
-  register ~enabled:false ~category:RuntimeException ~id:"INFINITE_RECURSION" Warning Pulse
+  register ~enabled:true ~category:RuntimeException ~id:"INFINITE_RECURSION" Warning Pulse
     ~user_documentation:
       "A special case of [MUTUAL_RECURSION_CYCLE](#mutual_recursion_cycle) where we detected that \
        the recursive call is made with the exact same values, which guarantees an infinite \

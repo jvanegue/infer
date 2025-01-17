@@ -36,15 +36,22 @@ rm -fr infer-out/ infinite.o infer-run.log
 #$HOME/infer/bin/infer run --pulse-only --pulse-widen-threshold=3 --debug-level=3 --print-logs -g -- clang++ -c pulseinf/iterate_crc_terminate.cpp 2> infer-run.log
 #$HOME/infer/bin/infer run --pulse-only --pulse-widen-threshold=3 --debug-level=3 --print-logs -g -- clang++ -c pulseinf/iterate_short_loop.cpp 2> infer-run.log
 # RECURSION TEST CASES
-#$HOME/infer/bin/infer run --pulse-only --pulse-widen-threshold=3 -- clang++ -c pulseinf/recurse_terminate_basic.cpp #2> infer-run.log
-#$HOME/infer/bin/infer run --pulse-only --pulse-widen-threshold=3 -- clang++ -c pulseinf/recurse_infinite_basic.cpp #2> infer-run-two.log
+#$HOME/infer/bin/infer run --pulse-only --pulse-widen-threshold=3 -- clang++ -c pulseinf/recurse_terminate_basic.cpp 2> infer-run.log
+#$HOME/infer/bin/infer run --pulse-only --pulse-widen-threshold=3 -- clang++ -c pulseinf/recurse_infinite_basic.cpp 2> infer-run-two.log
 
 #$HOME/infer/bin/infer run --pulse-only --debug-level=3 --print-logs -g -- clang++ -c pulseinf/loop_fcall_add_to_inductive_nonterminate.cpp 2> infer-run.log
+
+#$HOME/infer/bin/infer run --pulse-only --debug-level=3 --print-logs -g -- clang++ -c pulseinf/interproc_loop_terminate.cpp 2> infer-run.log
+#$HOME/infer/bin/infer run --pulse-only --debug-level=3 --print-logs -g -- clang++ -c pulseinf/interproc_struct_loop_terminate.cpp 2> infer-run.log
+#$HOME/infer/bin/infer run --pulse-only --debug-level=3 --print-logs -g -- clang++ -c pulseinf/loop_terminate_macro.cpp 2> infer-run.log
+#$HOME/infer/bin/infer run --pulse-only --debug-level=3 --print-logs -g -- clang++ -c pulseinf/loop_string_terminate.cpp 2> infer-run.log
+
+
 
 # All tests in one file (Debug mode)
 #$HOME/infer/bin/infer run --debug-level=2 --pulse-widen-threshold=20 --pulse-only --print-logs -g -- clang++ -c infinite.cpp 2> infer-run.log
 # All tests in one file (No Debug mode)
-$HOME/infer/bin/infer run --pulse-only --pulse-widen-threshold=20 -- clang++ -c infinite.cpp 2> infer-run.log
+#$HOME/infer/bin/infer run --pulse-only --pulse-widen-threshold=20 -- clang++ -c infinite.cpp 2> infer-run.log
 
 # Pretty printing for the bug report
 python3 -m json.tool infer-out/report.json > pulseinf-report.json
