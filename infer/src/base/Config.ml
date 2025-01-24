@@ -42,6 +42,7 @@ type build_system =
   | BNdk
   | BPython
   | BRebar3
+  | BSwiftc
   | BXcode
 [@@deriving compare, equal]
 
@@ -99,6 +100,7 @@ let build_system_exe_assoc =
   ; (BNdk, "ndk-build")
   ; (BPython, "python3")
   ; (BRebar3, "rebar3")
+  ; (BSwiftc, "swiftc")
   ; (BErlc, "erlc")
   ; (BXcode, "xcodebuild") ]
 
@@ -398,7 +400,7 @@ let infer_inside_maven_env_var = "INFER_INSIDE_MAVEN"
 
 let maven = CLOpt.is_env_var_set infer_inside_maven_env_var
 
-let env_inside_maven = `Extend [(infer_inside_maven_env_var, "1")]
+let maven_env = `Extend [(infer_inside_maven_env_var, "1"); ("JAVA_HOME", "")]
 
 let infer_is_javac = maven
 
@@ -1146,6 +1148,10 @@ and buck_mode =
   CLOpt.mk_bool ~long:"buck-java"
     ~in_help:InferCommand.[(Capture, manual_buck)]
     ~f:(set_mode `Java) "Buck integration for Java."
+  |> ignore ;
+  CLOpt.mk_bool ~long:"buck-python"
+    ~in_help:InferCommand.[(Capture, manual_buck)]
+    ~f:(set_mode `Python) "Buck integration for Python."
   |> ignore ;
   buck_mode
 
@@ -4008,6 +4014,8 @@ and buck_mode : BuckMode.t option =
       Some Erlang
   | `Java, _ ->
       Some Java
+  | `Python, _ ->
+      Some Python
 
 
 and buck_targets_block_list = RevList.to_list !buck_targets_block_list

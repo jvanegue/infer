@@ -65,9 +65,7 @@ module GlobalForStats = struct
 
   let empty = {node_is_not_stuck= false; one_call_is_stuck= false}
 
-  let global = DLS.new_key (fun () -> empty)
-
-  let () = AnalysisGlobalState.register_dls ~init:(fun () -> empty) global
+  let global = AnalysisGlobalState.make_dls ~init:(fun () -> empty)
 
   let init_before_call () =
     Utils.with_dls global ~f:(fun global -> {global with node_is_not_stuck= false})
@@ -952,9 +950,8 @@ let call ?disjunct_limit ({InterproceduralAnalysis.analyze_dependency} as analys
                            exec_state ) )
                 in
                 case_if_specialization_is_impossible res
-            | Error ((AnalysisFailed | InBlockList | UnknownProcedure) as no_summary) ->
-                L.die InternalError "No summary found by specialization: %a"
-                  AnalysisResult.pp_no_summary no_summary
+            | Error (AnalysisFailed | InBlockList | UnknownProcedure) ->
+                case_if_specialization_is_impossible res
             | Ok (summary, is_pulse_specialization_limit_not_reached) ->
                 let already_given = Specialization.Pulse.Set.add specialization already_given in
                 iter_call ~max_iteration ~nth_iteration:(nth_iteration + 1)

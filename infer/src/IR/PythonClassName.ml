@@ -48,3 +48,32 @@ let get_module_attribute_infos {classname} =
   in
   let classname = globals_prefix ^ module_name in
   ({classname}, attribute_name)
+
+
+let concatenate_package_name_and_file_name typename filename =
+  let open IOption.Let_syntax in
+  let+ package_name = get_module_name typename in
+  let classname = Printf.sprintf "%s%s::%s" globals_prefix package_name filename in
+  {classname}
+
+
+let closure_builtin_prefix = "closure:builtin:"
+
+let mk_reserved_builtin name =
+  let classname = closure_builtin_prefix ^ name in
+  {classname}
+
+
+let is_reserved_builtin {classname} = String.is_prefix classname ~prefix:closure_builtin_prefix
+
+let get_reserved_builtin {classname} = String.chop_prefix classname ~prefix:closure_builtin_prefix
+
+let builtin_types = ["Object"; "Dict"; "Int"; "Tuple"]
+
+let get_reserved_builtin_from_underlying_pyclass {classname} =
+  let py_suffix = String.chop_prefix classname ~prefix:"Py" in
+  match py_suffix with
+  | Some s when List.mem builtin_types s ~equal:String.equal ->
+      Some (String.lowercase s)
+  | _ ->
+      None

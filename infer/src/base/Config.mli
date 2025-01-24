@@ -29,6 +29,7 @@ type build_system =
   | BNdk
   | BPython
   | BRebar3
+  | BSwiftc
   | BXcode
 
 type scheduler = File | Restart | SyntacticCallGraph [@@deriving equal]
@@ -39,7 +40,8 @@ val build_system_of_exe_name : string -> build_system
 
 val string_of_build_system : build_system -> string
 
-val env_inside_maven : Unix.env
+val maven_env : Unix.env
+(** tell Infer it's running inside maven and disable JAVA_HOME *)
 
 (** {2 Constant configuration values} *)
 

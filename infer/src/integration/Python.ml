@@ -75,6 +75,30 @@ module Interpreter = struct
     Py.finalize ()
 end
 
+module Builtins = struct
+  let declare_closure tenv name =
+    let annots = [Annot.final] in
+    let python_type_name = PythonClassName.mk_reserved_builtin name in
+    let type_name = Typ.PythonClass python_type_name in
+    let proc_name =
+      Procname.make_python ~class_name:(Some python_type_name) ~function_name:"call"
+    in
+    let methods = [proc_name] in
+    Tenv.mk_struct tenv ~annots ~methods type_name |> ignore
+
+
+  let reserved_builtins = ["str"]
+
+  let add () =
+    let tenv =
+      Tenv.Global.load ()
+      |> Option.value_or_thunk ~default:(fun () ->
+             L.die InternalError "Global tenv not found after capture merge" )
+    in
+    List.iter ~f:(declare_closure tenv) reserved_builtins ;
+    Tenv.Global.store ~normalize:false tenv
+end
+
 let dump_textual_file ~version pyc module_ =
   let suffix = Format.asprintf ".v%d.sil" version in
   let filename =
@@ -86,7 +110,14 @@ let dump_textual_file ~version pyc module_ =
 
 let process_file ~is_binary file =
   let open IResult.Let_syntax in
-  let sourcefile = Textual.SourceFile.create file in
+  let sourcefile =
+    let file' =
+      (* if we are in buck-mode, we need to use absolute paths in order for Config.project_root
+         to be properly applied in SourceFile.create *)
+      if Config.buck then Utils.filename_to_absolute ~root:Config.buck2_root file else file
+    in
+    Textual.SourceFile.create file'
+  in
   let* code = FFI.from_file ~is_binary file |> Result.map_error ~f:Error.ffi in
   let* pyir = PyIR.mk ~debug:false code |> Result.map_error ~f:Error.ir in
   let textual = PyIR2Textual.mk_module pyir in
@@ -143,7 +174,7 @@ let capture_files ~is_binary files =
   (* TODO(vsiles) keep track of the number of success / failures like Hack *)
   let n_captured, n_error = (ref 0, ref 0) in
   let tasks () =
-    ProcessPool.TaskGenerator.of_list files ~finish:(fun result _ ->
+    TaskGenerator.of_list files ~finish:(fun result _ ->
         match result with
         | Some () ->
             incr n_error ;
@@ -173,6 +204,7 @@ let capture_files ~is_binary files =
   L.progress "Merging type environments...@\n%!" ;
   if not Config.python_skip_db then
     MergeCapture.merge_global_tenv ~normalize:true (Array.to_list child_tenv_paths) ;
+  Builtins.add () ;
   Array.iter child_tenv_paths ~f:(fun filename -> DB.filename_to_string filename |> Unix.unlink)
 
 

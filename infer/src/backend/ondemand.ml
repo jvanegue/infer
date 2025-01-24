@@ -14,9 +14,7 @@ module F = Format
 open Option.Monad_infix
 
 (* always incremented before use *)
-let nesting = ref (-1)
-
-let () = AnalysisGlobalState.register_ref nesting ~init:(fun () -> -1)
+let nesting = AnalysisGlobalState.make_dls ~init:(fun () -> -1)
 
 let max_nesting_to_print = 8
 
@@ -153,24 +151,26 @@ let () =
 let logged_error = DLS.new_key (fun () -> false)
 
 let update_taskbar proc_name_opt source_file_opt =
-  let t0 = Mtime_clock.now () in
-  let status =
-    match (proc_name_opt, source_file_opt) with
-    | Some pname, Some src_file ->
-        let nesting =
-          if !nesting <= max_nesting_to_print then String.make !nesting '>'
-          else Printf.sprintf "%d>" !nesting
-        in
-        F.asprintf "%s%a: %a" nesting SourceFile.pp src_file Procname.pp pname
-    | Some pname, None ->
-        Procname.to_string pname
-    | None, Some src_file ->
-        SourceFile.to_string src_file
-    | None, None ->
-        "Unspecified task"
-  in
-  DLS.set current_taskbar_status (Some (t0, status)) ;
-  !ProcessPoolState.update_status (Some t0) status
+  if Config.multicore then ()
+  else
+    let t0 = Mtime_clock.now () in
+    let status =
+      match (proc_name_opt, source_file_opt) with
+      | Some pname, Some src_file ->
+          let nesting =
+            let n = DLS.get nesting in
+            if n <= max_nesting_to_print then String.make n '>' else Printf.sprintf "%d>" n
+          in
+          F.asprintf "%s%a: %a" nesting SourceFile.pp src_file Procname.pp pname
+      | Some pname, None ->
+          Procname.to_string pname
+      | None, Some src_file ->
+          SourceFile.to_string src_file
+      | None, None ->
+          "Unspecified task"
+    in
+    DLS.set current_taskbar_status (Some (t0, status)) ;
+    !ProcessPoolState.update_status (Some t0) status
 
 
 let set_complete_result analysis_req summary =
@@ -207,10 +207,10 @@ let run_proc_analysis exe_env tenv analysis_req specialization_context ?caller_p
         "Elapsed analysis time: %a: %a@\n" Procname.pp callee_pname Mtime.Span.pp elapsed
   in
   if Config.trace_ondemand then
-    L.progress "[%d] run_proc_analysis %a -> %a@." !nesting (Pp.option Procname.pp) caller_pname
-      Procname.pp callee_pname ;
+    L.progress "[%d] run_proc_analysis %a -> %a@." (DLS.get nesting) (Pp.option Procname.pp)
+      caller_pname Procname.pp callee_pname ;
   let preprocess () =
-    incr nesting ;
+    DLS.incr nesting ;
     let source_file = callee_attributes.ProcAttributes.translation_unit in
     update_taskbar (Some callee_pname) (Some source_file) ;
     Preanal.do_preanalysis tenv callee_pdesc ;
@@ -219,7 +219,7 @@ let run_proc_analysis exe_env tenv analysis_req specialization_context ?caller_p
       | None ->
           if Config.debug_mode then
             DotCfg.emit_proc_desc callee_attributes.translation_unit callee_pdesc |> ignore ;
-          Summary.OnDisk.reset callee_pname analysis_req
+          Summary.OnDisk.empty callee_pname
       | Some (current_summary, _) ->
           current_summary
     in
@@ -227,7 +227,7 @@ let run_proc_analysis exe_env tenv analysis_req specialization_context ?caller_p
     initial_callee_summary
   in
   let postprocess summary =
-    decr nesting ;
+    DLS.decr nesting ;
     (* copy the previous recursion edges over to the new summary if doing a replay analysis so that
        subsequent replay analyses can pick them up too *)
     DLS.get edges_to_ignore
@@ -281,7 +281,7 @@ let run_proc_analysis exe_env tenv analysis_req specialization_context ?caller_p
         | RecursiveCycleException.RecursiveCycle _
         | RestartSchedulerException.ProcnameAlreadyLocked _
         | MissingDependencyException.MissingDependencyException ->
-            decr nesting ;
+            DLS.decr nesting ;
             ActiveProcedures.remove {proc_name= callee_pname; specialization} ;
             true
         | exn ->
@@ -427,8 +427,6 @@ let double_lock_for_restart ~lazy_payloads analysis_req callee_pname specializat
         `NoSummary )
 
 
-let analysis_result_of_option opt = Result.of_option opt ~error:AnalysisResult.AnalysisFailed
-
 (** track how many times we restarted the analysis of the current dependency chain to make the
     analysis of mutual recursion cycles deterministic *)
 let number_of_recursion_restarts = DLS.new_key (fun () -> 0)
@@ -520,15 +518,15 @@ let rec analyze_callee_can_raise_recursion exe_env ~lazy_payloads (analysis_req 
         | `SummaryReady summary ->
             Ok summary
         | `ComputeDefaultSummary ->
-            analyze_callee_aux None |> analysis_result_of_option
+            analyze_callee_aux None |> AnalysisResult.of_option
         | `ComputeDefaultSummaryThenSpecialize specialization ->
             (* recursive call so that we detect mutual recursion on the unspecialized summary *)
             analyze_callee exe_env ~lazy_payloads analysis_req ~specialization:None ?caller_summary
               ~from_file_analysis callee_pname
             |> Result.bind ~f:(fun summary ->
-                   analyze_callee_aux (Some (summary, specialization)) |> analysis_result_of_option )
+                   analyze_callee_aux (Some (summary, specialization)) |> AnalysisResult.of_option )
         | `AddNewSpecialization (summary, specialization) ->
-            analyze_callee_aux (Some (summary, specialization)) |> analysis_result_of_option
+            analyze_callee_aux (Some (summary, specialization)) |> AnalysisResult.of_option
         | `UnknownProcedure ->
             Error UnknownProcedure )
 
@@ -541,7 +539,7 @@ and on_recursive_cycle exe_env ~lazy_payloads analysis_req ?caller_summary:_ ?fr
     ?from_file_analysis cycle_start.proc_name
   |> ignore ;
   (* TODO: register caller -> callee relationship, possibly *)
-  Summary.OnDisk.get ~lazy_payloads analysis_req callee_pname |> analysis_result_of_option
+  Summary.OnDisk.get ~lazy_payloads analysis_req callee_pname |> AnalysisResult.of_option
 
 
 and analyze_callee exe_env ~lazy_payloads analysis_req ~specialization ?caller_summary

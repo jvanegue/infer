@@ -221,17 +221,18 @@ let report_src_to_snk_path {InterproceduralAnalysis.proc_desc; tenv; err_log} sr
   let spec_name = append_if_not_empty spec.name ". " in
   (* A direct call has a trace of length 3: source def + callsite + sink def *)
   let transitive = if List.length trace > 3 then "transitively " else "" in
+  let method_or_constr = if Procname.is_constructor src_pname then "Constructor" else "Method" in
   let description =
     if is_dummy_constructor snk then
       let constr_str = str_of_pname ~withclass:true snk_pname in
-      Format.asprintf "%sMethod %a annotated with %a allocates %a via %a%s" spec_name
+      Format.asprintf "%s%s %a annotated with %a allocates %a via %a%s" spec_name method_or_constr
         MF.pp_monospaced (str_of_pname src_pname) MF.pp_monospaced ("@" ^ src_annot_str)
         MF.pp_monospaced constr_str MF.pp_monospaced ("new " ^ constr_str) spec_description
     else
-      Format.asprintf "%sMethod %a (%s %a%s%s) %s%s %a (%s %a%s%s)%s" spec_name MF.pp_monospaced
-        (str_of_pname src_pname) (get_kind src src_pname) MF.pp_monospaced ("@" ^ src_annot_str)
-        (get_details src src_pname) (get_class_details src src_pname) transitive access_or_call
-        MF.pp_monospaced
+      Format.asprintf "%s%s %a (%s %a%s%s) %s%s %a (%s %a%s%s)%s" spec_name method_or_constr
+        MF.pp_monospaced (str_of_pname src_pname) (get_kind src src_pname) MF.pp_monospaced
+        ("@" ^ src_annot_str) (get_details src src_pname) (get_class_details src src_pname)
+        transitive access_or_call MF.pp_monospaced
         (str_of_pname ~withclass:true snk_pname)
         (get_kind snk snk_pname) MF.pp_monospaced ("@" ^ snk_annot_str) (get_details snk snk_pname)
         (get_class_details snk snk_pname) spec_description
@@ -242,7 +243,8 @@ let report_src_to_snk_path {InterproceduralAnalysis.proc_desc; tenv; err_log} sr
 
 let start_trace proc_desc annot =
   let description =
-    "Method "
+    ( if Procname.is_constructor (Procdesc.get_proc_name proc_desc) then "Constructor "
+      else "Method " )
     ^ str_of_pname (Procdesc.get_proc_name proc_desc)
     ^ ", marked as source @" ^ annot.Annot.class_name
   in
@@ -279,13 +281,36 @@ let add_to_trace (call_site_info : Domain.call_site_info) end_of_stack snk_annot
 let find_paths_to_snk ({InterproceduralAnalysis.proc_desc; tenv} as analysis_data) src
     (spec : AnnotationSpec.t) sink_map =
   let snk_annot = spec.sink_annotation in
+  let src_pname = Procdesc.get_proc_name proc_desc in
+  let update_loc_if_nonsynth loc caller (call_site_info : Domain.call_site_info) =
+    match loc with
+    | None ->
+        let is_synth =
+          Attributes.load caller
+          |> Option.exists ~f:(fun (a : ProcAttributes.t) -> a.is_synthetic_method)
+        in
+        if is_synth then None else Some (CallSite.loc call_site_info.call_site)
+    | Some _ ->
+        loc
+  in
+  let first_callsite call_sites =
+    (* Just pick one path forward (per sink procedure) to avoid path explosion *)
+    try Domain.CallSites.min_elt call_sites
+    with Stdlib.Not_found -> L.die InternalError "Callsite map should not be empty"
+  in
   let rec step_forward report_loc trace snk_pname (call_site_info : Domain.call_site_info) =
     let callee_pname = CallSite.pname call_site_info.call_site in
     let end_of_stack = Procname.equal callee_pname snk_pname in
     let new_trace = add_to_trace call_site_info end_of_stack snk_annot trace in
     if end_of_stack then
       (* Reached sink, report *)
-      report_src_to_snk_path analysis_data src spec report_loc (List.rev new_trace) callee_pname
+      match report_loc with
+      | Some report_loc ->
+          report_src_to_snk_path analysis_data src spec report_loc (List.rev new_trace) callee_pname
+      | None ->
+          L.debug Analysis Verbose
+            "Annotation reachability skipped path %s -> %s all procedures were synthetic@."
+            (str_of_pname src_pname) (str_of_pname snk_pname)
     else if
       Config.annotation_reachability_minimize_sources
       && method_overrides_annot src spec.models tenv callee_pname
@@ -297,22 +322,22 @@ let find_paths_to_snk ({InterproceduralAnalysis.proc_desc; tenv} as analysis_dat
       (* Sink not yet reached, thus we have an intermediate step: let's get its summary and recurse *)
       let callee_sink_map = lookup_annotation_calls analysis_data snk_annot callee_pname in
       let next_call_sites =
-        Domain.SinkMap.find_opt snk_pname callee_sink_map
-        |> Option.value ~default:Domain.CallSites.empty
+        try Domain.SinkMap.find snk_pname callee_sink_map
+        with Stdlib.Not_found ->
+          (* This could happen if some function F says that it can reach H via G
+             but G doesn't have an entry for H, which is a bug somewhere else. *)
+          L.die InternalError "Sink procedure not found in summary of dependency"
       in
-      let next_fst_call_site = Domain.CallSites.min_elt_opt next_call_sites in
-      Option.iter next_fst_call_site ~f:(step_forward report_loc new_trace snk_pname)
+      let next_call_site = first_callsite next_call_sites in
+      let report_loc = update_loc_if_nonsynth report_loc callee_pname next_call_site in
+      step_forward report_loc new_trace snk_pname next_call_site
   in
   let trace = start_trace proc_desc src in
   Domain.SinkMap.iter
     (fun snk_pname call_sites ->
-      let fst_call_site =
-        (* Just pick one path forward (per sink procedure) to avoid path explosion *)
-        try Domain.CallSites.min_elt call_sites
-        with Stdlib.Not_found -> L.die InternalError "Callsite map should not be empty"
-      in
-      (* Report the issue where the source makes the first call *)
-      let report_loc = CallSite.loc fst_call_site.call_site in
+      let fst_call_site = first_callsite call_sites in
+      (* Report the issue where the source makes the first non-synthetic call *)
+      let report_loc = update_loc_if_nonsynth None src_pname fst_call_site in
       step_forward report_loc trace snk_pname fst_call_site )
     sink_map
 
@@ -446,25 +471,32 @@ module MakeTransferFunctions (CFG : ProcCfg.S) = struct
     ; loop_nodes: Control.GuardNodes.t
     ; analysis_data: Domain.t InterproceduralAnalysis.t }
 
-  let is_sink tenv (spec : AnnotationSpec.t) ~caller_pname ~callee_pname =
-    spec.sink_predicate tenv callee_pname
-    && (not (spec.sanitizer_predicate tenv callee_pname))
-    && not (spec.sanitizer_predicate tenv caller_pname)
-
-
   let check_direct_call tenv ~caller_pname ~callee_pname call_site_info astate specs =
     List.fold ~init:astate specs ~f:(fun astate (spec : AnnotationSpec.t) ->
-        if is_sink tenv spec ~caller_pname ~callee_pname then (
-          L.d_printfln "%s: Adding direct call `%a -> %a` to sink `@%s`" spec.kind Procname.pp
-            caller_pname Procname.pp callee_pname spec.sink_annotation.Annot.class_name ;
-          Domain.add_call_site spec.sink_annotation callee_pname call_site_info astate )
+        if spec.sink_predicate tenv callee_pname then
+          if spec.sanitizer_predicate tenv callee_pname then (
+            L.d_printf "%s: Direct call `%a -> %a` to sink `@%s` sanitized by callee `%a`\n"
+              spec.kind Procname.pp caller_pname Procname.pp callee_pname
+              spec.sink_annotation.Annot.class_name Procname.pp callee_pname ;
+            astate )
+          else if spec.sanitizer_predicate tenv caller_pname then (
+            L.d_printf "%s: Direct call `%a -> %a` to sink `@%s` sanitized by caller `%a`\n"
+              spec.kind Procname.pp caller_pname Procname.pp callee_pname
+              spec.sink_annotation.Annot.class_name Procname.pp caller_pname ;
+            astate )
+          else (
+            L.d_printfln "%s: Adding direct call `%a -> %a` to sink `@%s`" spec.kind Procname.pp
+              caller_pname Procname.pp callee_pname spec.sink_annotation.Annot.class_name ;
+            Domain.add_call_site spec.sink_annotation callee_pname call_site_info astate )
         else astate )
 
 
   let add_transitive_calls {analysis_data= {proc_desc; tenv; analyze_dependency}; specs}
       call_site_info ~callee_pname astate =
     match analyze_dependency callee_pname with
-    | Error _ ->
+    | Error err ->
+        L.d_printf "No summary for callee `%a`: %a@\n" Procname.pp callee_pname
+          AnalysisResult.pp_no_summary err ;
         astate
     | Ok callee_call_map ->
         L.d_printf "Applying summary of callee `%a`@\n" Procname.pp callee_pname ;
@@ -477,10 +509,26 @@ module MakeTransferFunctions (CFG : ProcCfg.S) = struct
                of the specs thinks that this sink is indeed a sink. *)
             let caller_pname = Procdesc.get_proc_name proc_desc in
             List.fold ~init:astate specs ~f:(fun astate (spec : AnnotationSpec.t) ->
-                if is_sink tenv spec ~caller_pname ~callee_pname:sink then (
-                  L.d_printf "%s: Adding transitive call `%a -> %a` to sink `@%s`@\n" spec.kind
-                    Procname.pp caller_pname Procname.pp sink spec.sink_annotation.Annot.class_name ;
-                  Domain.add_call_site annot sink call_site_info astate )
+                if spec.sink_predicate tenv sink then
+                  if spec.sanitizer_predicate tenv callee_pname then (
+                    (* I don't think this branch can happen, if callee is sanitizer then call
+                       to sink should not appear in its summary. But better be safe. *)
+                    L.d_printf
+                      "%s: Indirect call `%a -> %a` to sink `@%s` sanitized by callee `%a`\n"
+                      spec.kind Procname.pp caller_pname Procname.pp sink
+                      spec.sink_annotation.Annot.class_name Procname.pp callee_pname ;
+                    astate )
+                  else if spec.sanitizer_predicate tenv caller_pname then (
+                    L.d_printf
+                      "%s: Indirect call `%a -> %a` to sink `@%s` sanitized by caller `%a`\n"
+                      spec.kind Procname.pp caller_pname Procname.pp sink
+                      spec.sink_annotation.Annot.class_name Procname.pp caller_pname ;
+                    astate )
+                  else (
+                    L.d_printf "%s: Adding transitive call `%a -> %a` to sink `@%s`@\n" spec.kind
+                      Procname.pp caller_pname Procname.pp sink
+                      spec.sink_annotation.Annot.class_name ;
+                    Domain.add_call_site annot sink call_site_info astate )
                 else astate )
         in
         Domain.fold

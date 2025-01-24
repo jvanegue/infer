@@ -14,29 +14,253 @@ open PulseDomainInterface
 open PulseModelsImport
 module DSL = PulseModelsDSL
 
+let bool_tname = TextualSil.python_bool_type_name
+
 let dict_tname = TextualSil.python_dict_type_name
 
 let int_tname = TextualSil.python_int_type_name
 
-let none_tname = TextualSil.python_none_type_name
-
 let tuple_tname = TextualSil.python_tuple_type_name
+
+let none_tname = Typ.PythonClass (PythonClassName.mk_reserved_builtin "None")
+
+(* sys.stdlib_module_names *)
+let stdlib_modules : IString.Set.t =
+  IString.Set.of_list
+    [ "abc"
+    ; "aifc"
+    ; "antigravity"
+    ; "argparse"
+    ; "array"
+    ; "ast"
+    ; "asynchat"
+    ; "asyncio"
+    ; "asyncore"
+    ; "atexit"
+    ; "audioop"
+    ; "base64"
+    ; "bdb"
+    ; "binascii"
+    ; "binhex"
+    ; "bisect"
+    ; "builtins"
+    ; "bz2"
+    ; "cProfile"
+    ; "calendar"
+    ; "cgi"
+    ; "cgitb"
+    ; "chunk"
+    ; "cmath"
+    ; "cmd"
+    ; "code"
+    ; "codecs"
+    ; "codeop"
+    ; "collections"
+    ; "colorsys"
+    ; "compileall"
+    ; "concurrent"
+    ; "configparser"
+    ; "contextlib"
+    ; "contextvars"
+    ; "copy"
+    ; "copyreg"
+    ; "crypt"
+    ; "csv"
+    ; "ctypes"
+    ; "curses"
+    ; "dataclasses"
+    ; "datetime"
+    ; "dbm"
+    ; "decimal"
+    ; "difflib"
+    ; "dis"
+    ; "distutils"
+    ; "doctest"
+    ; "email"
+    ; "encodings"
+    ; "ensurepip"
+    ; "enum"
+    ; "errno"
+    ; "faulthandler"
+    ; "fcntl"
+    ; "filecmp"
+    ; "fileinput"
+    ; "fnmatch"
+    ; "fractions"
+    ; "ftplib"
+    ; "functools"
+    ; "gc"
+    ; "genericpath"
+    ; "getopt"
+    ; "getpass"
+    ; "gettext"
+    ; "glob"
+    ; "graphlib"
+    ; "grp"
+    ; "gzip"
+    ; "hashlib"
+    ; "heapq"
+    ; "hmac"
+    ; "html"
+    ; "http"
+    ; "idlelib"
+    ; "imaplib"
+    ; "imghdr"
+    ; "imp"
+    ; "importlib"
+    ; "inspect"
+    ; "io"
+    ; "ipaddress"
+    ; "itertools"
+    ; "json"
+    ; "keyword"
+    ; "lib2to3"
+    ; "linecache"
+    ; "locale"
+    ; "logging"
+    ; "lzma"
+    ; "mailbox"
+    ; "mailcap"
+    ; "marshal"
+    ; "math"
+    ; "mimetypes"
+    ; "mmap"
+    ; "modulefinder"
+    ; "msilib"
+    ; "msvcrt"
+    ; "multiprocessing"
+    ; "netrc"
+    ; "nis"
+    ; "nntplib"
+    ; "nt"
+    ; "ntpath"
+    ; "nturl2path"
+    ; "numbers"
+    ; "opcode"
+    ; "operator"
+    ; "optparse"
+    ; "os"
+    ; "ossaudiodev"
+    ; "pathlib"
+    ; "pdb"
+    ; "pickle"
+    ; "pickletools"
+    ; "pipes"
+    ; "pkgutil"
+    ; "platform"
+    ; "plistlib"
+    ; "poplib"
+    ; "posix"
+    ; "posixpath"
+    ; "pprint"
+    ; "profile"
+    ; "pstats"
+    ; "pty"
+    ; "pwd"
+    ; "py_compile"
+    ; "pyclbr"
+    ; "pydoc"
+    ; "pydoc_data"
+    ; "pyexpat"
+    ; "queue"
+    ; "quopri"
+    ; "random"
+    ; "re"
+    ; "readline"
+    ; "reprlib"
+    ; "resource"
+    ; "rlcompleter"
+    ; "runpy"
+    ; "sched"
+    ; "secrets"
+    ; "select"
+    ; "selectors"
+    ; "shelve"
+    ; "shlex"
+    ; "shutil"
+    ; "signal"
+    ; "site"
+    ; "smtpd"
+    ; "smtplib"
+    ; "sndhdr"
+    ; "socket"
+    ; "socketserver"
+    ; "spwd"
+    ; "sqlite3"
+    ; "sre_compile"
+    ; "sre_constants"
+    ; "sre_parse"
+    ; "ssl"
+    ; "stat"
+    ; "statistics"
+    ; "string"
+    ; "stringprep"
+    ; "struct"
+    ; "subprocess"
+    ; "sunau"
+    ; "symtable"
+    ; "sys"
+    ; "sysconfig"
+    ; "syslog"
+    ; "tabnanny"
+    ; "tarfile"
+    ; "telnetlib"
+    ; "tempfile"
+    ; "termios"
+    ; "textwrap"
+    ; "this"
+    ; "threading"
+    ; "time"
+    ; "timeit"
+    ; "tkinter"
+    ; "token"
+    ; "tokenize"
+    ; "trace"
+    ; "traceback"
+    ; "tracemalloc"
+    ; "tty"
+    ; "turtle"
+    ; "turtledemo"
+    ; "types"
+    ; "typing"
+    ; "unicodedata"
+    ; "unittest"
+    ; "urllib"
+    ; "uu"
+    ; "uuid"
+    ; "venv"
+    ; "warnings"
+    ; "wave"
+    ; "weakref"
+    ; "webbrowser"
+    ; "winreg"
+    ; "winsound"
+    ; "wsgiref"
+    ; "xdrlib"
+    ; "xml"
+    ; "xmlrpc"
+    ; "zipapp"
+    ; "zipfile"
+    ; "zipimport"
+    ; "zlib"
+    ; "zoneinfo" ]
+
+
+let reserved_builtins = ["int"; "str"; "type"]
 
 let module_tname module_name =
   let str = F.asprintf "%s%s" PythonClassName.globals_prefix module_name in
   Typ.PythonClass (PythonClassName.make str)
 
 
-let sil_fieldname_from_string_value_exn type_name ((address, _) : DSL.aval) :
-    Fieldname.t DSL.model_monad =
-  let f astate =
-    match PulseArithmetic.as_constant_string astate address with
-    | Some str ->
-        (Fieldname.make type_name str, astate)
-    | None ->
-        L.die InternalError "expecting constant string value"
+let as_constant_string_exn aval : string DSL.model_monad =
+  let open DSL.Syntax in
+  let* opt_str = as_constant_string aval in
+  let str =
+    Option.value_or_thunk opt_str ~default:(fun () ->
+        L.die InternalError "Python frontend should have put a constant string here" )
   in
-  DSL.Syntax.exec_operation f
+  ret str
 
 
 module Dict = struct
@@ -61,31 +285,48 @@ module Dict = struct
                 let tname, attr =
                   Typ.Name.get_python_module_attribute_infos static_tname |> Option.value_exn
                 in
-                propagate_field_type tname attr
+                let* tname_is_defined = tenv_type_is_defined tname in
+                if tname_is_defined then propagate_field_type tname attr
+                else
+                  Typ.Name.python_concatenate_package_name_and_file_name tname attr
+                  |> option_iter ~f:(fun static_tname -> add_static_type static_tname load_res)
               else add_static_type static_tname load_res ) )
-    in
-    let* opt_key = as_constant_string key in
-    let key =
-      Option.value_or_thunk opt_key ~default:(fun () ->
-          L.die InternalError "expecting constant string value" )
     in
     let* opt_static_type = get_static_type dict in
     option_iter opt_static_type ~f:(fun tname -> propagate_field_type tname key)
 
 
-  let get dict key : DSL.aval DSL.model_monad =
+  let get_str_key ?(propagate_static_type = false) dict key : DSL.aval DSL.model_monad =
     let open DSL.Syntax in
-    let* field = sil_fieldname_from_string_value_exn dict_tname key in
+    let field = Fieldname.make dict_tname key in
     let* load_res = load_access ~deref:false dict (FieldAccess field) in
-    let* () = propagate_static_type_on_load dict key load_res in
+    let* () =
+      if propagate_static_type then propagate_static_type_on_load dict key load_res else ret ()
+    in
+    (* note: we do not try static type propagation here *)
     ret load_res
 
 
-  let set dict key value : unit DSL.model_monad =
+  (* beware: key is expected to be a constant string! *)
+  let get dict key : DSL.aval DSL.model_monad =
     let open DSL.Syntax in
-    let* field = sil_fieldname_from_string_value_exn dict_tname key in
+    let* key = as_constant_string_exn key in
+    let* load_res = get_str_key ~propagate_static_type:true dict key in
+    ret load_res
+
+
+  let set_str_key dict key value : unit DSL.model_monad =
+    let open DSL.Syntax in
+    let field = Fieldname.make dict_tname key in
     let* () = store_field ~deref:false ~ref:dict field value in
     ret ()
+
+
+  (* beware: key is expected to be a constant string! *)
+  let set dict key value : unit DSL.model_monad =
+    let open DSL.Syntax in
+    let* key = as_constant_string_exn key in
+    set_str_key dict key value
 end
 
 module Tuple = struct
@@ -160,17 +401,39 @@ let call_dsl ~closure ~arg_names:_ ~args : DSL.aval DSL.model_monad =
   apply_python_closure closure gen_closure_args
 
 
-let call closure arg_names args : model =
-  (* TODO: take into account named args *)
-  let open DSL.Syntax in
-  start_model
-  @@ fun () ->
-  let* value = call_dsl ~closure ~arg_names ~args in
-  assign_ret value
-
-
 let await_awaitable arg : unit DSL.model_monad =
   fst arg |> AddressAttributes.await_awaitable |> DSL.Syntax.exec_command
+
+
+let make_type arg : DSL.aval option DSL.model_monad =
+  let open DSL.Syntax in
+  let* arg_dynamic_type_data = get_dynamic_type ~ask_specialization:true arg in
+  let* res = fresh () in
+  match arg_dynamic_type_data with
+  | Some {Formula.typ= {desc= Tstruct (PythonClass py_class)}} -> (
+    match PythonClassName.get_reserved_builtin_from_underlying_pyclass py_class with
+    | Some builtin ->
+        let* () =
+          and_dynamic_type_is res
+            (Typ.mk_struct (PythonClass (PythonClassName.mk_reserved_builtin builtin)))
+        in
+        ret (Some res)
+    | None ->
+        ret (Some res) )
+  | _ ->
+      ret (Some res)
+
+
+let make_int_internal arg : DSL.aval DSL.model_monad =
+  let open DSL.Syntax in
+  let* opt_int = as_constant_int arg in
+  match opt_int with
+  | None ->
+      constructor ~deref:false int_tname []
+  | Some i ->
+      let* res = int i in
+      let* () = and_dynamic_type_is res (Typ.mk_struct int_tname) in
+      ret res
 
 
 (* Only Python frontend builtins ($builtins.py_) have a C-style syntax, so we
@@ -178,16 +441,48 @@ let await_awaitable arg : unit DSL.model_monad =
 let modelled_python_call module_name fun_name args : DSL.aval option DSL.model_monad =
   let open DSL.Syntax in
   match (module_name, fun_name, args) with
-  | "asyncio", Some "run", [arg] ->
+  | `PyLib "asyncio", "run", [arg] ->
       let* () = await_awaitable arg in
       let* res = fresh () in
       ret (Some res)
-  | "asyncio", Some "sleep", _ ->
+  | `PyLib "asyncio", "sleep", _ ->
       let* res = fresh () in
       let* () = allocation Attribute.Awaitable res in
       ret (Some res)
+  | `PyBuiltin, "int", [arg] ->
+      let* res = make_int_internal arg in
+      ret (Some res)
+  | `PyBuiltin, "str", _ ->
+      let* res = fresh () in
+      ret (Some res)
+  | `PyBuiltin, "type", [arg] ->
+      make_type arg
   | _, _, _ ->
       ret None
+
+
+let call closure arg_names args : model =
+  (* TODO: take into account named args *)
+  let open DSL.Syntax in
+  start_model
+  @@ fun () ->
+  let* opt_dynamic_type_data = get_dynamic_type ~ask_specialization:true closure in
+  let* res =
+    match opt_dynamic_type_data with
+    | Some {Formula.typ= {Typ.desc= Tstruct type_name}}
+      when Typ.Name.is_python_reserved_builtin type_name -> (
+        let builtin_name = Typ.Name.get_python_reserved_builtin type_name |> Option.value_exn in
+        let* opt_special_call = modelled_python_call `PyBuiltin builtin_name args in
+        match opt_special_call with
+        | None ->
+            L.die InternalError "builtin %s was not successfully recognized" builtin_name
+        | Some res ->
+            L.d_printfln "catching reserved builtin call %s" builtin_name ;
+            ret res )
+    | _ ->
+        call_dsl ~closure ~arg_names ~args
+  in
+  assign_ret res
 
 
 let call_method name obj arg_names args : model =
@@ -202,17 +497,15 @@ let call_method name obj arg_names args : model =
       -> (
         (* since module types are final, static type will save us most of the time *)
         let module_name = Typ.Name.get_python_module_name type_name |> Option.value_exn in
-        let* opt_str_name = as_constant_string name in
-        let* opt_special_call = modelled_python_call module_name opt_str_name args in
+        let* str_name = as_constant_string_exn name in
+        let* opt_special_call = modelled_python_call (`PyLib module_name) str_name args in
         match opt_special_call with
         | None ->
-            L.d_printfln "calling method %a on module object %s" (Pp.option F.pp_print_string)
-              opt_str_name module_name ;
+            L.d_printfln "calling method %s on module object %s" str_name module_name ;
             let* closure = Dict.get obj name in
             call_dsl ~closure ~arg_names ~args
         | Some res ->
-            L.d_printfln "catching special call %a on module object %s"
-              (Pp.option F.pp_print_string) opt_str_name module_name ;
+            L.d_printfln "catching special call %s on module object %s" str_name module_name ;
             ret res )
     | _ ->
         let* closure = Dict.get obj name in
@@ -227,6 +520,16 @@ let gen_start_coroutine : model =
   start_model @@ fun () -> ret ()
 
 
+let get_attr obj attr : model =
+  let open DSL.Syntax in
+  start_model
+  @@ fun () ->
+  let* attr = as_constant_string_exn attr in
+  (* TODO: look into companion class object if necessary *)
+  let* res = Dict.get_str_key obj attr in
+  assign_ret res
+
+
 let get_awaitable arg : model =
   let open DSL.Syntax in
   start_model
@@ -235,31 +538,163 @@ let get_awaitable arg : model =
   assign_ret arg
 
 
+let is_package aval : string option DSL.model_monad =
+  let suffix = "::__init__" in
+  let tname_is_package tname = Typ.Name.name tname |> String.is_suffix ~suffix in
+  let open DSL.Syntax in
+  let* opt_dynamic_type_data = get_dynamic_type ~ask_specialization:false aval in
+  ret
+    ( match opt_dynamic_type_data with
+    | Some {Formula.typ= {Typ.desc= Tstruct tname}} when tname_is_package tname ->
+        Typ.Name.name tname |> String.chop_suffix ~suffix
+        |> Option.bind ~f:(String.chop_prefix ~prefix:PythonClassName.globals_prefix)
+    | _ ->
+        None )
+
+
+let is_global aval : bool DSL.model_monad =
+  let tname_is_global tname =
+    Typ.Name.name tname |> String.is_prefix ~prefix:PythonClassName.globals_prefix
+  in
+  let open DSL.Syntax in
+  let* opt_dynamic_type_data = get_dynamic_type ~ask_specialization:false aval in
+  ret
+    ( match opt_dynamic_type_data with
+    | Some {Formula.typ= {Typ.desc= Tstruct tname}} ->
+        tname_is_global tname
+    | _ ->
+        false )
+
+
+let is_module_captured module_name =
+  let function_name = "__module_body__" in
+  let class_name = PythonClassName.make module_name in
+  let proc_name = Procname.make_python ~class_name:(Some class_name) ~function_name in
+  IRAttributes.load proc_name |> Option.map ~f:(fun _ -> proc_name)
+
+
+let lookup_module module_name =
+  let open DSL.Syntax in
+  match is_module_captured module_name with
+  | Some proc_name ->
+      let* module_ = PyModule.make module_name in
+      ret (module_, Some proc_name)
+  | None -> (
+      (* it is not a capture module name *)
+      let module_name_init = module_name ^ "::__init__" in
+      match is_module_captured module_name_init with
+      | None ->
+          (* neither it is a captured package name *)
+          if not (IString.Set.mem module_name stdlib_modules) then
+            StatsLogging.log_message ~label:"python_missing_module" ~message:module_name ;
+          let* module_ = PyModule.make module_name in
+          ret (module_, None)
+      | Some proc_name ->
+          (* it is a captured package name *)
+          let* module_ = PyModule.make module_name_init in
+          ret (module_, Some proc_name) )
+
+
+let import_module module_name : DSL.aval DSL.model_monad =
+  let open DSL.Syntax in
+  let* module_, opt_body_procname = lookup_module module_name in
+  let* () =
+    option_iter opt_body_procname ~f:(fun proc_name ->
+        python_call proc_name [("globals", module_)] |> ignore )
+  in
+  ret module_
+
+
+let import_module_from_package package ~module_path ~module_name =
+  let open DSL.Syntax in
+  let* module_ = Dict.get_str_key package module_name in
+  let* already_imported = is_global module_ in
+  if already_imported then ret ()
+  else
+    let* imported = import_module module_path in
+    Dict.set_str_key package module_name imported
+
+
+let rec import_chain parents ?root_parent ?path chain : DSL.aval DSL.model_monad =
+  let open DSL.Syntax in
+  match (parents, chain, root_parent) with
+  | _ :: _, [], Some root_parent ->
+      ret root_parent
+  | parent :: _, name :: chain, _ ->
+      let path =
+        Option.value_map path ~default:name ~f:(fun path -> F.asprintf "%s::%s" path name)
+      in
+      let* () = import_module_from_package parent ~module_path:path ~module_name:name in
+      let* module_ = Dict.get_str_key parent name in
+      let root_parent = Option.value root_parent ~default:module_ in
+      import_chain (module_ :: parents) ~path ~root_parent chain
+  | _, _, _ ->
+      L.die InternalError "import_chain should never be called on an empty parents list"
+
+
 let import_from name module_ : model =
   let open DSL.Syntax in
   start_model
   @@ fun () ->
-  let* res = Dict.get module_ name in
+  let* opt_is_package = is_package module_ in
+  let* name = as_constant_string_exn name in
+  let* () =
+    option_iter opt_is_package ~f:(fun package_name ->
+        let module_path = F.asprintf "%s::%s" package_name name in
+        import_module_from_package module_ ~module_path ~module_name:name )
+  in
+  let* res = Dict.get_str_key module_ name in
   assign_ret res
 
 
-let import_name name _fromlist _level : model =
+let is_tuple aval : bool DSL.model_monad =
+  let open DSL.Syntax in
+  let* opt_dynamic_type_data = get_dynamic_type ~ask_specialization:false aval in
+  let res =
+    match opt_dynamic_type_data with
+    | Some {Formula.typ= {Typ.desc= Tstruct type_name}} ->
+        Typ.Name.equal tuple_tname type_name
+    | _ ->
+        false
+  in
+  ret res
+
+
+let split_module_path path =
+  let rec loop acc = function
+    | [] ->
+        L.die InternalError "split_module_path: unexpected case"
+    | [last] ->
+        let pos = last + 2 in
+        String.sub path ~pos ~len:(String.length path - pos) :: acc |> List.rev
+    | pos :: (next_pos :: _ as rest) ->
+        let pos = pos + 2 in
+        let acc = String.sub path ~pos ~len:(next_pos - pos) :: acc in
+        loop acc rest
+  in
+  let positions = String.substr_index_all path ~may_overlap:false ~pattern:"::" in
+  loop [] (-2 :: positions)
+
+
+let import_name globals name fromlist _level : model =
   let open DSL.Syntax in
   start_model
   @@ fun () ->
-  let* opt_str = as_constant_string name in
-  let module_name =
-    Option.value_or_thunk opt_str ~default:(fun () ->
-        L.die InternalError "frontend should always give a string here" )
-  in
-  let class_name = PythonClassName.make module_name in
-  let function_name = "__module_body__" in
-  let proc_name = Procname.make_python ~class_name:(Some class_name) ~function_name in
-  let* module_ = PyModule.make module_name in
-  if IRAttributes.load proc_name |> Option.is_none then assign_ret module_
-  else
-    let* _ = python_call proc_name [("globals", module_)] in
+  let* module_name = as_constant_string_exn name in
+  let* fromlist_is_tuple = is_tuple fromlist in
+  let names = split_module_path module_name in
+  if
+    fromlist_is_tuple
+    (* this is a from ... import ... [as ...] *)
+    || List.length names <= 1
+    (* this is a import <simple_name> [as ...] *)
+  then
+    let* module_ = import_module module_name in
     assign_ret module_
+  else
+    (* this is a import <package> [as ...] *)
+    let* first_parent = import_chain [globals] names in
+    assign_ret first_parent
 
 
 let load_fast name locals : model =
@@ -270,12 +705,21 @@ let load_fast name locals : model =
   assign_ret value
 
 
+let tag_if_builtin name aval : unit DSL.model_monad =
+  let open DSL.Syntax in
+  if List.mem ~equal:String.equal reserved_builtins name then
+    and_dynamic_type_is aval
+      (Typ.mk_struct (PythonClass (PythonClassName.mk_reserved_builtin name)))
+  else ret ()
+
+
 let load_global name globals : model =
   let open DSL.Syntax in
   start_model
   @@ fun () ->
-  let* value = Dict.get globals name in
-  (* TODO: decide what we do if the binding is missing in globals (for builtins) *)
+  let* name = as_constant_string_exn name in
+  let* value = Dict.get_str_key ~propagate_static_type:true globals name in
+  let* () = tag_if_builtin name value in
   assign_ret value
 
 
@@ -307,17 +751,22 @@ let make_int arg : model =
   let open DSL.Syntax in
   start_model
   @@ fun () ->
-  let* opt_int = as_constant_int arg in
-  let* res =
-    match opt_int with
-    | None ->
-        constructor ~deref:false int_tname []
-    | Some i ->
-        let* res = int i in
-        let* () = and_dynamic_type_is res (Typ.mk_struct int_tname) in
-        ret res
-  in
+  let* res = make_int_internal arg in
   assign_ret res
+
+
+let make_bool bool : DSL.aval DSL.model_monad =
+  let open DSL.Syntax in
+  let* bool = int (if bool then 1 else 0) in
+  let* () = and_dynamic_type_is bool (Typ.mk_struct bool_tname) in
+  ret bool
+
+
+let make_random_bool () =
+  let open DSL.Syntax in
+  let* res = fresh () in
+  let* () = and_dynamic_type_is res (Typ.mk_struct bool_tname) in
+  ret res
 
 
 let make_none : model =
@@ -368,28 +817,178 @@ let yield_from _ _ : model =
   start_model @@ fun () -> ret ()
 
 
+let unknown _ : model =
+  let open DSL.Syntax in
+  start_model
+  @@ fun () ->
+  let* res = fresh () in
+  assign_ret res
+
+
+let die_if_other_builtin (_, proc_name) _ =
+  if
+    Language.curr_language_is Python
+    && Procname.get_class_name proc_name |> Option.exists ~f:(String.equal "$builtins")
+  then L.die InternalError "unknown builtin %a" Procname.pp proc_name ;
+  false
+
+
+let is_builtin typename : bool =
+  match (typename : Typ.Name.t) with
+  | PythonClass pyclass ->
+      PythonClassName.is_reserved_builtin pyclass
+  | _ ->
+      false
+
+
+let compare_eq arg1 arg2 : model =
+  let open DSL.Syntax in
+  start_model
+  @@ fun () ->
+  let* arg1_dynamic_type_data = get_dynamic_type ~ask_specialization:true arg1 in
+  let* arg2_dynamic_type_data = get_dynamic_type ~ask_specialization:true arg2 in
+  let* res =
+    match (arg1_dynamic_type_data, arg2_dynamic_type_data) with
+    | ( Some {Formula.typ= {desc= Tstruct arg1_type_name}}
+      , Some {Formula.typ= {desc= Tstruct arg2_type_name}} )
+      when is_builtin arg1_type_name || is_builtin arg2_type_name ->
+        make_bool (Typ.Name.equal arg1_type_name arg2_type_name)
+    | _ ->
+        L.d_printfln "py_compare_eq: at least one unknown dynamic type: unknown result" ;
+        make_random_bool ()
+  in
+  assign_ret res
+
+
 let matchers : matcher list =
   let open ProcnameDispatcher.Call in
   let arg = capt_arg_payload in
-  [ -"$builtins" &:: "py_build_class" <>$ arg $+ arg $+++$--> build_class
-  ; -"$builtins" &:: "py_call" <>$ arg $+ arg $+++$--> call
-  ; -"$builtins" &:: "py_call_method" <>$ arg $+ arg $+ arg $+++$--> call_method
+  [ -"$builtins" &:: "py_attributes_of_match_class" &::.*+++> unknown
+  ; -"$builtins" &:: "py_binary_add" &::.*+++> unknown
+  ; -"$builtins" &:: "py_binary_and" &::.*+++> unknown
+  ; -"$builtins" &:: "py_binary_floor_divide" &::.*+++> unknown
+  ; -"$builtins" &:: "py_binary_lshift" &::.*+++> unknown
+  ; -"$builtins" &:: "py_binary_matrix_multiply" &::.*+++> unknown
+  ; -"$builtins" &:: "py_binary_modulo" &::.*+++> unknown
+  ; -"$builtins" &:: "py_binary_multiply" &::.*+++> unknown
+  ; -"$builtins" &:: "py_binary_or" &::.*+++> unknown
+  ; -"$builtins" &:: "py_binary_power" &::.*+++> unknown
+  ; -"$builtins" &:: "py_binary_rshift" &::.*+++> unknown
+  ; -"$builtins" &:: "py_binary_substract" &::.*+++> unknown
+  ; -"$builtins" &:: "py_binary_true_divide" &::.*+++> unknown
+  ; -"$builtins" &:: "py_binary_xor" &::.*+++> unknown
+  ; -"$builtins" &:: "py_bool_false" &::.*+++> unknown
+  ; -"$builtins" &:: "py_bool_of_match_class" &::.*+++> unknown
+  ; -"$builtins" &:: "py_bool_true" &::.*+++> unknown
+  ; -"$builtins" &:: "py_build_class" <>$ arg $+ arg $+++$--> build_class
+  ; -"$builtins" &:: "py_build_const_key_map" &::.*+++> unknown
+  ; -"$builtins" &:: "py_build_frozen_set" &::.*+++> unknown
+  ; -"$builtins" &:: "py_build_list" &::.*+++> unknown
+  ; -"$builtins" &:: "py_build_map" &::.*+++> unknown
+  ; -"$builtins" &:: "py_build_set" &::.*+++> unknown
+  ; -"$builtins" &:: "py_build_slice" &::.*+++> unknown
+  ; -"$builtins" &:: "py_build_string" &::.*+++> unknown
   ; -"$builtins" &:: "py_build_tuple" &::.*+++> build_tuple
+  ; -"$builtins" &:: "py_build_unpack_list" &::.*+++> unknown
+  ; -"$builtins" &:: "py_build_unpack_map" &::.*+++> unknown
+  ; -"$builtins" &:: "py_build_unpack_set" &::.*+++> unknown
+  ; -"$builtins" &:: "py_build_unpack_tuple" &::.*+++> build_tuple
+  ; -"$builtins" &:: "py_call" <>$ arg $+ arg $+++$--> call
+  ; -"$builtins" &:: "py_call_function_ex" &::.*+++> unknown
+  ; -"$builtins" &:: "py_call_method" <>$ arg $+ arg $+ arg $+++$--> call_method
+  ; -"$builtins" &:: "py_compare_bad" &::.*+++> unknown
+  ; -"$builtins" &:: "py_compare_eq" <>$ arg $+ arg $--> compare_eq
+  ; -"$builtins" &:: "py_compare_exception" &::.*+++> unknown
+  ; -"$builtins" &:: "py_compare_ge" &::.*+++> unknown
+  ; -"$builtins" &:: "py_compare_gt" &::.*+++> unknown
+  ; -"$builtins" &:: "py_compare_in" &::.*+++> unknown
+  ; -"$builtins" &:: "py_compare_is" <>$ arg $+ arg $--> compare_eq
+  ; -"$builtins" &:: "py_compare_is_not" &::.*+++> unknown
+  ; -"$builtins" &:: "py_compare_le" &::.*+++> unknown
+  ; -"$builtins" &:: "py_compare_lt" &::.*+++> unknown
+  ; -"$builtins" &:: "py_compare_neq" &::.*+++> unknown
+  ; -"$builtins" &:: "py_compare_not_in" &::.*+++> unknown
+  ; -"$builtins" &:: "py_delete_attr" &::.*+++> unknown
+  ; -"$builtins" &:: "py_delete_deref" &::.*+++> unknown
+  ; -"$builtins" &:: "py_delete_fast" &::.*+++> unknown
+  ; -"$builtins" &:: "py_delete_global" &::.*+++> unknown
+  ; -"$builtins" &:: "py_delete_name" &::.*+++> unknown
+  ; -"$builtins" &:: "py_delete_subscr" &::.*+++> unknown
+  ; -"$builtins" &:: "py_dict_merge" &::.*+++> unknown
+  ; -"$builtins" &:: "py_dict_set_item" &::.*+++> unknown
+  ; -"$builtins" &:: "py_dict_update" &::.*+++> unknown
+  ; -"$builtins" &:: "py_format" &::.*+++> unknown
+  ; -"$builtins" &:: "py_format_fn_ascii" &::.*+++> unknown
+  ; -"$builtins" &:: "py_format_fn_repr" &::.*+++> unknown
+  ; -"$builtins" &:: "py_format_fn_str" &::.*+++> unknown
+  ; -"$builtins" &:: "py_gen_start_async_generator" &::.*+++> unknown
   ; -"$builtins" &:: "py_gen_start_coroutine" <>--> gen_start_coroutine
+  ; -"$builtins" &:: "py_gen_start_generator" &::.*+++> unknown
+  ; -"$builtins" &:: "py_get_aiter" &::.*+++> unknown
+  ; -"$builtins" &:: "py_get_attr" <>$ arg $+ arg $--> get_attr
   ; -"$builtins" &:: "py_get_awaitable" <>$ arg $--> get_awaitable
+  ; -"$builtins" &:: "py_get_iter" &::.*+++> unknown
+  ; -"$builtins" &:: "py_get_len" <>$ arg $--> unknown
+  ; -"$builtins" &:: "py_get_previous_exception" &::.*+++> unknown
+  ; -"$builtins" &:: "py_get_yield_from_iter" &::.*+++> unknown
+  ; -"$builtins" &:: "py_has_next_iter" &::.*+++> unknown
   ; -"$builtins" &:: "py_import_from" <>$ arg $+ arg $--> import_from
-  ; -"$builtins" &:: "py_import_name" <>$ arg $+ arg $+ arg $--> import_name
+  ; -"$builtins" &:: "py_import_name" <>$ arg $+ arg $+ arg $+ arg $--> import_name
+  ; -"$builtins" &:: "py_import_star" &::.*+++> unknown
+  ; -"$builtins" &:: "py_inplace_add" &::.*+++> unknown
+  ; -"$builtins" &:: "py_inplace_and" &::.*+++> unknown
+  ; -"$builtins" &:: "py_inplace_floor_divide" &::.*+++> unknown
+  ; -"$builtins" &:: "py_inplace_lshift" &::.*+++> unknown
+  ; -"$builtins" &:: "py_inplace_matrix_multiply" &::.*+++> unknown
+  ; -"$builtins" &:: "py_inplace_modulo" &::.*+++> unknown
+  ; -"$builtins" &:: "py_inplace_multiply" &::.*+++> unknown
+  ; -"$builtins" &:: "py_inplace_or" &::.*+++> unknown
+  ; -"$builtins" &:: "py_inplace_power" &::.*+++> unknown
+  ; -"$builtins" &:: "py_inplace_rshift" &::.*+++> unknown
+  ; -"$builtins" &:: "py_inplace_substract" &::.*+++> unknown
+  ; -"$builtins" &:: "py_inplace_true_divide" &::.*+++> unknown
+  ; -"$builtins" &:: "py_inplace_xor" &::.*+++> unknown
+  ; -"$builtins" &:: "py_invalid_unicode" &::.*+++> unknown
+  ; -"$builtins" &:: "py_iter_data" &::.*+++> unknown
+  ; -"$builtins" &:: "py_list_append" &::.*+++> unknown
+  ; -"$builtins" &:: "py_list_extend" &::.*+++> unknown
+  ; -"$builtins" &:: "py_list_to_tuple" &::.*+++> unknown
+  ; -"$builtins" &:: "py_load_assertion_error" &::.*+++> unknown
+  ; -"$builtins" &:: "py_load_class_deref" <>$ arg $--> unknown
+  ; -"$builtins" &:: "py_load_closure" <>$ arg $--> unknown
+  ; -"$builtins" &:: "py_load_deref" <>$ arg $--> unknown
   ; -"$builtins" &:: "py_load_fast" <>$ arg $+ arg $--> load_fast
   ; -"$builtins" &:: "py_load_global" <>$ arg $+ arg $--> load_global
   ; -"$builtins" &:: "py_load_name" <>$ arg $+ arg $+ arg $--> load_name
+  ; -"$builtins" &:: "py_make_bytes" <>$ arg $--> unknown
+  ; -"$builtins" &:: "py_make_complex" &::.*+++> unknown
   ; -"$builtins" &:: "py_make_dictionary" &::.*+++> make_dictionary
+  ; -"$builtins" &:: "py_make_float" <>$ arg $--> unknown
   ; -"$builtins" &:: "py_make_function" <>$ arg $+ arg $+ arg $+ arg $+ arg $--> make_function
   ; -"$builtins" &:: "py_make_int" <>$ arg $--> make_int
   ; -"$builtins" &:: "py_make_none" <>--> make_none
+  ; -"$builtins" &:: "py_make_string" <>$ arg $--> unknown
+  ; -"$builtins" &:: "py_match_class" &::.*+++> unknown
+  ; -"$builtins" &:: "py_match_sequence" <>$ arg $--> unknown
+  ; -"$builtins" &:: "py_next_iter" &::.*+++> unknown
   ; -"$builtins" &:: "py_nullify_locals" <>$ arg $+++$--> nullify_locals
-  ; -"$builtins" &:: "py_subscript" <>$ arg $+ arg $--> subscript
+  ; -"$builtins" &:: "py_set_add" &::.*+++> unknown
+  ; -"$builtins" &:: "py_set_attr" &::.*+++> unknown
+  ; -"$builtins" &:: "py_set_update" &::.*+++> unknown
+  ; -"$builtins" &:: "py_setup_annotations" &::.*+++> unknown
+  ; -"$builtins" &:: "py_store_deref" &::.*+++> unknown
   ; -"$builtins" &:: "py_store_fast" <>$ arg $+ arg $+ arg $--> store_fast
   ; -"$builtins" &:: "py_store_global" <>$ arg $+ arg $+ arg $--> store_global
   ; -"$builtins" &:: "py_store_name" <>$ arg $+ arg $+ arg $+ arg $--> store_name
-  ; -"$builtins" &:: "py_yield_from" <>$ arg $+ arg $--> yield_from ]
+  ; -"$builtins" &:: "py_store_subscript" &::.*+++> unknown
+  ; -"$builtins" &:: "py_subscript" <>$ arg $+ arg $--> subscript
+  ; -"$builtins" &:: "py_unary_invert" &::.*+++> unknown
+  ; -"$builtins" &:: "py_unary_negative" &::.*+++> unknown
+  ; -"$builtins" &:: "py_unary_not" &::.*+++> unknown
+  ; -"$builtins" &:: "py_unary_positive" &::.*+++> unknown
+  ; -"$builtins" &:: "py_unpack_ex" &::.*+++> unknown
+  ; -"$builtins" &:: "py_yield" <>$ arg $--> unknown
+  ; -"$builtins" &:: "py_yield_from" &::.*+++> unknown
+  ; -"$builtins" &:: "py_yield_from" <>$ arg $+ arg $--> yield_from
+  ; +die_if_other_builtin &::.*+++> unknown ]
   |> List.map ~f:(ProcnameDispatcher.Call.contramap_arg_payload ~f:ValueOrigin.addr_hist)

@@ -77,7 +77,7 @@ and QualName : sig
 
   val init : module_name:string -> t
 
-  val extend : t -> string -> t
+  val extend : t -> string -> int -> t
 
   val pp : F.formatter -> t -> unit
 
@@ -93,10 +93,12 @@ end = struct
 
   let init ~module_name = {function_name= ""; module_name}
 
-  let extend {module_name; function_name} attr =
+  let extend {module_name; function_name} attr counter =
     let attr = remove_angles attr in
+    let str_counter = match counter with 0 -> "" | _ -> string_of_int counter in
     let function_name =
-      if String.is_empty function_name then attr else F.asprintf "%s.%s" function_name attr
+      if String.is_empty function_name then F.asprintf "%s%s" attr str_counter
+      else F.asprintf "%s.%s%s" function_name attr str_counter
     in
     {function_name; module_name}
 
@@ -436,7 +438,6 @@ module Exp = struct
     | Const of Const.t
     | Function of
         { qual_name: QualName.t
-        ; short_name: Ident.t
         ; default_values: t
         ; default_values_kw: t
         ; annotations: t
@@ -514,12 +515,9 @@ module Exp = struct
         F.fprintf fmt "$LoadDeref(%d,\"%a\")" slot Ident.pp name
     | LoadClassDeref {name; slot} ->
         F.fprintf fmt "$LoadClassDeref(%d,\"%a\")" slot Ident.pp name
-    | Function
-        {qual_name; short_name; default_values; default_values_kw; annotations; cells_for_closure}
-      ->
-        F.fprintf fmt "$MakeFunction[\"%a\", \"%a\", %a, %a, %a, %a]" Ident.pp short_name
-          QualName.pp qual_name pp default_values pp default_values_kw pp annotations pp
-          cells_for_closure
+    | Function {qual_name; default_values; default_values_kw; annotations; cells_for_closure} ->
+        F.fprintf fmt "$MakeFunction[\"%a\", %a, %a, %a, %a]" QualName.pp qual_name pp
+          default_values pp default_values_kw pp annotations pp cells_for_closure
     | Yield exp ->
         F.fprintf fmt "$Yield(%a)" pp exp
 
@@ -731,7 +729,7 @@ module Stack = struct
 end
 
 module TerminatorBuilder = struct
-  (** This is a terminator in a tempory state. We will cast the [ssa_args] when finalizing the
+  (** This is a terminator in a temporary state. We will cast the [ssa_args] when finalizing the
       consrtruction *)
   type node_call = {label: NodeName.t; ssa_args: Exp.opstack_symbol list}
 
@@ -1265,7 +1263,6 @@ let make_function st flags =
         internal_error st (Error.MakeFunction ("a code object", codeobj))
   in
   let* qual_name = read_code_qual_name st code in
-  let short_name = Ident.mk code.FFI.Code.co_name in
   let* cells_for_closure, st =
     if flags land 0x08 <> 0 then State.pop_and_cast st else Ok (Exp.none, st)
   in
@@ -1280,8 +1277,7 @@ let make_function st flags =
   in
   let lhs, st = State.fresh_id st in
   let rhs =
-    Exp.Function
-      {short_name; qual_name; default_values; default_values_kw; annotations; cells_for_closure}
+    Exp.Function {qual_name; default_values; default_values_kw; annotations; cells_for_closure}
   in
   let stmt = Stmt.Let {lhs; rhs} in
   let st = State.push_stmt st stmt in
@@ -1492,7 +1488,11 @@ let get_cell_name {FFI.Code.co_cellvars; co_freevars} arg =
 let build_collection st count ~f =
   let open IResult.Let_syntax in
   let* values, st = State.pop_n_and_cast st count in
-  let exp = f values in
+  let rhs = f values in
+  let id, st = State.fresh_id st in
+  let exp = Exp.Temp id in
+  let stmt = Stmt.Let {lhs= id; rhs} in
+  let st = State.push_stmt st stmt in
   let st = State.push st exp in
   Ok (st, None)
 
@@ -1664,7 +1664,7 @@ let parse_bytecode st ({FFI.Code.co_consts; co_names; co_varnames} as code)
   | "POP_TOP" -> (
       (* TODO: rethink this in the future.
          Keep the popped values around in case their construction involves side effects.
-         dpichardie: I don't see any raison to keep the popped value, except special care
+         dpichardie: I don't see any reason to keep the popped value, except special care
          with the YIELD operations. *)
       let* rhs, st = State.pop st in
       match (rhs : Exp.opstack_symbol) with
@@ -1991,7 +1991,7 @@ let parse_bytecode st ({FFI.Code.co_consts; co_names; co_varnames} as code)
   | "POP_EXCEPT" ->
       internal_error st (Error.UnsupportedOpcode opname)
   | "BUILD_TUPLE_UNPACK_WITH_CALL"
-    (* No real difference betwen the two but in case of an error, which shouldn't happen since
+    (* No real difference between the two but in case of an error, which shouldn't happen since
        the code is known to compile *)
   | "BUILD_TUPLE_UNPACK" ->
       build_collection st arg ~f:(fun values -> Exp.Collection {kind= Tuple; values; unpack= true})
@@ -2000,7 +2000,7 @@ let parse_bytecode st ({FFI.Code.co_consts; co_names; co_varnames} as code)
   | "BUILD_SET_UNPACK" ->
       build_collection st arg ~f:(fun values -> Exp.Collection {kind= Set; values; unpack= true})
   | "BUILD_MAP_UNPACK_WITH_CALL" | "BUILD_MAP_UNPACK" ->
-      (* No real difference betwen the two but in case of an error, which shouldn't happen since
+      (* No real difference between the two but in case of an error, which shouldn't happen since
          the code is known to compile *)
       build_collection st arg ~f:(fun values -> Exp.Collection {kind= Map; values; unpack= true})
   | "YIELD_VALUE" ->
@@ -2113,7 +2113,7 @@ let parse_bytecode st ({FFI.Code.co_consts; co_names; co_varnames} as code)
          https://quentin.pradet.me/blog/using-asynchronous-for-loops-in-python.html
          https://superfastpython.com/asyncio-async-for/
          We model it like a throwing exception for now. This offset will not be reached
-         by our DFS anyway since we don't model exceptionnal edges yet.
+         by our DFS anyway since we don't model exceptional edges yet.
       *)
       Ok (st, Some (TerminatorBuilder.Throw Exp.none))
   | "RERAISE" | "WITH_EXCEPT_START" ->
@@ -2326,8 +2326,8 @@ module Subroutine = struct
      Then, we hit a END_FINALLY, the current frame is either [None]
      or [Some offset] and we can make a decision.
      This approach is rather fragile because a the order of return
-     adresses in the real operand stack could **in theory** be messed
-     up by some stack operaion like ROT_TWO, ROT_THREE and so one.
+     addresses in the real operand stack could **in theory** be messed
+     up by some stack operation like ROT_TWO, ROT_THREE and so one.
      We do not try to detect such a strange situation for now.
   *)
 
@@ -2657,13 +2657,16 @@ let build_code_object_unique_name module_name code =
     if CodeMap.mem code map then map
     else
       let map = CodeMap.add code outer_name map in
-      Array.fold co_consts ~init:map ~f:(fun map constant ->
+      Array.fold co_consts ~init:(map, IString.Map.empty) ~f:(fun (map, counter_map) constant ->
           match constant with
           | FFI.Constant.PYCCode code ->
-              let outer_name = QualName.extend outer_name code.FFI.Code.co_name in
-              visit map outer_name code
+              let name = code.FFI.Code.co_name in
+              let counter = IString.Map.find_opt name counter_map |> Option.value ~default:0 in
+              let outer_name = QualName.extend outer_name name counter in
+              (visit map outer_name code, IString.Map.add name (counter + 1) counter_map)
           | _ ->
-              map )
+              (map, counter_map) )
+      |> fst
   in
   let map = visit CodeMap.empty (QualName.init ~module_name) code in
   fun code -> CodeMap.find_opt code map

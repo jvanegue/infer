@@ -268,7 +268,7 @@ module CaptureWorker = struct
         ResultsDirEntryName.get_path ~results_dir:worker_out_dir_abspath CaptureDB
       in
       let capture_db = Database.Secondary capture_db_abspath in
-      DBWriter.override_use_daemon false ;
+      DBWriterProcess.override_use_daemon false ;
       Database.create_db capture_db CaptureDatabase ;
       Database.new_database_connection capture_db CaptureDatabase
     in
@@ -325,7 +325,7 @@ let process_output_in_parallel ic =
   let worker_blueprint = CaptureWorker.mk_blueprint () in
   let on_finish = function Some () -> incr n_error | None -> incr n_captured in
   let tasks () =
-    ProcessPool.TaskGenerator.
+    TaskGenerator.
       { remaining_tasks= (fun () -> IterSeq.estimated_remaining unit_iter)
       ; is_empty= (fun () -> IterSeq.is_empty unit_iter)
       ; finished= (fun ~result _ -> on_finish result)
@@ -359,7 +359,7 @@ let process_output_in_parallel ic =
   if not Config.hack_verify_capture_only then (
     MergeCapture.merge_captured_targets ~root:Config.results_dir ;
     let tenv =
-      Tenv.load_global ()
+      Tenv.Global.load ()
       |> Option.value_or_thunk ~default:(fun () ->
              L.die InternalError "Global tenv not found after capture merge" )
     in
@@ -486,5 +486,5 @@ let capture ~prog ~args =
     Tenv.merge ~src:hack_model_tenv ~dst:captured_tenv ;
     Tenv.merge ~src:textual_model_tenv ~dst:captured_tenv ;
     (* normalization already happened in the compile call through merging, no point repeating it *)
-    Tenv.store_global ~normalize:false captured_tenv )
+    Tenv.Global.store ~normalize:false captured_tenv )
   else L.die UserError "hackc command line is missing %s subcommand" textual_subcommand

@@ -9,6 +9,24 @@ include Core
 
 [@@@warning "-unused-value-declaration"]
 
+module Lazy = struct
+  include Lazy
+
+  let max_force_iterations = 100
+
+  (** Thread-safe forcing. Will busy-wait up to [max_force_iterations]. Recursive lazy expressions
+      or raised [Lazy.Undefined] raised from other sources will eventually escape. *)
+  let force l =
+    let rec safe_force n l =
+      try Lazy.force l
+      with Lazy.Undefined when n > 0 ->
+        (* Give some breathing room *)
+        Domain.cpu_relax () ;
+        safe_force (n - 1) l
+    in
+    safe_force max_force_iterations l
+end
+
 (* easier to write Unix than Core_unix *)
 module Unix = Core_unix
 
@@ -25,7 +43,13 @@ module Sys = struct
 end
 
 (* easy access to sub-module *)
-module DLS = Domain.DLS
+module DLS = struct
+  include Domain.DLS
+
+  let incr key = get key |> (fun x -> x + 1) |> set key
+
+  let decr key = get key |> (fun x -> x - 1) |> set key
+end
 
 (* Compare police: generic compare mostly disabled. *)
 let compare = No_polymorphic_compare.compare
