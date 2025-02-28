@@ -157,7 +157,7 @@ val is_strong_pointer : t -> bool
 
 module Name : sig
   (** Named types. *)
-  type t = name [@@deriving compare, yojson_of, sexp, hash, normalize]
+  type t = name [@@deriving compare, yojson_of, sexp, hash, normalize, show]
 
   val compare_name : t -> t -> int
   (** Similar to compare, but compares only names, except template arguments. *)
@@ -200,20 +200,6 @@ module Name : sig
 
   val is_objc_block : t -> bool
 
-  val is_hack_class : t -> bool
-
-  val is_python_class : t -> bool
-
-  val is_python_final : t -> bool
-
-  val is_python_module : t -> bool
-
-  val is_python_module_attribute : t -> bool
-
-  val get_python_module_name : t -> string option
-
-  val get_python_module_attribute_infos : t -> (t * string) option
-
   module C : sig
     val from_string : string -> t
 
@@ -229,6 +215,8 @@ module Name : sig
   end
 
   module Hack : sig
+    val is_class : t -> bool
+
     val static_companion : t -> t
     (** See {!HackClassName.static_companion} *)
 
@@ -246,6 +234,18 @@ module Name : sig
 
     val is_HH_classname : t -> bool
     (** Check return true if the typename is [HH::classname] *)
+  end
+
+  module Python : sig
+    val is_class : t -> bool
+
+    val is_final : t -> bool
+
+    val is_singleton : t -> bool
+
+    val split_module_attr : t -> (string * string) option
+
+    val concatenate_package_name_and_file_name : t -> string -> t option
   end
 
   module Java : sig

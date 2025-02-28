@@ -344,6 +344,12 @@ module Internal = struct
         (astate.post :> base_domain).stack
 
 
+    let for_all pre_or_post f astate =
+      BaseStack.for_all
+        (fun var vo -> f var (CanonValue.canon_value_origin astate vo))
+        (select pre_or_post astate)
+
+
     let keys astate = fold_keys List.cons astate []
 
     let fold_merge pre_or_post astate1 astate2 ~init ~f =
@@ -783,7 +789,7 @@ module Internal = struct
     let is_final =
       Tenv.lookup tenv typ_name
       |> Option.value_map ~default:false ~f:(fun {Struct.annots} -> Annot.Item.is_final annots)
-      || Typ.Name.is_python_final typ_name
+      || Typ.Name.Python.is_final typ_name
     in
     if is_final then
       let phi' =
@@ -817,8 +823,8 @@ module Internal = struct
     let record_static_type astate (_var, typ, _, (src_addr, src_addr_hist)) =
       match typ with
       | {Typ.desc= Tptr ({desc= Tstruct typ_name}, _)}
-        when Typ.Name.is_objc_class typ_name || Typ.Name.is_hack_class typ_name
-             || Typ.Name.is_python_class typ_name ->
+        when Typ.Name.is_objc_class typ_name || Typ.Name.Hack.is_class typ_name
+             || Typ.Name.Python.is_class typ_name ->
           let pre_heap = (astate.pre :> BaseDomain.t).heap in
           let post_heap = (astate.post :> BaseDomain.t).heap in
           let addr = CanonValue.mk_fresh () in
@@ -1033,13 +1039,15 @@ module Internal = struct
             Continue (astate, error)
         | Equal (v1, v2) -> (
           match subst_var (v1, v2) astate with
-          | Unsat ->
-              Stop Unsat
+          | Unsat _ as unsat ->
+              Stop unsat
           | Sat astate' ->
               Continue (astate', error) )
         | EqZero v when is_stack_allocated stack_allocations v ->
-            L.d_printfln "CONTRADICTION: %a = 0 but is allocated" AbstractValue.pp v ;
-            Stop Unsat
+            let reason () =
+              F.asprintf "CONTRADICTION: %a = 0 but is allocated" AbstractValue.pp v
+            in
+            Stop (Unsat {reason; source= __POS__})
         | EqZero v when is_heap_allocated astate v -> (
             (* We want to detect when we know [v|->-] and [v=0] together. This is a contradiction, but
                can also be the sign that there is a real issue. Consider:
@@ -1072,9 +1080,11 @@ module Internal = struct
             | None ->
                 (* we don't know why [v|->-] is in the state, weird and probably cannot happen; drop
                    the path because we won't be able to give a sensible error *)
-                L.d_printfln "Not clear why %a should be allocated in the first place, giving up"
-                  AbstractValue.pp v ;
-                Stop Unsat
+                let reason () =
+                  F.asprintf "Not clear why %a should be allocated in the first place, giving up"
+                    AbstractValue.pp v
+                in
+                Stop (Unsat {reason; source= __POS__})
             | Some (_, trace, reason_opt) ->
                 Stop (Sat (astate, Some (v, (trace, reason_opt)))) )
         | EqZero _ (* [v] not allocated *) ->
@@ -1678,21 +1688,93 @@ let mk_initial tenv (proc_attrs : ProcAttributes.t) =
   update_pre_for_kotlin_proc astate proc_attrs formals
 
 
+(* work a bit hard: we need to canonicalize abstract values taken out of edges on the fly and
+   compare the two edges maps access per access so we sort their respective accesses first to behave
+   in [n (lg n)] instead of quadratically *)
+let equal_edges astate edges_pre edges_post =
+  let to_sorted astate edges =
+    RawMemory.Edges.to_seq edges
+    |> Stdlib.Seq.map (fun (access, (v, _hist)) ->
+           ( CanonValue.canon_access astate access |> downcast_access
+           , CanonValue.canon' astate v |> downcast ) )
+    |> Stdlib.Seq.fold_left (fun l x -> x :: l) []
+    |> List.sort ~compare:(fun (access1, _) (access2, _) ->
+           RawMemory.Access.compare access1 access2 )
+  in
+  List.equal [%compare.equal: RawMemory.Access.t * AbstractValue.t] (to_sorted astate edges_pre)
+    (to_sorted astate edges_post)
+
+
+let rec equal_pre_post_heaps visited astate v =
+  if AbstractValue.Set.mem v !visited then true
+  else
+    let raw_edges_post_opt = RawMemory.find_opt v (SafeMemory.select `Post astate) in
+    let raw_edges_pre_opt = RawMemory.find_opt v (SafeMemory.select `Pre astate) in
+    (* addresses get "registered" in the pre with empty edges, which doesn't happen in the post and
+       can lead to spuriously considering that the edges are different *)
+    let raw_edges_pre_opt =
+      if Option.exists raw_edges_pre_opt ~f:RawMemory.Edges.is_empty then None
+      else raw_edges_pre_opt
+    in
+    visited := AbstractValue.Set.add v !visited ;
+    Option.equal (equal_edges astate) raw_edges_pre_opt raw_edges_post_opt
+    && Option.for_all raw_edges_pre_opt ~f:(fun raw_edges_pre ->
+           RawMemory.Edges.for_all raw_edges_pre ~f:(fun (_access, (v, _)) ->
+               equal_pre_post_heaps visited astate v ) )
+
+
 let are_same_values_as_pre_formals proc_desc values astate =
-  List.for_all2 (Procdesc.get_formals proc_desc) values ~f:(fun (mangled_name, _, _) v ->
-      if Language.curr_language_is Hack && Mangled.is_self mangled_name then true
-      else
-        let formal = Pvar.mk mangled_name (Procdesc.get_proc_name proc_desc) in
-        let formal_addr =
-          SafeStack.find_opt `Pre (Var.of_pvar formal) astate
-          |> Option.value_exn |> ValueOrigin.value
-        in
-        let formal_v =
-          SafeMemory.find_edge_opt `Pre formal_addr Dereference astate
-          |> Option.value_exn |> fst |> downcast
-        in
-        AbstractValue.equal formal_v v )
-  |> function List.Or_unequal_lengths.Ok b -> b | List.Or_unequal_lengths.Unequal_lengths -> false
+  let open IOption.Let_syntax in
+  let visited_ref = ref AbstractValue.Set.empty in
+  let compatible_sub_heaps astate v_pre v_post =
+    AbstractValue.equal v_pre v_post && equal_pre_post_heaps visited_ref astate v_pre
+  in
+  let deref pre_or_post addr astate =
+    SafeMemory.find_edge_opt pre_or_post addr Dereference astate >>| fst >>| downcast
+  in
+  let pvar_value pre_or_post pvar astate =
+    let* pvar_addr =
+      SafeStack.find_opt pre_or_post (Var.of_pvar pvar) astate >>| ValueOrigin.value
+    in
+    deref pre_or_post pvar_addr astate
+  in
+  let proc_name = Procdesc.get_proc_name proc_desc in
+  let same_input_parameters () =
+    List.for_all2 (Procdesc.get_formals proc_desc) values ~f:(fun (mangled_name, _, _) v ->
+        if Language.curr_language_is Hack && Mangled.is_self mangled_name then true
+        else
+          let formal = Pvar.mk mangled_name proc_name in
+          let formal_v = pvar_value `Pre formal astate |> Option.value_exn in
+          compatible_sub_heaps astate formal_v v )
+    |> function
+    | List.Or_unequal_lengths.Ok b -> b | List.Or_unequal_lengths.Unequal_lengths -> false
+  in
+  let same_globals () =
+    let formals =
+      Procdesc.get_formals proc_desc
+      |> List.map ~f:(fun (mangled_name, _, _) -> Pvar.mk mangled_name proc_name)
+      |> Pvar.Set.of_list
+    in
+    (* parameters are given in the same order as [Procdesc.get_formals proc_desc] so above we look
+       up each one in turn, but to discover other input values in the precondition (global
+       variables) we need to enumerate the bindings of the pre stack, skipping over the parameters
+       we already handled *)
+    SafeStack.for_all `Pre
+      (fun var vo ->
+        match var with
+        | ProgramVar pvar ->
+            if Pvar.Set.mem pvar formals then (* handled above *) true
+            else
+              let v_pre = deref `Pre (ValueOrigin.value vo) astate in
+              let v_curr = pvar_value `Post pvar astate in
+              Option.equal (compatible_sub_heaps astate) v_pre v_curr
+        | LogicalVar _ ->
+            (* should be impossible *)
+            L.internal_error "Logical variable found in precondition" ;
+            true )
+      astate
+  in
+  same_input_parameters () && same_globals ()
 
 
 let leq ~lhs ~rhs =
@@ -1853,7 +1935,11 @@ let check_memory_leaks ~live_addresses ~unreachable_addresses astate =
 
            We don't have a precise enough memory model to understand everything that goes on here
            but we should at least not report a leak. *)
-        if reaches_into addr live_addresses astate then (
+        let curr_language = Language.get_language () in
+        if
+          Language.supports_pointer_arithmetic curr_language
+          && reaches_into addr live_addresses astate
+        then (
           L.d_printfln ~color:Orange
             "False alarm: address is still reachable via other means; forgetting about its \
              allocation site to prevent leak false positives." ;
@@ -2180,9 +2266,9 @@ module Summary = struct
     match summary_sat with
     | Sat _ ->
         summary_sat
-    | Unsat ->
+    | Unsat _ as unsat ->
         Stats.incr_pulse_summaries_contradictions () ;
-        Unsat
+        unsat
 
 
   let add_need_dynamic_type_specialization = add_need_dynamic_type_specialization
@@ -2334,7 +2420,12 @@ let incorporate_new_eqs new_eqs astate =
       Sat (Ok astate)
   | Some (address, must_be_valid) ->
       L.d_printfln ~color:Red "potential error if %a is null" AbstractValue.pp address ;
-      if is_allocated_this_pointer proc_attrs astate address then Unsat
+      if is_allocated_this_pointer proc_attrs astate address then
+        let reason () =
+          F.asprintf "%a is deduced to be equal to null but is already allocated" AbstractValue.pp
+            address
+        in
+        Unsat {reason; source= __POS__}
       else Sat (Error (`PotentialInvalidAccess (astate, address, must_be_valid)))
 
 

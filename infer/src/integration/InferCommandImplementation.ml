@@ -11,10 +11,10 @@ module F = Format
 let debug () =
   if not Config.(global_tenv || procedures || source_files) then
     L.die UserError
-      "Expected at least one of '--global-tenv', '--procedures' or '--source_files'.@\n"
+      "Expected at least one of '--global-tenv', '--procedures' or '--source-files'.@\n"
   else (
     ( if Config.global_tenv then
-        match Tenv.load_global () with
+        match Tenv.Global.load () with
         | None ->
             L.result "No global type environment was found.@."
         | Some tenv ->

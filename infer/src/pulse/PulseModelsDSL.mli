@@ -113,11 +113,11 @@ module Syntax : sig
 
   val allocation : Attribute.allocator -> aval -> unit model_monad
 
+  val is_allocated : aval -> bool model_monad
+
   val data_dependency : ValueOrigin.t -> ValueOrigin.t list -> unit model_monad
 
   val data_dependency_to_ret : ValueOrigin.t list -> unit model_monad
-
-  val add_dict_contain_const_keys : aval -> unit model_monad
 
   val add_dict_read_const_key : aval -> Fieldname.t -> unit model_monad
 
@@ -144,6 +144,8 @@ module Syntax : sig
 
   val read : Exp.t -> aval model_monad [@@warning "-unused-value-declaration"]
 
+  val remove_allocation_attr_transitively : aval list -> unit model_monad
+
   val int : ?hist:ValueHistory.t -> int -> aval model_monad
 
   val string : string -> aval model_monad
@@ -164,9 +166,22 @@ module Syntax : sig
 
   val new_ : Exp.t -> aval model_monad
 
-  val constructor : ?deref:bool -> Typ.Name.t -> (string * aval) list -> aval model_monad
+  val constructor :
+       ?deref:bool
+    -> ?field_of_string:(string -> Fieldname.t)
+    -> Typ.Name.t
+    -> (string * aval) list
+    -> aval model_monad
   (** [constructor_dsl typ_name fields] builds a fresh object of type [typ_name] and initializes its
       fields using list [fields] *)
+
+  val construct_dict :
+       ?deref:bool
+    -> ?field_of_string:(string -> Fieldname.t)
+    -> Typ.name
+    -> (string * (AbstractValue.t * ValueHistory.t)) list
+    -> const_strings_only:bool
+    -> aval model_monad
 
   val remove_hack_builder_attributes : aval -> unit model_monad
   [@@warning "-unused-value-declaration"]
@@ -243,6 +258,7 @@ module Syntax : sig
   val tenv_resolve_fieldname :
     Typ.name -> string -> (Fieldname.t option * Tenv.unresolved_reason option) model_monad
 
+  val tenv_type_is_defined : Typ.name -> bool model_monad
   (** {2 Invalidation operations} *)
 
   val invalidate_access : Invalidation.t -> aval -> Access.t -> unit model_monad
@@ -275,7 +291,7 @@ module Syntax : sig
 end
 
 val unsafe_to_astate_transformer :
-  'a model_monad -> CallEvent.t * model_data -> astate -> ('a * astate) sat_unsat_t
+  unsat_info -> 'a model_monad -> CallEvent.t * model_data -> astate -> ('a * astate) sat_unsat_t
 (** warning: the transformation will fail if the result of the computation is not a single abstract
     state with no error and it ignores the non-disjunctive state. You should think twice before
     using it... *)

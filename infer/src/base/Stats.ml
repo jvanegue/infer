@@ -155,13 +155,79 @@ module LongestProcDurationHeap = struct
   include Heap
 end
 
+module CacheStats = struct
+  type cache_data = {mutable hits: int; mutable misses: int}
+
+  type t = cache_data IString.Map.t
+
+  let merge m1 m2 =
+    IString.Map.merge
+      (fun _name data1_opt data2_opt ->
+        match (data1_opt, data2_opt) with
+        | _, None ->
+            data1_opt
+        | None, _ ->
+            data2_opt
+        | Some data1, Some data2 ->
+            Some {hits= data1.hits + data2.hits; misses= data1.misses + data2.misses} )
+      m1 m2
+
+
+  let get_stats {hits; misses} =
+    let total_queries = hits + misses in
+    let hit_rate =
+      int_of_float @@ Float.round (float_of_int (100 * hits) /. float_of_int total_queries)
+    in
+    (hit_rate, total_queries)
+
+
+  let pp fmt t =
+    let pp_cache_data name data =
+      let hit_rate, total_queries = get_stats data in
+      F.fprintf fmt "cache stats: name=%s; hit rate=%d%%; total queries=%d@;" name hit_rate
+        total_queries
+    in
+    IString.Map.iter pp_cache_data t
+
+
+  let to_log_entries ~field_name:_ t =
+    IString.Map.fold
+      (fun name data acc ->
+        let hit_rate, total_queries = get_stats data in
+        LogEntry.mk_count ~label:(F.sprintf "backend_stats.cache.%s.hit_rate" name) ~value:hit_rate
+        :: LogEntry.mk_count
+             ~label:(F.sprintf "backend_stats.cache.%s.total_queries" name)
+             ~value:total_queries
+        :: acc )
+      t []
+
+
+  let init = IString.Map.empty
+
+  let add_hit t ~name =
+    IString.Map.update name
+      (fun data_opt ->
+        let data = Option.value data_opt ~default:{hits= 0; misses= 0} in
+        data.hits <- data.hits + 1 ;
+        Some data )
+      t
+
+
+  let add_miss t ~name =
+    IString.Map.update name
+      (fun data_opt ->
+        let data = Option.value data_opt ~default:{hits= 0; misses= 0} in
+        data.misses <- data.misses + 1 ;
+        Some data )
+      t
+end
+
 (* NOTE: there is a custom ppx for this data structure to generate boilerplate, see
    src/inferppx/StatsPpx.mli *)
 type t =
-  { mutable summary_file_try_load: IntCounter.t
+  { mutable cache_stats: CacheStats.t
+  ; mutable summary_file_try_load: IntCounter.t
   ; mutable summary_read_from_disk: IntCounter.t
-  ; mutable summary_cache_hits: IntCounter.t
-  ; mutable summary_cache_misses: IntCounter.t
   ; mutable summary_specializations: IntCounter.t
   ; mutable ondemand_procs_analyzed: IntCounter.t
   ; mutable ondemand_double_analysis_prevented: IntCounter.t
@@ -198,18 +264,7 @@ type t =
 
 let reset () = copy initial ~into:global_stats
 
-let log_to_jsonl stats =
-  let hit_percent hit miss =
-    let total = hit + miss in
-    if Int.equal total 0 then None else Some (hit * 100 / total)
-  in
-  let summary_cache_hit_percent_entry =
-    hit_percent stats.summary_cache_hits stats.summary_cache_misses
-    |> Option.map ~f:(fun hit_percent ->
-           LogEntry.mk_count ~label:"backend_stats.summary_cache_hit_rate" ~value:hit_percent )
-  in
-  Option.to_list summary_cache_hit_percent_entry @ to_log_entries stats |> StatsLogging.log_many
-
+let log_to_jsonl stats = to_log_entries stats |> StatsLogging.log_many
 
 (** human-readable pretty-printing of all fields *)
 let pp fmt stats =
@@ -219,11 +274,6 @@ let pp fmt stats =
   let pp_serialized_field deserializer pp_value fmt field =
     pp_field (fun fmt v -> pp_value fmt (deserializer v)) fmt field
   in
-  let pp_hit_percent hit miss fmt =
-    let total = hit + miss in
-    if Int.equal total 0 then F.pp_print_string fmt "N/A%%"
-    else F.fprintf fmt "%d%%" (hit * 100 / total)
-  in
   let pp_int_field fmt field = pp_field F.pp_print_int fmt field in
   let pp_percent_field fmt field =
     pp_field (fun fmt p -> F.fprintf fmt "%.1f%%" (float_of_int p /. 10.)) fmt field
@@ -232,11 +282,6 @@ let pp fmt stats =
     let field_value = Field.get field stats in
     let field_name = Field.name field in
     F.fprintf fmt "%a@;" (TimeCounter.pp ~prefix:field_name) field_value
-  in
-  let pp_cache_hits stats cache_misses fmt cache_hits_field =
-    let cache_hits = Field.get cache_hits_field stats in
-    F.fprintf fmt "%s= %d (%t)@;" (Field.name cache_hits_field) cache_hits
-      (pp_hit_percent cache_hits cache_misses)
   in
   let pp_longest_proc_duration_heap fmt field =
     let heap : LongestProcDurationHeap.t = Field.get field stats in
@@ -255,11 +300,13 @@ let pp fmt stats =
     in
     F.fprintf fmt "pulse_summaries_total_disjuncts= %d@;" total
   in
+  let pp_cache_stats fmt field =
+    let cache_stats : CacheStats.t = Field.get field stats in
+    CacheStats.pp fmt cache_stats
+  in
   Fields.iter ~summary_file_try_load:(pp_int_field fmt) ~useful_times:(pp_time_counter_field fmt)
     ~longest_proc_duration_heap:(pp_longest_proc_duration_heap fmt)
-    ~summary_read_from_disk:(pp_int_field fmt)
-    ~summary_cache_hits:(pp_cache_hits stats stats.summary_cache_misses fmt)
-    ~summary_cache_misses:(pp_int_field fmt) ~summary_specializations:(pp_int_field fmt)
+    ~summary_read_from_disk:(pp_int_field fmt) ~summary_specializations:(pp_int_field fmt)
     ~ondemand_procs_analyzed:(pp_int_field fmt)
     ~ondemand_double_analysis_prevented:(pp_int_field fmt)
     ~ondemand_recursion_cycle_restart_limit_hit:(pp_int_field fmt)
@@ -284,6 +331,7 @@ let pp fmt stats =
     ~restart_scheduler_total_time:(pp_time_counter_field fmt)
     ~spec_store_times:(pp_time_counter_field fmt) ~topl_reachable_calls:(pp_int_field fmt)
     ~timings:(pp_serialized_field TimingsStat.deserialize Timings.pp fmt)
+    ~cache_stats:(pp_cache_stats fmt)
 
 
 (** machine-readable printing of selected fields, for tests *)
@@ -375,14 +423,20 @@ let log_aggregate stats_list =
       log_to_file stats
 
 
-let get () = {global_stats with timings= TimingsStat.serialize global_stats.timings}
+let mutex = Error_checking_mutex.create ()
+
+let get () =
+  Error_checking_mutex.critical_section mutex ~f:(fun () ->
+      {global_stats with timings= TimingsStat.serialize global_stats.timings} )
+
 
 let update_with field ~f =
   match Field.setter field with
   | None ->
       L.die InternalError "incr on non-mutable field %s" (Field.name field)
   | Some set ->
-      set global_stats (f (Field.get field global_stats))
+      Error_checking_mutex.critical_section mutex ~f:(fun () ->
+          set global_stats (f (Field.get field global_stats)) )
 
 
 let add field n = update_with field ~f:(( + ) n)
@@ -394,10 +448,6 @@ let add_exe_duration field exe_duration = update_with field ~f:(TimeCounter.add 
 let incr_summary_file_try_load () = incr Fields.summary_file_try_load
 
 let incr_summary_read_from_disk () = incr Fields.summary_read_from_disk
-
-let incr_summary_cache_hits () = incr Fields.summary_cache_hits
-
-let incr_summary_cache_misses () = incr Fields.summary_cache_misses
 
 let incr_summary_specializations () = incr Fields.summary_specializations
 
@@ -488,3 +538,8 @@ let set_useful_times execution_duration =
 
 let incr_spec_store_times counter =
   update_with Fields.spec_store_times ~f:(fun t -> TimeCounter.add_duration_since t counter)
+
+
+let add_cache_hit ~name = update_with Fields.cache_stats ~f:(fun t -> CacheStats.add_hit t ~name)
+
+let add_cache_miss ~name = update_with Fields.cache_stats ~f:(fun t -> CacheStats.add_miss t ~name)

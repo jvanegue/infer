@@ -100,11 +100,11 @@ let capture_gradle_target (out_dir, (javac_data : javac_data)) =
 
 
 let run_infer_capture target_data =
-  Tasks.Runner.create ~jobs:Config.jobs ~child_prologue:ignore ~f:capture_gradle_target
-    ~child_epilogue:ignore (fun () ->
-      ProcessPool.TaskGenerator.of_list ~finish:ProcessPool.TaskGenerator.finish_always_none
-        target_data )
-  |> Tasks.Runner.run |> ignore
+  ProcessPool.create ~jobs:Config.jobs ~child_prologue:ignore ~f:capture_gradle_target
+    ~child_epilogue:ignore
+    ~tasks:(fun () -> TaskGenerator.of_list ~finish:TaskGenerator.finish_always_none target_data)
+    ()
+  |> ProcessPool.run |> ignore
 
 
 let write_rev_infer_deps rev_target_data =

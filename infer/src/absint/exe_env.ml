@@ -9,13 +9,17 @@
 open! IStd
 module L = Logging
 
-type t =
-  {tenvs_map: Tenv.t option SourceFile.Hash.t; int_widths_map: IntegerWidths.t SourceFile.Hash.t}
+let tenvs_map = SourceFile.Cache.create ~name:"tenvs"
 
-let mk () = {tenvs_map= SourceFile.Hash.create 1; int_widths_map= SourceFile.Hash.create 1}
+let int_widths_map = SourceFile.Cache.create ~name:"int_widths"
 
-let[@alert "-tenv"] get_source_tenv exe_env source =
-  match SourceFile.Hash.find_opt exe_env.tenvs_map source with
+let clear_caches () =
+  SourceFile.Cache.clear tenvs_map ;
+  SourceFile.Cache.clear int_widths_map
+
+
+let[@alert "-tenv"] get_source_tenv source =
+  match SourceFile.Cache.lookup tenvs_map source with
   | Some tenv_opt ->
       tenv_opt
   | None -> (
@@ -23,7 +27,7 @@ let[@alert "-tenv"] get_source_tenv exe_env source =
     | None when Config.log_missing_deps ->
         raise MissingDependencyException.MissingDependencyException
     | v ->
-        SourceFile.Hash.add exe_env.tenvs_map source v ;
+        SourceFile.Cache.add tenvs_map source v ;
         v )
 
 
@@ -37,38 +41,30 @@ let get_proc_source pname =
       L.die InternalError "exe_env: could not find procedure attributes for %a@\n" Procname.pp pname
 
 
-let load_java_global_tenv _exe_env =
-  (* We don't use exe_env, though require it as a param.
-     This is to make API consistent with other methods and to allow for future implementation changes.
-     If somebody wants to fetch java global environment, they'd better have exe_env instance provided.
-     If they don't they are probably doing something wrong.
-  *)
-  match Tenv.load_global () with
-  | None ->
-      L.die InternalError "Could not load the global tenv"
-  | Some tenv ->
-      tenv
-
-
-let get_proc_tenv exe_env pname =
+let get_proc_tenv pname =
   match pname with
   | Procname.Java _ ->
-      load_java_global_tenv exe_env
+      Tenv.Global.load () |> Option.value_exn
   | _ ->
-      get_proc_source pname |> get_source_tenv exe_env
+      get_proc_source pname |> get_source_tenv
       |> Option.value_or_thunk ~default:(fun () ->
              L.die InternalError "exe_env: could not find tenv for %a@\n" Procname.pp pname )
 
 
-let get_integer_type_widths exe_env pname =
+let get_integer_type_widths pname =
   let source = get_proc_source pname in
-  match SourceFile.Hash.find_opt exe_env.int_widths_map source with
+  match SourceFile.Cache.lookup int_widths_map source with
   | Some widths ->
       widths
   | None -> (
     match IntegerWidths.load source with
     | Some widths ->
-        SourceFile.Hash.add exe_env.int_widths_map source widths ;
+        SourceFile.Cache.add int_widths_map source widths ;
         widths
     | None ->
         IntegerWidths.java )
+
+
+let set_lru_limit ~lru_limit =
+  SourceFile.Cache.set_lru_mode tenvs_map ~lru_limit ;
+  SourceFile.Cache.set_lru_mode int_widths_map ~lru_limit

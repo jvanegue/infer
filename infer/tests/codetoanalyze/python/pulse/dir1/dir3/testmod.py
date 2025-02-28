@@ -15,3 +15,16 @@ class C:
     @staticmethod
     async def async_fun():
         pass
+
+
+def wait(arg):
+    """
+    This function is expected to be modeled as awaiting its argument because of .inferconfig
+    """
+    pass
+
+def deep_wait(*arg):
+    """
+    This function is expected to be modeled as awaiting deeply its arguments because of .inferconfig
+    """
+    pass

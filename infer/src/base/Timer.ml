@@ -10,7 +10,7 @@ module L = Logging
 
 exception Timeout of float
 
-let now () = (Unix.times ()).tms_utime
+let now () = if Config.multicore then 0.0 else (Unix.times ()).tms_utime
 
 let timer = DLS.new_key (fun () -> None)
 
@@ -47,7 +47,7 @@ let check_timeout timeout =
     raise (Timeout span) )
 
 
-let check_timeout () = Option.iter ~f:check_timeout Config.timeout
+let check_timeout () = if not Config.multicore then Option.iter ~f:check_timeout Config.timeout
 
 let time timeable ~on_timeout ~f =
   let timer = suspend () in

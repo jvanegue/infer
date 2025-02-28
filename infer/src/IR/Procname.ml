@@ -855,8 +855,8 @@ let get_class_name t =
       Block.get_class_name bsig
   | Hack hack_pname ->
       Hack.get_class_name_as_a_string hack_pname
-  | Python _ ->
-      L.die InternalError "TODO: get_class_name for Python type"
+  | Python py_pname ->
+      Python.get_class_name_as_a_string py_pname
   | C _ | Erlang _ ->
       None
 
@@ -1384,7 +1384,6 @@ end)
 
 include Comparable
 module Hash = Hashtbl.Make (Hashable)
-module LRUHash = LRUHashtbl.Make (Hashable)
 module HashQueue = Hash_queue.Make (Hashable)
 module HashSet = HashSet.Make (Hashable)
 
@@ -1398,6 +1397,10 @@ module Set = PrettyPrintable.MakePPSet (struct
   type nonrec t = t [@@deriving compare]
 
   let pp = pp
+end)
+
+module Cache = Concurrent.MakeCache (struct
+  type nonrec t = t [@@deriving compare, equal, hash, show, sexp]
 end)
 
 let get_qualifiers pname =

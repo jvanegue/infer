@@ -208,7 +208,8 @@ module Syntax = struct
   let exec_partial_command (f : astate -> astate PulseOperationResult.t) : unit model_monad =
    fun _data astate non_disj ->
     match f astate with
-    | Unsat ->
+    | Unsat unsat_info ->
+        SatUnsat.log_unsat unsat_info ;
         ([], non_disj)
     | Sat res ->
         ([PulseResult.map res ~f:(fun astate -> ContinueProgram ((), astate))], non_disj)
@@ -221,7 +222,8 @@ module Syntax = struct
   let exec_partial_operation (f : astate -> (astate * 'a) PulseOperationResult.t) : 'a model_monad =
    fun _data astate non_disj ->
     match f astate with
-    | Unsat ->
+    | Unsat unsat_info ->
+        SatUnsat.log_unsat unsat_info ;
         ([], non_disj)
     | Sat res ->
         ([PulseResult.map res ~f:(fun (astate, a) -> ContinueProgram (a, astate))], non_disj)
@@ -436,10 +438,17 @@ module Syntax = struct
         ret false
 
 
+  (* is_dict_non_alias was introduced as an attempt to differentiate dicts from shapes in Hack *)
+  (* For python for now we don't have any similar heuristic in place *)
+  let should_add_read_const_key proc_desc addr : bool model_monad =
+    if Language.curr_language_is Python then ret true
+    else is_dict_non_alias (Procdesc.get_pvar_formals proc_desc) addr
+
+
   let add_dict_read_const_key (addr, history) key : unit model_monad =
     let* {analysis_data= {proc_desc}; path= {timestamp}; location} = get_data in
-    let* is_dict_non_alias = is_dict_non_alias (Procdesc.get_pvar_formals proc_desc) addr in
-    if is_dict_non_alias then
+    let* should_add_read = should_add_read_const_key proc_desc addr in
+    if should_add_read then
       PulseOperations.add_dict_read_const_key timestamp (Immediate {location; history}) addr key
       >> sat |> exec_partial_command
     else ret ()
@@ -501,6 +510,12 @@ module Syntax = struct
 
   let get_static_type (addr, _) = AddressAttributes.get_static_type addr |> exec_pure_operation
 
+  let tenv_type_is_defined typ_name : bool model_monad =
+   fun ((_desc, {analysis_data= {tenv}}) as data) astate ->
+    let is_defined = Tenv.lookup tenv typ_name |> Option.is_some in
+    ret is_defined data astate
+
+
   let tenv_resolve_field_info typ_name field_name : Struct.field_info option model_monad =
    fun ((_desc, {analysis_data= {tenv}}) as data) astate ->
     let info = Tenv.resolve_field_info tenv typ_name field_name in
@@ -535,6 +550,11 @@ module Syntax = struct
     PulseOperations.eval path Read location exp |> exec_partial_operation
 
 
+  let remove_allocation_attr_transitively (args : aval list) : unit model_monad =
+    let args = List.map ~f:fst args in
+    PulseOperations.remove_allocation_attr_transitively args |> exec_command
+
+
   let string str : aval model_monad = read (Const (Cstr str))
 
   let string_concat (v1, hist1) (v2, hist2) : aval model_monad =
@@ -551,6 +571,10 @@ module Syntax = struct
   let allocation attr (addr, _) : unit model_monad =
     let* {location} = get_data in
     PulseOperations.allocate attr location addr |> exec_command
+
+
+  let is_allocated (addr, _) : bool model_monad =
+    PulseOperations.is_allocated addr |> exec_pure_operation
 
 
   let fresh_ var_type ?more () : aval model_monad =
@@ -658,7 +682,7 @@ module Syntax = struct
         unreachable
 
 
-  let constructor ?(deref = true) type_name fields : aval model_monad =
+  let constructor ?(deref = true) ?field_of_string type_name fields : aval model_monad =
     let exp =
       Exp.Sizeof
         { typ= Typ.mk_struct type_name
@@ -668,12 +692,21 @@ module Syntax = struct
         ; nullable= false }
     in
     let* new_obj = new_ exp in
+    let field_of_string =
+      match field_of_string with None -> Fieldname.make type_name | Some f -> f
+    in
     let* () =
       list_iter fields ~f:(fun (fieldname, obj) ->
-          let field = Fieldname.make type_name fieldname in
+          let field = field_of_string fieldname in
           store_field ~deref ~ref:new_obj field obj )
     in
     ret new_obj
+
+
+  let construct_dict ?(deref = true) ?field_of_string type_name bindings ~const_strings_only =
+    let* dict = constructor ~deref ?field_of_string type_name bindings in
+    let* () = if const_strings_only then add_dict_contain_const_keys dict else ret () in
+    ret dict
 
 
   let remove_hack_builder_attributes bv : unit model_monad =
@@ -866,6 +899,17 @@ module Syntax = struct
 
   let apply_closure lang (closure : aval) unresolved_pname closure_args : aval model_monad =
     let* opt_dynamic_type_data = get_dynamic_type ~ask_specialization:true closure in
+    let unknown_call () =
+      let unresolved_str = Format.asprintf "%a" Procname.pp unresolved_pname in
+      let* args =
+        match closure_args with
+        | Regular closure_args ->
+            ret closure_args
+        | FromAttributes gen_closure_args ->
+            gen_closure_args None
+      in
+      unknown_call lang unresolved_str args
+    in
     match opt_dynamic_type_data with
     | Some {Formula.typ= {Typ.desc= Tstruct type_name}} -> (
         let* opt_resolved_pname = tenv_resolve_method type_name unresolved_pname in
@@ -873,8 +917,7 @@ module Syntax = struct
         | None ->
             L.d_printfln "[ocaml model] Closure dynamic type is %a but no implementation was found!"
               Typ.Name.pp type_name ;
-            let* unknown_res = fresh () in
-            ret unknown_res
+            unknown_call ()
         | Some resolved_pname ->
             L.d_printfln "[ocaml model] Closure resolved to a call to %a" Procname.pp resolved_pname ;
             let* closure_args =
@@ -893,15 +936,7 @@ module Syntax = struct
             ret res )
     | _ ->
         L.d_printfln "[ocaml model] Closure dynamic type is unknown." ;
-        let unresolved_str = Format.asprintf "%a" Procname.pp unresolved_pname in
-        let* args =
-          match closure_args with
-          | Regular closure_args ->
-              ret closure_args
-          | FromAttributes gen_closure_args ->
-              gen_closure_args None
-        in
-        unknown_call lang unresolved_str args
+        unknown_call ()
 
 
   let apply_hack_closure closure closure_args =
@@ -914,7 +949,7 @@ module Syntax = struct
 
   let apply_python_closure closure gen_closure_args =
     let unresolved_pname =
-      Procname.make_python ~class_name:(Some PythonClassName.wildcard) ~function_name:"call"
+      Procname.make_python ~class_name:(Some PythonClassName.Wildcard) ~function_name:"call"
     in
     apply_closure Python closure unresolved_pname (FromAttributes gen_closure_args)
 
@@ -941,19 +976,20 @@ module Syntax = struct
   end
 end
 
-let unsafe_to_astate_transformer (monad : 'a model_monad) :
+let unsafe_to_astate_transformer unsat_info (monad : 'a model_monad) :
     CallEvent.t * model_data -> astate -> ('a * astate) sat_unsat_t =
  fun data astate ->
+  let unsat = Unsat unsat_info in
   (* warning: we currently ignore the non-disjunctive state *)
   match monad data astate NonDisjDomain.bottom |> fst with
   | [res] ->
       PulseResult.ok res
-      |> Option.value_map ~default:Unsat ~f:(function
+      |> Option.value_map ~default:unsat ~f:(function
            | ContinueProgram (a, astate) ->
                Sat (a, astate)
            | _ ->
-               Unsat )
+               unsat )
   | [] ->
-      Unsat
+      unsat
   | _ ->
-      Unsat
+      unsat

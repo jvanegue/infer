@@ -58,7 +58,7 @@ let parse_translate_store ?(base_dir = None) result_dir =
     if should_process json_file then (
       let t0 = Mtime_clock.now () in
       let status = Filename.basename json_file in
-      !ProcessPoolState.update_status (Some t0) status ;
+      !WorkerPoolState.update_status (Some t0) status ;
       match Utils.read_json_file json_file with
       | Ok json ->
           if not (process_one_ast json) then
@@ -68,12 +68,12 @@ let parse_translate_store ?(base_dir = None) result_dir =
     None
   in
   let tasks () =
-    ProcessPool.TaskGenerator.of_list ~finish:ProcessPool.TaskGenerator.finish_always_none
+    TaskGenerator.of_list ~finish:TaskGenerator.finish_always_none
       (Utils.directory_fold (fun l p -> p :: l) [] result_dir)
   in
-  Tasks.Runner.create ~jobs:Config.jobs ~child_prologue:ignore ~f:process_one_file
-    ~child_epilogue:ignore tasks
-  |> Tasks.Runner.run |> ignore
+  ProcessPool.create ~jobs:Config.jobs ~child_prologue:ignore ~f:process_one_file
+    ~child_epilogue:ignore ~tasks ()
+  |> ProcessPool.run |> ignore
 
 
 let capture ~command ~args =

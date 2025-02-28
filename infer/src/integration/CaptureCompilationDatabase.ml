@@ -29,7 +29,7 @@ let invoke_cmd (source_file, (cmd : CompilationDatabase.compilation_data)) =
   let argv = cmd.executable :: cmd.escaped_arguments in
   ( ( match Spawn.spawn ~cwd:(Path cmd.directory) ~prog:cmd.executable ~argv () with
     | pid ->
-        !ProcessPoolState.update_status
+        !WorkerPoolState.update_status
           (Some (Mtime_clock.now ()))
           (SourceFile.to_string source_file) ;
         Unix.waitpid (Pid.of_int pid)
@@ -59,16 +59,15 @@ let run_compilation_database compilation_database should_capture_file =
   L.progress "Starting %s %d files@\n%!" Config.clang_frontend_action_string number_of_jobs ;
   let compilation_commands = List.map ~f:create_cmd compilation_data in
   let tasks () =
-    ProcessPool.TaskGenerator.of_list ~finish:ProcessPool.TaskGenerator.finish_always_none
-      compilation_commands
+    TaskGenerator.of_list ~finish:TaskGenerator.finish_always_none compilation_commands
   in
   (* no stats to record so [child_epilogue] does nothing and we ignore the return
-     {!Tasks.Runner.run} *)
+     {!ProcessPool.run} *)
   let runner =
-    Tasks.Runner.create ~jobs:Config.jobs ~child_prologue:ignore ~f:invoke_cmd
-      ~child_epilogue:ignore tasks
+    ProcessPool.create ~jobs:Config.jobs ~child_prologue:ignore ~f:invoke_cmd ~child_epilogue:ignore
+      ~tasks ()
   in
-  Tasks.Runner.run runner |> ignore ;
+  ProcessPool.run runner |> ignore ;
   L.progress "@." ;
   L.(debug Analysis Medium) "Ran %d jobs" number_of_jobs
 

@@ -22,6 +22,7 @@ type mode =
   | BuckJavaFlavor of {build_cmd: string list}
   | BxlClang of {build_cmd: string list}
   | BxlJava of {build_cmd: string list}
+  | BxlPython of {build_cmd: string list}
   | Clang of {compiler: Clang.compiler; prog: string; args: string list}
   | ClangCompilationDB of {db_files: [`Escaped of string | `Raw of string] list}
   | Erlc of {args: string list}
@@ -35,6 +36,7 @@ type mode =
   | Python of {prog: string; args: string list}
   | PythonBytecode of {files: string list}
   | Rebar3 of {args: string list}
+  | Swiftc of {prog: string; args: string list}
   | Textual of {textualfiles: string list}
   | XcodeBuild of {prog: string; args: string list}
   | XcodeXcpretty of {prog: string; args: string list}
@@ -42,7 +44,7 @@ type mode =
 let is_analyze_mode = function Analyze -> true | _ -> false
 
 let is_compatible_with_textual_generation = function
-  | Javac _ | Python _ | PythonBytecode _ ->
+  | Javac _ | Python _ | Swiftc _ | PythonBytecode _ ->
       true
   | _ ->
       false
@@ -68,6 +70,8 @@ let pp_mode fmt = function
       F.fprintf fmt "BxlClang driver mode:@\nbuild command = %a" Pp.cli_args build_cmd
   | BxlJava {build_cmd} ->
       F.fprintf fmt "BxlJava driver mode:@\nbuild command = %a" Pp.cli_args build_cmd
+  | BxlPython {build_cmd} ->
+      F.fprintf fmt "BxlPython driver mode:@\nbuild command = %a" Pp.cli_args build_cmd
   | Clang {prog; args} ->
       F.fprintf fmt "Clang driver mode:@\nprog = '%s'@\nargs = %a" prog Pp.cli_args args
   | ClangCompilationDB _ ->
@@ -90,6 +94,8 @@ let pp_mode fmt = function
       F.fprintf fmt "Python driver mode:@\nfiles = '%a'" Pp.cli_args files
   | Rebar3 {args} ->
       F.fprintf fmt "Rebar3 driver mode:@\nargs = %a" Pp.cli_args args
+  | Swiftc {prog; args} ->
+      F.fprintf fmt "Swift driver mode:@\nprog = '%s' args = %a" prog Pp.cli_args args
   | Erlc {args} ->
       F.fprintf fmt "Erlc driver mode:@\nargs = %a" Pp.cli_args args
   | Hackc {prog; args} ->
@@ -176,6 +182,9 @@ let capture ~changed_files mode =
       | BxlJava {build_cmd} ->
           L.progress "Capturing in bxl/java mode...@." ;
           BxlCapture.capture build_cmd
+      | BxlPython {build_cmd} ->
+          L.progress "Capturing in bxl/python mode...@." ;
+          BxlCapture.capture build_cmd
       | Clang {compiler; prog; args} ->
           if Config.is_originator then L.progress "Capturing in make/cc mode...@." ;
           Clang.capture compiler ~prog ~args
@@ -209,6 +218,9 @@ let capture ~changed_files mode =
       | Rebar3 {args} ->
           L.progress "Capturing in rebar3 mode...@." ;
           Erlang.capture ~command:"rebar3" ~args
+      | Swiftc {prog; args} ->
+          L.progress "Capturing in swift mode...@." ;
+          Swift.capture ~command:prog ~args
       | Erlc {args} ->
           L.progress "Capturing in erlc mode...@." ;
           Erlang.capture ~command:"erlc" ~args
@@ -230,14 +242,18 @@ let capture ~changed_files mode =
           CaptureCompilationDatabase.capture ~changed_files ~db_files ) ;
   let should_merge =
     match mode with
-    | BuckClangFlavor _ | BuckJavaFlavor _ | BxlClang _ | BxlJava _ | Gradle _ ->
+    | BuckClangFlavor _ | BuckJavaFlavor _ | BxlClang _ | BxlJava _ | BxlPython _ | Gradle _ ->
         true
     | _ ->
         not (List.is_empty Config.merge_capture)
   in
   if should_merge then
     let root =
-      match mode with BxlClang _ | BxlJava _ -> Config.buck2_root | _ -> Config.project_root
+      match mode with
+      | BxlClang _ | BxlJava _ | BxlPython _ ->
+          Config.buck2_root
+      | _ ->
+          Config.project_root
     in
     MergeCapture.merge_captured_targets ~root
 
@@ -372,6 +388,8 @@ let assert_supported_mode required_analyzer requested_mode_string =
         Version.hack_enabled
     | `Python ->
         Version.python_enabled
+    | `Swift ->
+        Version.swift_enabled
     | `Xcode ->
         Version.clang_enabled && Version.xcode_enabled
   in
@@ -390,6 +408,8 @@ let assert_supported_mode required_analyzer requested_mode_string =
           "hack"
       | `Python ->
           "python"
+      | `Swift ->
+          "swift"
       | `Xcode ->
           "clang and xcode"
     in
@@ -414,6 +434,8 @@ let assert_supported_build_system build_system =
       Config.string_of_build_system build_system |> assert_supported_mode `Clang
   | BRebar3 ->
       Config.string_of_build_system build_system |> assert_supported_mode `Erlang
+  | BSwiftc ->
+      Config.string_of_build_system build_system |> assert_supported_mode `Swift
   | BErlc ->
       Config.string_of_build_system build_system |> assert_supported_mode `Erlang
   | BHackc ->
@@ -433,8 +455,8 @@ let assert_supported_build_system build_system =
             (`Clang, "buck compilation database")
         | Some Java ->
             (`Java, Config.string_of_build_system build_system)
-        | Some Erlang ->
-            L.die UserError "Unsupported buck2 integration."
+        | Some Erlang | Some Python ->
+            L.die UserError "Unsupported buck integration."
       in
       assert_supported_mode analyzer build_string
   | BBuck2 ->
@@ -448,6 +470,8 @@ let assert_supported_build_system build_system =
             (`Erlang, Config.string_of_build_system build_system)
         | Some Java ->
             (`Java, Config.string_of_build_system build_system)
+        | Some Python ->
+            (`Python, Config.string_of_build_system build_system)
         | Some (ClangCompilationDB _) ->
             L.die UserError "Unsupported buck2 integration."
       in
@@ -513,6 +537,8 @@ let mode_of_build_command build_cmd (buck_mode : BuckMode.t option) =
             BuckErlang {prog; args}
         | Some Java ->
             BxlJava {build_cmd}
+        | Some Python ->
+            BxlPython {build_cmd}
         | Some buck_mode ->
             L.die UserError "%a is not supported with buck2.@." BuckMode.pp buck_mode )
       | BClang ->
@@ -533,6 +559,8 @@ let mode_of_build_command build_cmd (buck_mode : BuckMode.t option) =
           NdkBuild {build_cmd}
       | BRebar3 ->
           Rebar3 {args}
+      | BSwiftc ->
+          Swiftc {prog; args}
       | BErlc ->
           Erlc {args}
       | BHackc ->

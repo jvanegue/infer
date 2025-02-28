@@ -275,6 +275,11 @@ OPTIONS
            --no-buck-merge-all-deps)
            See also infer-capture(1).
 
+       --buck-python
+           Activates: Buck integration for Python. (Conversely:
+           --no-buck-python)
+           See also infer-capture(1).
+
        --buck-targets-block-list +regex
            Skip capture of buck targets matched by the specified regular
            expression.
@@ -871,7 +876,7 @@ OPTIONS
            values: ant, buck1, buck, buck2, gradle, gradlew, java, javac,
            kotlinc, cc, clang, gcc, clang++, c++, g++, hackc, make,
            configure, cmake, waf, mvn, mvnw, ndk-build, python3, rebar3,
-           erlc, xcodebuild.
+           swiftc, erlc, xcodebuild.
            See also infer-capture(1) and infer-run(1).
 
        --no-fragment-retains-view
@@ -1519,6 +1524,11 @@ OPTIONS
 
        --pulse-model-cheap-copy-type-list +regex
            Regex of methods that should be cheap to copy in Pulse
+           See also infer-analyze(1).
+
+       --pulse-model-deep-release-pattern string
+           Regex of methods that should be modelled as deep release in Pulse
+           (i.e. await all unawaited values reachable from its arguments).
            See also infer-analyze(1).
 
        --pulse-model-free-pattern string
@@ -2298,7 +2308,8 @@ OPTIONS
 
        --timeout float
            Time after which any checker (except biabduction) should give up
-           analysing the current function or method, in seconds
+           analysing the current function or method, in seconds. Not
+           implemented for multicore mode
            See also infer-analyze(1) and infer-run(1).
 
        --top-longest-proc-duration-size int

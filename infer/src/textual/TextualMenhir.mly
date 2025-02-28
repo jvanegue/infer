@@ -33,6 +33,7 @@
 %token FALSE
 %token FLOAT
 %token FUN
+%token FUNTYPE
 %token GLOBAL
 %token HANDLERS
 %token IF
@@ -151,21 +152,40 @@ nname:
   | id=ident
     { { NodeName.value=id; loc=location_of_pos $startpos(id) } }
 
+%inline
+tname_with_args:
+  | id=ident LABRACKET args = separated_nonempty_list(COMMA, tname) RABRACKET
+    {
+      let loc = location_of_pos $startpos(id) in
+      let name : BaseTypeName.t = { value=id; loc } in
+      {TypeName.name; args}
+    }
+
 tname:
+  | tname=tname_with_args { tname }
   | id=ident
-    { { TypeName.value=id; loc=location_of_pos $startpos(id) } }
+    {
+      let name = { BaseTypeName.value=id; loc=location_of_pos $startpos(id) } in
+      {TypeName.name; args=[]}
+    }
 
 tname_or_void:
   | tname=tname
     { tname }
   | VOID
-    { { TypeName.value="void"; loc=location_of_pos $startpos } }
+    {
+      let name = { BaseTypeName.value="void"; loc=location_of_pos $startpos } in
+      {TypeName.name; args=[]}
+    }
 
 opt_tname:
   | tname=tname
     { tname }
   | QUESTION
-    { { TypeName.value="?"; loc=location_of_pos $startpos } }
+    {
+      let name = { BaseTypeName.value="?"; loc=location_of_pos $startpos } in
+      {TypeName.name; args=[]}
+    }
 
 vname:
   | id=ident
@@ -183,7 +203,9 @@ opt_qualified_pname_and_lparen:
       let enclosing_class =
         Option.value_map enclosing
                          ~default:QualifiedProcName.TopLevel
-                         ~f:(fun value -> QualifiedProcName.Enclosing {value; loc})
+                         ~f:(fun value ->
+                              let name = {BaseTypeName.value; loc} in
+                              QualifiedProcName.Enclosing {name; args=[]})
       in
       ( {enclosing_class; name} : QualifiedProcName.t)
     }
@@ -191,11 +213,17 @@ opt_qualified_pname_and_lparen:
 qualified_pname_and_lparen:
   | proc_ident=opt_qualified_pname_and_lparen
     { match (proc_ident : QualifiedProcName.t).enclosing_class with
-      | Enclosing tname when String.equal tname.TypeName.value "?" ->
+      | Enclosing {name={value="?"}} ->
          let loc = location_of_pos $startpos(proc_ident) in
          let string = Format.asprintf "%a" QualifiedProcName.pp proc_ident in
          raise (SpecialSyntaxError (loc, string))
       | _ -> proc_ident }
+  | tname=tname_with_args DOT id=ident LPAREN
+    { let loc = location_of_pos $startpos(id) in
+      let name : ProcName.t = { value=id; loc } in
+      let enclosing_class =  QualifiedProcName.Enclosing tname in
+      ( {enclosing_class; name} : QualifiedProcName.t)
+    }
 
 attribute:
   | DOT name=ident EQ value=STRING
@@ -286,6 +314,10 @@ base_typ:
     { Typ.Array typ }
   | LPAREN typ=typ RPAREN
     { typ }
+  | LPAREN FUN params_type=separated_list(COMMA, typ) RPAREN ARROW return_type=typ RPAREN
+    { Typ.Fun (Some {params_type; return_type}) }
+  | FUNTYPE
+    { Typ.Fun None}
 
 typ:
   | typ=base_typ
@@ -446,7 +478,7 @@ expression:
     { Exp.Apply {closure; args} }
   | recv=expression DOT proc=opt_qualified_pname_and_lparen args=separated_list(COMMA, expression) RPAREN
     { Exp.call_virtual proc recv args }
-  | FUN params=separated_list(COMMA, vname) RPAREN ARROW
+  | attributes=annots FUN params=separated_list(COMMA, vname) RPAREN ARROW
      proc=opt_qualified_pname_and_lparen args=separated_list(COMMA, expression) RPAREN
     {
       let syntax_error () =
@@ -466,7 +498,7 @@ expression:
             | _ -> false
         in
         if List.for_all2_exn ~f:match_param params2 params then
-          Exp.Closure {proc; captured; params}
+          Exp.Closure {proc; captured; params; attributes}
         else syntax_error ()
      }
   | LABRACKET typ=typ RABRACKET

@@ -80,7 +80,7 @@ let bottom_up call_graph =
         incr scheduled ;
         log n.pname ;
         CallGraph.Node.set_flag n ;
-        Some (Procname {proc_name= n.pname; specialization= None}, Fn.id)
+        Some (Procname {proc_name= n.pname; specialization= None})
   in
   let finished ~result:_ = function
     | Procname {proc_name} ->
@@ -90,4 +90,4 @@ let bottom_up call_graph =
     | File _ ->
         L.die InternalError "Only Procnames are scheduled but File target was received"
   in
-  {ProcessPool.TaskGenerator.remaining_tasks; is_empty; finished; next}
+  {TaskGenerator.remaining_tasks; is_empty; finished; next}

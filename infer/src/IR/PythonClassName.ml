@@ -12,39 +12,91 @@ module F = Format
    - module names
    - nested classes
 *)
-type t = {classname: string} [@@deriving compare, equal, yojson_of, sexp, hash, normalize]
+type builtin_type = PyBool | PyDict | PyInt | PyNone | PyObject | PyString | PyTuple
+[@@deriving compare, equal, yojson_of, sexp, hash, normalize, show]
 
-let make classname = {classname}
+type builtin_closure = IntFun | StrFun | TypeFun
+[@@deriving compare, equal, yojson_of, sexp, hash, normalize]
 
-let classname {classname} = classname
+type t =
+  | Builtin of builtin_type
+  | Globals of string
+  | Closure of string
+  | BuiltinClosure of builtin_closure
+  | ClassCompanion of {module_name: string; attr_name: string}
+  | ModuleAttribute of {module_name: string; attr_name: string}
+  | Filename of string
+  | Package of string
+  | Wildcard
+[@@deriving compare, equal, yojson_of, sexp, hash, normalize]
 
-let components {classname} = [classname]
+let builtin_type_to_string = show_builtin_type
 
-let wildcard = make "?"
+let builtin_closure_to_string = function IntFun -> "int" | StrFun -> "str" | TypeFun -> "type"
 
-let pp fmt {classname} = F.fprintf fmt "%s" classname
+let pp fmt = function
+  | Builtin builtin ->
+      F.pp_print_string fmt (builtin_type_to_string builtin)
+  | Globals name ->
+      F.fprintf fmt "Globals[%s]" name
+  | Closure name ->
+      F.fprintf fmt "Closure[%s]" name
+  | BuiltinClosure builtin ->
+      F.fprintf fmt "ClosureBuiltin[%s]" (builtin_closure_to_string builtin)
+  | ClassCompanion {module_name; attr_name} ->
+      F.fprintf fmt "ClassCompanion[%s,%s]" module_name attr_name
+  | ModuleAttribute {module_name; attr_name} ->
+      F.fprintf fmt "ModuleAttribute[%s,%s]" module_name attr_name
+  | Filename name ->
+      F.pp_print_string fmt name
+  | Package name ->
+      F.fprintf fmt "%s.__init__" name
+  | Wildcard ->
+      F.pp_print_char fmt '?'
+
+
+let components tname = [F.asprintf "%a" pp tname]
 
 let to_string = Pp.string_of_pp pp
 
-let globals_prefix = "PyGlobals::"
+let classname = to_string
 
-let is_module {classname} = String.is_prefix classname ~prefix:globals_prefix
+let is_final = function Globals _ -> true | _ -> false
 
-let get_module_name {classname} = String.chop_prefix classname ~prefix:globals_prefix
+let is_singleton = function BuiltinClosure _ | Builtin PyNone | Closure _ -> true | _ -> false
 
-let is_final name = is_module name
+let split_module_attr = function
+  (* TODO: we could simplify this function if we use [string list] instead of [string] in [t] *)
+  | Closure name ->
+      let open IOption.Let_syntax in
+      let+ pos = String.index name '.' in
+      let length = String.length name in
+      let attribute_name = String.sub name ~pos:(pos + 1) ~len:(length - pos - 1) in
+      let module_name = String.sub name ~pos:0 ~len:pos in
+      (module_name, attribute_name)
+  | Globals name ->
+      let open IOption.Let_syntax in
+      let+ last_pos = String.substr_index_all name ~may_overlap:false ~pattern:"::" |> List.last in
+      let length = String.length name in
+      let attribute_name = String.sub name ~pos:(last_pos + 2) ~len:(length - last_pos - 2) in
+      let module_name = String.sub name ~pos:0 ~len:last_pos in
+      (module_name, attribute_name)
+  | _ ->
+      None
 
-let module_attribute_prefix = "PyModuleAttr::"
 
-let is_module_attribute {classname} = String.is_prefix classname ~prefix:module_attribute_prefix
+let concatenate_package_name_and_file_name typename filename =
+  match typename with
+  | Globals module_name ->
+      Some (Globals (Printf.sprintf "%s::%s" module_name filename))
+  | _ ->
+      None
 
-let get_module_attribute_infos {classname} =
-  let open IOption.Let_syntax in
-  let* last_pos = String.substr_index_all classname ~may_overlap:false ~pattern:"::" |> List.last in
-  let length = String.length classname in
-  let attribute_name = String.sub classname ~pos:(last_pos + 2) ~len:(length - last_pos - 2) in
-  let+ module_name =
-    String.sub classname ~pos:0 ~len:last_pos |> String.chop_prefix ~prefix:module_attribute_prefix
-  in
-  let classname = globals_prefix ^ module_name in
-  ({classname}, attribute_name)
+
+let get_builtin_closure_from_builtin_type = function
+  | PyObject | PyDict | PyTuple | PyNone | PyBool ->
+      None
+  | PyInt ->
+      Some IntFun
+  | PyString ->
+      Some StrFun

@@ -14,9 +14,7 @@ module F = Format
 open Option.Monad_infix
 
 (* always incremented before use *)
-let nesting = ref (-1)
-
-let () = AnalysisGlobalState.register_ref nesting ~init:(fun () -> -1)
+let nesting = AnalysisGlobalState.make_dls ~init:(fun () -> -1)
 
 let max_nesting_to_print = 8
 
@@ -131,7 +129,7 @@ let () =
          (* forget about the time spent doing a nested analysis and resend the status of the outer
             analysis with the updated "original" start time *)
          let new_t0 = Mtime.sub_span (Mtime_clock.now ()) suspended_span |> Option.value_exn in
-         !ProcessPoolState.update_status (Some new_t0) status ;
+         !WorkerPoolState.update_status (Some new_t0) status ;
          (new_t0, status) ) )
     ~init:(fun _ -> DLS.set current_taskbar_status None)
 
@@ -153,24 +151,26 @@ let () =
 let logged_error = DLS.new_key (fun () -> false)
 
 let update_taskbar proc_name_opt source_file_opt =
-  let t0 = Mtime_clock.now () in
-  let status =
-    match (proc_name_opt, source_file_opt) with
-    | Some pname, Some src_file ->
-        let nesting =
-          if !nesting <= max_nesting_to_print then String.make !nesting '>'
-          else Printf.sprintf "%d>" !nesting
-        in
-        F.asprintf "%s%a: %a" nesting SourceFile.pp src_file Procname.pp pname
-    | Some pname, None ->
-        Procname.to_string pname
-    | None, Some src_file ->
-        SourceFile.to_string src_file
-    | None, None ->
-        "Unspecified task"
-  in
-  DLS.set current_taskbar_status (Some (t0, status)) ;
-  !ProcessPoolState.update_status (Some t0) status
+  if Config.multicore then ()
+  else
+    let t0 = Mtime_clock.now () in
+    let status =
+      match (proc_name_opt, source_file_opt) with
+      | Some pname, Some src_file ->
+          let nesting =
+            let n = DLS.get nesting in
+            if n <= max_nesting_to_print then String.make n '>' else Printf.sprintf "%d>" n
+          in
+          F.asprintf "%s%a: %a" nesting SourceFile.pp src_file Procname.pp pname
+      | Some pname, None ->
+          Procname.to_string pname
+      | None, Some src_file ->
+          SourceFile.to_string src_file
+      | None, None ->
+          "Unspecified task"
+    in
+    DLS.set current_taskbar_status (Some (t0, status)) ;
+    !WorkerPoolState.update_status (Some t0) status
 
 
 let set_complete_result analysis_req summary =
@@ -181,17 +181,16 @@ let set_complete_result analysis_req summary =
       ()
 
 
-let analyze exe_env analysis_req specialization callee_summary callee_pdesc =
+let analyze analysis_req specialization callee_summary callee_pdesc =
   let summary =
-    Callbacks.iterate_procedure_callbacks exe_env analysis_req ?specialization callee_summary
-      callee_pdesc
+    Callbacks.iterate_procedure_callbacks analysis_req ?specialization callee_summary callee_pdesc
   in
   set_complete_result analysis_req summary ;
   Stats.incr_ondemand_procs_analyzed () ;
   summary
 
 
-let run_proc_analysis exe_env tenv analysis_req specialization_context ?caller_pname callee_pdesc =
+let run_proc_analysis tenv analysis_req specialization_context ?caller_pname callee_pdesc =
   let specialization = Option.map ~f:snd specialization_context in
   let callee_pname = Procdesc.get_proc_name callee_pdesc in
   let callee_attributes = Procdesc.get_attributes callee_pdesc in
@@ -207,10 +206,10 @@ let run_proc_analysis exe_env tenv analysis_req specialization_context ?caller_p
         "Elapsed analysis time: %a: %a@\n" Procname.pp callee_pname Mtime.Span.pp elapsed
   in
   if Config.trace_ondemand then
-    L.progress "[%d] run_proc_analysis %a -> %a@." !nesting (Pp.option Procname.pp) caller_pname
-      Procname.pp callee_pname ;
+    L.progress "[%d] run_proc_analysis %a -> %a@." (DLS.get nesting) (Pp.option Procname.pp)
+      caller_pname Procname.pp callee_pname ;
   let preprocess () =
-    incr nesting ;
+    DLS.incr nesting ;
     let source_file = callee_attributes.ProcAttributes.translation_unit in
     update_taskbar (Some callee_pname) (Some source_file) ;
     Preanal.do_preanalysis tenv callee_pdesc ;
@@ -219,7 +218,7 @@ let run_proc_analysis exe_env tenv analysis_req specialization_context ?caller_p
       | None ->
           if Config.debug_mode then
             DotCfg.emit_proc_desc callee_attributes.translation_unit callee_pdesc |> ignore ;
-          Summary.OnDisk.reset callee_pname analysis_req
+          Summary.OnDisk.empty callee_pname
       | Some (current_summary, _) ->
           current_summary
     in
@@ -227,7 +226,7 @@ let run_proc_analysis exe_env tenv analysis_req specialization_context ?caller_p
     initial_callee_summary
   in
   let postprocess summary =
-    decr nesting ;
+    DLS.decr nesting ;
     (* copy the previous recursion edges over to the new summary if doing a replay analysis so that
        subsequent replay analyses can pick them up too *)
     DLS.get edges_to_ignore
@@ -251,9 +250,9 @@ let run_proc_analysis exe_env tenv analysis_req specialization_context ?caller_p
     let payloads =
       let biabduction =
         Some
-          (Lazy.from_val
+          (SafeLazy.from_val
              BiabductionSummary.
-               {preposts= []; phase= payloads.biabduction |> ILazy.force_option |> opt_get_phase} )
+               {preposts= []; phase= payloads.biabduction |> SafeLazy.force_option |> opt_get_phase} )
       in
       {payloads with biabduction}
     in
@@ -267,7 +266,7 @@ let run_proc_analysis exe_env tenv analysis_req specialization_context ?caller_p
   try
     let callee_summary =
       if callee_attributes.ProcAttributes.is_defined then
-        analyze exe_env analysis_req specialization initial_callee_summary callee_pdesc
+        analyze analysis_req specialization initial_callee_summary callee_pdesc
       else initial_callee_summary
     in
     let final_callee_summary = postprocess callee_summary in
@@ -281,7 +280,7 @@ let run_proc_analysis exe_env tenv analysis_req specialization_context ?caller_p
         | RecursiveCycleException.RecursiveCycle _
         | RestartSchedulerException.ProcnameAlreadyLocked _
         | MissingDependencyException.MissingDependencyException ->
-            decr nesting ;
+            DLS.decr nesting ;
             ActiveProcedures.remove {proc_name= callee_pname; specialization} ;
             true
         | exn ->
@@ -306,16 +305,14 @@ let run_proc_analysis exe_env tenv analysis_req specialization_context ?caller_p
 
 
 (* shadowed for tracing *)
-let run_proc_analysis exe_env tenv analysis_req specialization ?caller_pname callee_pdesc =
+let run_proc_analysis tenv analysis_req specialization ?caller_pname callee_pdesc =
   PerfEvent.(
     log (fun logger ->
         let callee_pname = Procdesc.get_proc_name callee_pdesc in
         log_begin_event logger ~name:"ondemand" ~categories:["backend"]
           ~arguments:[("proc", `String (Procname.to_string callee_pname))]
           () ) ) ;
-  let summary =
-    run_proc_analysis exe_env tenv analysis_req specialization ?caller_pname callee_pdesc
-  in
+  let summary = run_proc_analysis tenv analysis_req specialization ?caller_pname callee_pdesc in
   PerfEvent.(log (fun logger -> log_end_event logger ())) ;
   summary
 
@@ -427,13 +424,11 @@ let double_lock_for_restart ~lazy_payloads analysis_req callee_pname specializat
         `NoSummary )
 
 
-let analysis_result_of_option opt = Result.of_option opt ~error:AnalysisResult.AnalysisFailed
-
 (** track how many times we restarted the analysis of the current dependency chain to make the
     analysis of mutual recursion cycles deterministic *)
 let number_of_recursion_restarts = DLS.new_key (fun () -> 0)
 
-let rec analyze_callee_can_raise_recursion exe_env ~lazy_payloads (analysis_req : AnalysisRequest.t)
+let rec analyze_callee_can_raise_recursion ~lazy_payloads (analysis_req : AnalysisRequest.t)
     ~specialization ?caller_summary ?(from_file_analysis = false) callee_pname : _ AnalysisResult.t
     =
   match detect_mutual_recursion_cycle ~caller_summary ~callee:callee_pname specialization with
@@ -491,7 +486,7 @@ let rec analyze_callee_can_raise_recursion exe_env ~lazy_payloads (analysis_req 
                   protect
                     ~f:(fun () ->
                       (* preload tenv to avoid tainting preanalysis timing with IO *)
-                      let tenv = Exe_env.get_proc_tenv exe_env callee_pname in
+                      let tenv = Exe_env.get_proc_tenv callee_pname in
                       AnalysisGlobalState.initialize callee_pdesc tenv ;
                       Timer.time Preanalysis
                         ~f:(fun () ->
@@ -499,8 +494,8 @@ let rec analyze_callee_can_raise_recursion exe_env ~lazy_payloads (analysis_req 
                             caller_summary >>| fun summ -> summ.Summary.proc_name
                           in
                           let summary =
-                            run_proc_analysis exe_env tenv analysis_req specialization_context
-                              ?caller_pname callee_pdesc
+                            run_proc_analysis tenv analysis_req specialization_context ?caller_pname
+                              callee_pdesc
                           in
                           set_complete_result analysis_req summary ;
                           Some summary )
@@ -520,84 +515,82 @@ let rec analyze_callee_can_raise_recursion exe_env ~lazy_payloads (analysis_req 
         | `SummaryReady summary ->
             Ok summary
         | `ComputeDefaultSummary ->
-            analyze_callee_aux None |> analysis_result_of_option
+            analyze_callee_aux None |> AnalysisResult.of_option
         | `ComputeDefaultSummaryThenSpecialize specialization ->
             (* recursive call so that we detect mutual recursion on the unspecialized summary *)
-            analyze_callee exe_env ~lazy_payloads analysis_req ~specialization:None ?caller_summary
+            analyze_callee ~lazy_payloads analysis_req ~specialization:None ?caller_summary
               ~from_file_analysis callee_pname
             |> Result.bind ~f:(fun summary ->
-                   analyze_callee_aux (Some (summary, specialization)) |> analysis_result_of_option )
+                   analyze_callee_aux (Some (summary, specialization)) |> AnalysisResult.of_option )
         | `AddNewSpecialization (summary, specialization) ->
-            analyze_callee_aux (Some (summary, specialization)) |> analysis_result_of_option
+            analyze_callee_aux (Some (summary, specialization)) |> AnalysisResult.of_option
         | `UnknownProcedure ->
             Error UnknownProcedure )
 
 
-and on_recursive_cycle exe_env ~lazy_payloads analysis_req ?caller_summary:_ ?from_file_analysis
-    ~ttl (cycle_start : SpecializedProcname.t) callee_pname =
+and on_recursive_cycle ~lazy_payloads analysis_req ?caller_summary:_ ?from_file_analysis ~ttl
+    (cycle_start : SpecializedProcname.t) callee_pname =
   if ttl > 0 then
     raise (RecursiveCycleException.RecursiveCycle {recursive= cycle_start; ttl= ttl - 1}) ;
-  analyze_callee exe_env ~lazy_payloads analysis_req ~specialization:cycle_start.specialization
+  analyze_callee ~lazy_payloads analysis_req ~specialization:cycle_start.specialization
     ?from_file_analysis cycle_start.proc_name
   |> ignore ;
   (* TODO: register caller -> callee relationship, possibly *)
-  Summary.OnDisk.get ~lazy_payloads analysis_req callee_pname |> analysis_result_of_option
+  Summary.OnDisk.get ~lazy_payloads analysis_req callee_pname |> AnalysisResult.of_option
 
 
-and analyze_callee exe_env ~lazy_payloads analysis_req ~specialization ?caller_summary
-    ?from_file_analysis callee_pname =
+and analyze_callee ~lazy_payloads analysis_req ~specialization ?caller_summary ?from_file_analysis
+    callee_pname =
   try
-    analyze_callee_can_raise_recursion exe_env ~lazy_payloads analysis_req ~specialization
-      ?caller_summary ?from_file_analysis callee_pname
+    analyze_callee_can_raise_recursion ~lazy_payloads analysis_req ~specialization ?caller_summary
+      ?from_file_analysis callee_pname
   with RecursiveCycleException.RecursiveCycle {recursive; ttl} ->
-    on_recursive_cycle ~lazy_payloads exe_env analysis_req recursive ~ttl callee_pname
+    on_recursive_cycle ~lazy_payloads analysis_req recursive ~ttl callee_pname
 
 
-let analyze_callee exe_env ~lazy_payloads analysis_req ~specialization ?caller_summary
-    ?from_file_analysis callee_pname =
+let analyze_callee ~lazy_payloads analysis_req ~specialization ?caller_summary ?from_file_analysis
+    callee_pname =
   (* If [caller_summary] is set then we are analyzing a dependency of another procedure, so we
      should keep counting restarts within that dependency chain (or cycle). If it's not set then
      this is a "toplevel" analysis of [callee_pname] so we start fresh. *)
   if Option.is_none caller_summary then DLS.set number_of_recursion_restarts 0 ;
-  analyze_callee exe_env ~lazy_payloads analysis_req ~specialization ?caller_summary
-    ?from_file_analysis callee_pname
-
-
-let analyze_proc_name exe_env analysis_req ?specialization ~caller_summary callee_pname =
-  analyze_callee ~lazy_payloads:false ~specialization exe_env analysis_req ~caller_summary
+  analyze_callee ~lazy_payloads analysis_req ~specialization ?caller_summary ?from_file_analysis
     callee_pname
 
 
-let analyze_proc_name_for_file_analysis exe_env analysis_req callee_pname =
+let analyze_proc_name analysis_req ?specialization ~caller_summary callee_pname =
+  analyze_callee ~lazy_payloads:false ~specialization analysis_req ~caller_summary callee_pname
+
+
+let analyze_proc_name_for_file_analysis analysis_req callee_pname =
   (* load payloads lazily (and thus field by field as needed): we are either doing a file analysis
      and we don't want to load all payloads at once (to avoid high memory usage when only a few of
      the payloads are actually needed), or we are starting a procedure analysis in which case we're
      not interested in loading the summary if it has already been computed *)
-  analyze_callee ~lazy_payloads:true ~specialization:None exe_env analysis_req
-    ~from_file_analysis:true callee_pname
+  analyze_callee ~lazy_payloads:true ~specialization:None analysis_req ~from_file_analysis:true
+    callee_pname
 
 
-let analyze_file_procedures exe_env analysis_req procs_to_analyze source_file_opt =
+let analyze_file_procedures analysis_req procs_to_analyze source_file_opt =
   let saved_language = Language.get_language () in
   let analyze_proc_name_call pname =
-    ignore
-      (analyze_proc_name_for_file_analysis exe_env analysis_req pname : Summary.t AnalysisResult.t)
+    ignore (analyze_proc_name_for_file_analysis analysis_req pname : Summary.t AnalysisResult.t)
   in
   List.iter ~f:analyze_proc_name_call procs_to_analyze ;
   Option.iter source_file_opt ~f:(fun source_file ->
       if Config.dump_duplicate_symbols then dump_duplicate_procs source_file procs_to_analyze ;
-      Callbacks.iterate_file_callbacks_and_store_issues procs_to_analyze exe_env source_file ) ;
+      Callbacks.iterate_file_callbacks_and_store_issues procs_to_analyze source_file ) ;
   Language.set_language saved_language
 
 
 (** Invoke all procedure-level and file-level callbacks on a given environment. *)
-let analyze_file exe_env analysis_req source_file =
+let analyze_file analysis_req source_file =
   update_taskbar None (Some source_file) ;
   let procs_to_analyze = SourceFiles.proc_names_of_source source_file in
-  analyze_file_procedures exe_env analysis_req procs_to_analyze (Some source_file)
+  analyze_file_procedures analysis_req procs_to_analyze (Some source_file)
 
 
 (** Invoke procedure callbacks on a given environment. *)
-let analyze_proc_name_toplevel exe_env analysis_req ~specialization proc_name =
+let analyze_proc_name_toplevel analysis_req ~specialization proc_name =
   update_taskbar (Some proc_name) None ;
-  analyze_callee ~lazy_payloads:true ~specialization exe_env analysis_req proc_name |> ignore
+  analyze_callee ~lazy_payloads:true ~specialization analysis_req proc_name |> ignore

@@ -150,6 +150,14 @@ AC_ARG_ENABLE(python-analyzers,
 BUILD_PYTHON_ANALYZERS=$enable_python_analyzers
 AC_SUBST([BUILD_PYTHON_ANALYZERS])
 
+AC_ARG_ENABLE(swift-analyzers,
+  AS_HELP_STRING([--disable-swift-analyzers],
+    [do not build the Swift analyzers (default is to build them)]),
+  ,
+  enable_swift_analyzers=yes)
+BUILD_SWIFT_ANALYZERS=$enable_swift_analyzers
+AC_SUBST([BUILD_SWIFT_ANALYZERS])
+
 AC_ARG_WITH(fcp-clang,
   AS_HELP_STRING([--with-fcp-clang],
     [use $CLANG_PREFIX/bin/clang to override the default compiler (default is not to override)]),
@@ -193,7 +201,6 @@ AS_IF([test "x$enable_python_analyzers" != "xno"], [
   python_version=$("$PYTHON" --version)
   AC_MSG_RESULT([$python_version])
   case $python_version in
-    Python\ 3.8.*) BUILD_PYTHON_ANALYZERS=yes; break;;
     Python\ 3.10.*) BUILD_PYTHON_ANALYZERS=yes; break;;
     *) BUILD_PYTHON_ANALYZERS=no;
       AS_IF([test "x$enable_python_analyzers" = "xauto"], [
@@ -348,6 +355,10 @@ AS_IF([$HACKC --version >/dev/null 2>/dev/null],
   [HACKC=no
    AC_MSG_RESULT([no])])
 
+if test "x$enable_swift_analyzers" = "xyes"; then
+  AC_CHECK_TOOL([SWIFTC], [swiftc], [no])
+fi
+
 if test "x$enable_java_analyzers" = "xyes"; then
   AC_CHECK_TOOL([JAVA], [java], [no])
   AC_CHECK_TOOL([JAVAC], [javac], [no])
@@ -418,6 +429,7 @@ AC_ARG_ENABLE(ocaml-bin-annot,
   enable_ocaml_bin_annot=yes)
 ENABLE_OCAML_BINANNOT=$enable_ocaml_bin_annot
 AC_SUBST([ENABLE_OCAML_BINANNOT])
+
 
 
 # We use Buck to run the Infer tests
@@ -521,6 +533,7 @@ AC_CLASSIFY_FRONTEND_SUPPORT([erlang], [$BUILD_ERLANG_ANALYZERS])
 AC_CLASSIFY_FRONTEND_SUPPORT([hack], [$BUILD_HACK_ANALYZERS])
 AC_CLASSIFY_FRONTEND_SUPPORT([java], [$BUILD_JAVA_ANALYZERS])
 AC_CLASSIFY_FRONTEND_SUPPORT([python], [$BUILD_PYTHON_ANALYZERS])
+AC_CLASSIFY_FRONTEND_SUPPORT([swift], [$BUILD_SWIFT_ANALYZERS])
 
 AC_MSG_NOTICE([enabled language frontends:  $enabled_languages])
 AC_MSG_NOTICE([disabled language frontends: $disabled_languages])

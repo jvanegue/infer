@@ -569,10 +569,10 @@ let report_unsafe_accesses ~issue_log classname aggregated_access_map =
   |> ReportedSet.to_issue_log
 
 
-let should_report_on_proc file_exe_env proc_name =
+let should_report_on_proc proc_name =
   Attributes.load proc_name
   |> Option.exists ~f:(fun attrs ->
-         let tenv = Exe_env.get_proc_tenv file_exe_env proc_name in
+         let tenv = Exe_env.get_proc_tenv proc_name in
          let is_not_private = not ProcAttributes.(equal_access (get_access attrs) Private) in
          match (proc_name : Procname.t) with
          | CSharp _ ->
@@ -602,7 +602,7 @@ let should_report_on_proc file_exe_env proc_name =
    may touch that memory loc. the abstraction of a location is an access
    path like x.f.g whose concretization is the set of memory cells
    that x.f.g may point to during execution *)
-let make_results_table exe_env summaries =
+let make_results_table summaries =
   let open RacerDDomain in
   let aggregate_post tenv procname acc {threads; accesses} =
     AccessDomain.fold
@@ -610,8 +610,8 @@ let make_results_table exe_env summaries =
       accesses acc
   in
   List.fold summaries ~init:ReportMap.empty ~f:(fun acc (procname, summary) ->
-      if should_report_on_proc exe_env procname then
-        let tenv = Exe_env.get_proc_tenv exe_env procname in
+      if should_report_on_proc procname then
+        let tenv = Exe_env.get_proc_tenv procname in
         aggregate_post tenv procname acc summary
       else acc )
 
@@ -683,17 +683,19 @@ let get_synchronized_container_fields_of analyze tenv classname =
          AttributeMapDomain.fold add_synchronized_container_field attributes acc )
 
 
-let get_synchronized_container_fields_of, clear_sync_container_cache =
-  let cache = Typ.Name.Hash.create 5 in
-  ( (fun analyze tenv classname ->
-      match Typ.Name.Hash.find_opt cache classname with
-      | Some fieldset ->
-          fieldset
-      | None ->
-          let fieldset = get_synchronized_container_fields_of analyze tenv classname in
-          Typ.Name.Hash.add cache classname fieldset ;
-          fieldset )
-  , fun () -> Typ.Name.Hash.clear cache )
+module TypeNameCache = Concurrent.MakeCache (Typ.Name)
+
+let get_synchronized_container_fields_of =
+  let cache = TypeNameCache.create ~name:"racerd_sync_fields" in
+  let () = TypeNameCache.set_lru_mode cache ~lru_limit:(Some 50) in
+  fun analyze tenv classname ->
+    match TypeNameCache.lookup cache classname with
+    | Some fieldset ->
+        fieldset
+    | None ->
+        let fieldset = get_synchronized_container_fields_of analyze tenv classname in
+        TypeNameCache.add cache classname fieldset ;
+        fieldset
 
 
 let should_keep_container_access analyze tenv ((_base, path) : PathModuloThis.t) =
@@ -716,23 +718,19 @@ let should_keep_container_access analyze tenv ((_base, path) : PathModuloThis.t)
 
 (** Gathers results by analyzing all the methods in a file, then post-processes the results to check
     an (approximation of) thread safety *)
-let analyze ({InterproceduralAnalysis.file_exe_env; analyze_file_dependency} as file_t) =
+let analyze ({InterproceduralAnalysis.analyze_file_dependency} as file_t) =
   let synchronized_container_filter = function
     | Typ.JavaClass _ ->
-        let tenv = Exe_env.load_java_global_tenv file_exe_env in
+        let tenv = Tenv.Global.load () |> Option.value_exn in
         ReportMap.filter_container_accesses
           (should_keep_container_access analyze_file_dependency tenv)
     | _ ->
         Fn.id
   in
   let class_map = aggregate_by_class file_t in
-  let result =
-    Typ.Name.Map.fold
-      (fun classname methods issue_log ->
-        make_results_table file_exe_env methods
-        |> synchronized_container_filter classname
-        |> report_unsafe_accesses ~issue_log classname )
-      class_map IssueLog.empty
-  in
-  clear_sync_container_cache () ;
-  result
+  Typ.Name.Map.fold
+    (fun classname methods issue_log ->
+      make_results_table methods
+      |> synchronized_container_filter classname
+      |> report_unsafe_accesses ~issue_log classname )
+    class_map IssueLog.empty

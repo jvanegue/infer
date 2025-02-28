@@ -42,6 +42,7 @@ type build_system =
   | BNdk
   | BPython
   | BRebar3
+  | BSwiftc
   | BXcode
 [@@deriving compare, equal]
 
@@ -99,6 +100,7 @@ let build_system_exe_assoc =
   ; (BNdk, "ndk-build")
   ; (BPython, "python3")
   ; (BRebar3, "rebar3")
+  ; (BSwiftc, "swiftc")
   ; (BErlc, "erlc")
   ; (BXcode, "xcodebuild") ]
 
@@ -398,7 +400,7 @@ let infer_inside_maven_env_var = "INFER_INSIDE_MAVEN"
 
 let maven = CLOpt.is_env_var_set infer_inside_maven_env_var
 
-let env_inside_maven = `Extend [(infer_inside_maven_env_var, "1")]
+let maven_env = `Extend [(infer_inside_maven_env_var, "1"); ("JAVA_HOME", "")]
 
 let infer_is_javac = maven
 
@@ -668,6 +670,12 @@ and append_buck_flavors =
     ~in_help:InferCommand.[(Capture, manual_buck)]
     "Additional Buck flavors to append to targets discovered by the \
      $(b,--buck-compilation-database) option."
+
+
+and attributes_lru_max_size =
+  CLOpt.mk_int ~long:"attributes-lru-max-size" ~meta:"int" ~default:500
+    "Specify size of procedure attribute LRU cache. Relevant only to multicore mode. Defaults to \
+     500"
 
 
 and biabduction_abs_struct =
@@ -1147,6 +1155,10 @@ and buck_mode =
     ~in_help:InferCommand.[(Capture, manual_buck)]
     ~f:(set_mode `Java) "Buck integration for Java."
   |> ignore ;
+  CLOpt.mk_bool ~long:"buck-python"
+    ~in_help:InferCommand.[(Capture, manual_buck)]
+    ~f:(set_mode `Python) "Buck integration for Python."
+  |> ignore ;
   buck_mode
 
 
@@ -1298,6 +1310,12 @@ and compaction_if_heap_greater_equal_to_GB =
   CLOpt.mk_int ~long:"compaction-if-heap-greater-equal-to-GB" ~default:8 ~meta:"int"
     "An analysis worker will trigger compaction if its heap size is equal or great to this value \
      in Gigabytes. Defaults to 8"
+
+
+and compaction_if_heap_greater_equal_to_GB_multicore =
+  CLOpt.mk_int ~long:"compaction-if-heap-greater-equal-to-GB-multicore" ~default:40 ~meta:"int"
+    "Multicore analysis will trigger compaction if the total heap size is equal or great to this \
+     value in Gigabytes. Defaults to 40"
 
 
 and compilation_database =
@@ -1857,6 +1875,11 @@ and incremental_analysis, mark_unchanged_procs, invalidate_only =
   (incremental_analysis, mark_unchanged_procs, invalidate_only)
 
 
+and inferbo_lru_max_size =
+  CLOpt.mk_int ~long:"inferbo-lru-max-size" ~meta:"int" ~default:500
+    "Specify size of inferbo LRU cache. Relevant only to multicore mode. Defaults to 500"
+
+
 and _inferconfig_path =
   (* This is a no-op argument ensuring a meaningful message in case of error, as well as to
      silently consume the argument which is parsed specially. *)
@@ -2200,6 +2223,11 @@ and merge_summaries =
      be merged together and deduplicated before reporting is done."
 
 
+and minor_heap_size_mb =
+  CLOpt.mk_int ~long:"minor-heap-size-mb" ~default:8
+    "Set minor heap size (in Mb) for each process/domain. Defaults to 8"
+
+
 and _method_decls_info =
   CLOpt.mk_path_opt ~long:"" ~deprecated:["-method-decls-info"] ~meta:"method_decls_info.json"
     "[DOES NOTHING, test determinator has been removed] Specifies the file containing the method \
@@ -2533,6 +2561,13 @@ and pulse_model_cheap_copy_type_list =
   CLOpt.mk_string_list ~long:"pulse-model-cheap-copy-type-list" ~meta:"regex"
     ~in_help:InferCommand.[(Analyze, manual_pulse)]
     "Regex of methods that should be cheap to copy in Pulse"
+
+
+and pulse_model_deep_release_pattern =
+  CLOpt.mk_string_opt ~long:"pulse-model-deep-release-pattern"
+    ~in_help:InferCommand.[(Analyze, manual_pulse)]
+    "Regex of methods that should be modelled as deep release in Pulse (i.e. await all unawaited \
+     values reachable from its arguments)."
 
 
 and pulse_model_free_pattern =
@@ -2989,6 +3024,12 @@ and python_files_index =
      $(b,infer capture -- python3 file1.py file2.py) but not with $(b,--pyc-file)."
 
 
+and python_trim_source_paths =
+  CLOpt.mk_bool ~long:"python-trim-source-paths" ~default:false
+    "Remove any prefix calculated from the relative difference between $(b,--buck2-root) and \
+     $(b,--project-root) from captured source paths."
+
+
 and python_skip_db =
   CLOpt.mk_bool ~long:"python-skip-db" ~default:false "Skip the DB writing during Python capture"
 
@@ -3239,25 +3280,6 @@ and scope_leakage_config =
   }
 }
     |}
-
-
-and _scuba_execution_id =
-  CLOpt.mk_int64_opt ~long:"scuba-execution-id"
-    "[DOES NOTHING] Execution ID attached to all samples logged to scuba"
-
-
-and _scuba_logging = CLOpt.mk_bool ~long:"scuba-logging" "[DOES NOTHING] (direct) logging to scuba"
-
-and _scuba_normals =
-  CLOpt.mk_string_map ~long:"scuba-normal"
-    "[DOES NOTHING] add an extra string (normal) field to be set for each sample of scuba, format \
-     <name>=<value>"
-
-
-and _scuba_tags =
-  CLOpt.mk_string_map ~long:"scuba-tags"
-    "[DOES NOTHING] add an extra set of strings (tagset) field to be set for each sample of scuba, \
-     format <name>=(<value>,<value>,<value>|NONE)"
 
 
 and select =
@@ -3516,9 +3538,9 @@ and suffix_match_changed_files =
      analyzed if a name in the changed files index is a suffix of its name."
 
 
-and summaries_caches_max_size =
-  CLOpt.mk_int ~long:"summaries-caches-max-size" ~default:500
-    "The maximum amount of elements the summaries LRU caches can hold"
+and summaries_lru_max_size =
+  CLOpt.mk_int ~long:"summaries-lru-max-size" ~meta:"int" ~default:2000
+    "Specify size of summary LRU cache. Relevant only to multicore mode. Defaults to 2000"
 
 
 and suppress_lint_ignore_types =
@@ -3541,6 +3563,11 @@ and tenv_json =
     ~meta:"file" "Path to TEnv json file"
 
 
+and tenvs_lru_max_size =
+  CLOpt.mk_int ~long:"tenvs-lru-max-size" ~meta:"int" ~default:500
+    "Specify size of type environment LRU cache. Relevant only to multicore mode. Defaults to 500"
+
+
 and testing_mode =
   CLOpt.mk_bool ~long:"testing-mode"
     "Mode for testing, where no headers are translated, and dot files are created (clang only)"
@@ -3557,7 +3584,7 @@ and timeout =
     ?default:(if is_running_unit_test then None else Some 120.0)
     ~in_help:[(Analyze, manual_generic); (Run, manual_generic)]
     "Time after which any checker (except biabduction) should give up analysing the current \
-     function or method, in seconds"
+     function or method, in seconds. Not implemented for multicore mode"
 
 
 and top_longest_proc_duration_size =
@@ -3727,6 +3754,15 @@ let inferconfig_file =
         Option.map inferconfig_dir ~f:(fun dir -> dir ^/ CommandDoc.inferconfig_file) )
 
 
+let set_gc_params () =
+  let ctrl = Gc.get () in
+  let words_of_Mb nMb = nMb * 1024 * 1024 * 8 / Sys.word_size_in_bits in
+  let new_size nMb = max ctrl.minor_heap_size (words_of_Mb nMb) in
+  (* increase the minor heap size *)
+  let minor_heap_size = new_size !minor_heap_size_mb in
+  Gc.set {ctrl with minor_heap_size}
+
+
 let post_parsing_initialization command_opt =
   if CLOpt.is_originator [@warning "-3"] then
     (* make sure subprocesses read from the same .inferconfig as the toplevel process *)
@@ -3823,18 +3859,6 @@ let post_parsing_initialization command_opt =
   in
   Stdlib.Printexc.set_uncaught_exception_handler uncaught_exception_handler ;
   F.set_margin !margin ;
-  let set_gc_params () =
-    let ctrl = Gc.get () in
-    let words_of_Mb nMb = nMb * 1024 * 1024 * 8 / Sys.word_size_in_bits in
-    let new_size nMb = max ctrl.minor_heap_size (words_of_Mb nMb) in
-    (* increase the minor heap size *)
-    let minor_heap_size = new_size 8 in
-    (* use the best-fit allocator *)
-    let allocation_policy = 2 in
-    (* increase the overhead as the default is tuned for the next-fit allocator *)
-    let space_overhead = 120 in
-    Gc.set {ctrl with minor_heap_size; allocation_policy; space_overhead}
-  in
   set_gc_params () ;
   let biabd_symops_timeout, biabd_seconds_timeout =
     let default_symops_timeout = 1100 in
@@ -3897,6 +3921,8 @@ and annotation_reachability_no_allocation = !annotation_reachability_no_allocati
 and annotation_reachability_report_source_and_sink = !annotation_reachability_report_source_and_sink
 
 and append_buck_flavors = RevList.to_list !append_buck_flavors
+
+and attributes_lru_max_size = !attributes_lru_max_size
 
 and biabduction_abs_struct = !biabduction_abs_struct
 
@@ -4008,6 +4034,8 @@ and buck_mode : BuckMode.t option =
       Some Erlang
   | `Java, _ ->
       Some Java
+  | `Python, _ ->
+      Some Python
 
 
 and buck_targets_block_list = RevList.to_list !buck_targets_block_list
@@ -4074,6 +4102,10 @@ and clang_libcxx_include_to_override_regex = !clang_libcxx_include_to_override_r
 and classpath = !classpath
 
 and compaction_if_heap_greater_equal_to_GB = !compaction_if_heap_greater_equal_to_GB
+
+and compaction_if_heap_greater_equal_to_GB_multicore =
+  !compaction_if_heap_greater_equal_to_GB_multicore
+
 
 and complete_capture_from = !complete_capture_from
 
@@ -4278,6 +4310,8 @@ and impurity_report_immutable_modifications = !impurity_report_immutable_modific
 and inclusive_cost = !inclusive_cost
 
 and incremental_analysis = !incremental_analysis
+
+and inferbo_lru_max_size = !inferbo_lru_max_size
 
 and inline_func_pointer_for_testing = !inline_func_pointer_for_testing
 
@@ -4524,6 +4558,8 @@ and pulse_model_cheap_copy_type =
     ~pattern_list:pulse_model_cheap_copy_type_list
 
 
+and pulse_model_deep_release_pattern = Option.map ~f:Str.regexp !pulse_model_deep_release_pattern
+
 and pulse_model_free_pattern = Option.map ~f:Str.regexp !pulse_model_free_pattern
 
 and pulse_model_malloc_pattern = Option.map ~f:Str.regexp !pulse_model_malloc_pattern
@@ -4695,6 +4731,8 @@ and pyc_file = RevList.to_list !pyc_file
 
 and python_files_index = !python_files_index
 
+and python_trim_source_paths = !python_trim_source_paths
+
 and python_skip_db = !python_skip_db
 
 and qualified_cpp_name_block_list = RevList.to_list !qualified_cpp_name_block_list
@@ -4846,13 +4884,15 @@ and subtype_multirange = !subtype_multirange
 
 and suffix_match_changed_files = !suffix_match_changed_files
 
-and summaries_caches_max_size = !summaries_caches_max_size
+and summaries_lru_max_size = !summaries_lru_max_size
 
 and suppress_lint_ignore_types = !suppress_lint_ignore_types
 
 and suppressions = !suppressions
 
 and tenv_json = !tenv_json
+
+and tenvs_lru_max_size = !tenvs_lru_max_size
 
 and testing_mode = !testing_mode
 
