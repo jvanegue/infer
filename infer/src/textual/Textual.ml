@@ -126,6 +126,10 @@ module FieldName : NAME = Name
 
 let builtin_allocate = "__sil_allocate"
 
+let builtin_malloc = "__sil_malloc"
+
+let builtin_free = "__sil_free"
+
 let builtin_allocate_array = "__sil_allocate_array"
 
 let builtin_lazy_class_initialize = "__sil_lazy_class_initialize"
@@ -138,7 +142,7 @@ let builtin_get_lazy_class = "__sil_get_lazy_class"
 
 let builtin_instanceof = "__sil_instanceof"
 
-module TypeName : sig
+module BaseTypeName : sig
   include NAME
 
   val hack_builtin : t
@@ -158,6 +162,58 @@ end = struct
   let python_builtin = {value= "$builtins"; loc= Location.Unknown}
 
   let hack_generics = {value= "HackGenerics"; loc= Location.Unknown}
+end
+
+module TypeName : sig
+  type t = {name: BaseTypeName.t; args: t list} [@@deriving compare, equal, hash]
+
+  val of_string : ?loc:Location.t -> string -> t
+
+  val pp : F.formatter -> t -> unit
+
+  module Hashtbl : Hashtbl.S with type key = t
+
+  module HashSet : HashSet.S with type elt = t
+
+  module Map : Stdlib.Map.S with type key = t
+
+  module Set : Stdlib.Set.S with type elt = t
+
+  val hack_builtin : t
+
+  val python_builtin : t
+
+  val hack_generics : t
+
+  val wildcard : t
+end = struct
+  module T = struct
+    type t = {name: BaseTypeName.t; args: t list} [@@deriving compare, equal, hash]
+  end
+
+  include T
+
+  let from_basename name = {name; args= []}
+
+  let of_string ?loc str = BaseTypeName.of_string ?loc str |> from_basename
+
+  let rec pp fmt {name; args} =
+    if List.is_empty args then BaseTypeName.pp fmt name
+    else F.fprintf fmt "%a<%a>" BaseTypeName.pp name (Pp.comma_seq pp) args
+
+
+  module Hashtbl = Hashtbl.Make (T)
+  module HashSet = HashSet.Make (T)
+  module Map = Stdlib.Map.Make (T)
+  module Set = Stdlib.Set.Make (T)
+
+  let wildcard = from_basename BaseTypeName.wildcard
+
+  let hack_builtin = from_basename BaseTypeName.hack_builtin
+
+  let python_builtin = from_basename BaseTypeName.python_builtin
+
+  let hack_generics = from_basename BaseTypeName.hack_generics
 end
 
 module QualifiedProcName = struct
@@ -289,8 +345,18 @@ module Attr = struct
 end
 
 module Typ = struct
-  type t = Int | Float | Null | Void | Ptr of t | Struct of TypeName.t | Array of t
+  type t =
+    | Int
+    | Float
+    | Null
+    | Void
+    | Fun of function_prototype option
+    | Ptr of t
+    | Struct of TypeName.t
+    | Array of t
   [@@deriving equal, hash]
+
+  and function_prototype = {params_type: t list; return_type: t} [@@deriving equal, hash]
 
   let rec pp fmt = function
     | Int ->
@@ -301,6 +367,10 @@ module Typ = struct
         F.pp_print_string fmt "null"
     | Void ->
         F.pp_print_string fmt "void"
+    | Fun None ->
+        F.pp_print_string fmt "(fun _ -> _)"
+    | Fun (Some {params_type; return_type}) ->
+        F.fprintf fmt "(fun (%a) -> %a)" (Pp.comma_seq pp) params_type pp return_type
     | Ptr typ ->
         F.pp_print_char fmt '*' ;
         pp fmt typ
@@ -384,7 +454,6 @@ module ProcSig = struct
   module T = struct
     type t =
       | Hack of {qualified_name: QualifiedProcName.t; arity: int option}
-      | Python of {qualified_name: QualifiedProcName.t; arity: int option}
       | Other of {qualified_name: QualifiedProcName.t}
     [@@deriving equal, hash, show {with_path= false}]
   end
@@ -392,19 +461,17 @@ module ProcSig = struct
   include T
 
   let to_qualified_procname = function
-    | Hack {qualified_name} | Python {qualified_name} | Other {qualified_name} ->
+    | Hack {qualified_name} | Other {qualified_name} ->
         qualified_name
 
 
-  let arity = function Hack {arity} | Python {arity} -> arity | Other _ -> None
+  let arity = function Hack {arity} -> arity | Other _ -> None
 
   let map_arity procsig ~f =
     match procsig with
     | Hack {qualified_name; arity= Some arity} ->
         Hack {qualified_name; arity= Some (f arity)}
-    | Python {qualified_name; arity= Some arity} ->
-        Python {qualified_name; arity= Some (f arity)}
-    | Hack {arity= None} | Python {arity= None} | Other _ ->
+    | Hack {arity= None} | Other _ ->
         procsig
 
 
@@ -415,7 +482,7 @@ module ProcSig = struct
   let is_hack_init = function
     | Hack {qualified_name} ->
         QualifiedProcName.is_hack_init qualified_name
-    | Python _ | Other _ ->
+    | Other _ ->
         false
 
 
@@ -438,9 +505,7 @@ module ProcDecl = struct
   let to_sig {qualified_name; formals_types} = function
     | Some Lang.Hack ->
         ProcSig.Hack {qualified_name; arity= Option.map formals_types ~f:List.length}
-    | Some Lang.Python ->
-        ProcSig.Python {qualified_name; arity= Option.map formals_types ~f:List.length}
-    | Some Lang.Java | None ->
+    | Some Lang.Python | Some Lang.Java | None ->
         ProcSig.Other {qualified_name}
 
 
@@ -469,6 +534,10 @@ module ProcDecl = struct
 
 
   let allocate_object_name = make_toplevel_name builtin_allocate Location.Unknown
+
+  let malloc_name = make_toplevel_name builtin_malloc Location.Unknown
+
+  let free_name = make_toplevel_name builtin_free Location.Unknown
 
   let allocate_array_name = make_toplevel_name builtin_allocate_array Location.Unknown
 
@@ -587,6 +656,10 @@ module ProcDecl = struct
     QualifiedProcName.equal allocate_object_name qualified_name
 
 
+  let is_malloc_builtin qualified_name = QualifiedProcName.equal malloc_name qualified_name
+
+  let is_free_builtin qualified_name = QualifiedProcName.equal free_name qualified_name
+
   let is_allocate_array_builtin qualified_name =
     QualifiedProcName.equal allocate_array_name qualified_name
 
@@ -689,7 +762,11 @@ module Exp = struct
     (*  | Sizeof of sizeof_data *)
     | Const of Const.t
     | Call of {proc: QualifiedProcName.t; args: t list; kind: call_kind}
-    | Closure of {proc: QualifiedProcName.t; captured: t list; params: VarName.t list}
+    | Closure of
+        { proc: QualifiedProcName.t
+        ; captured: t list
+        ; params: VarName.t list
+        ; attributes: Attr.t list }
     | Apply of {closure: t; args: t list}
     | Typ of Typ.t
 
@@ -700,9 +777,7 @@ module Exp = struct
   let call_sig qualified_name nb_args = function
     | Some Lang.Hack ->
         ProcSig.Hack {qualified_name; arity= Some nb_args}
-    | Some Lang.Python ->
-        ProcSig.Python {qualified_name; arity= Some nb_args}
-    | Some Lang.Java | None ->
+    | Some Lang.Python | Some Lang.Java | None ->
         ProcSig.Other {qualified_name}
 
 
@@ -713,6 +788,8 @@ module Exp = struct
   let allocate_object typename =
     Call {proc= ProcDecl.allocate_object_name; args= [Typ (Typ.Struct typename)]; kind= NonVirtual}
 
+
+  let pp_fun_attributes fmt = function [] -> () | l -> List.iter l ~f:(Attr.pp fmt)
 
   let rec pp fmt = function
     | Apply {closure; args} ->
@@ -743,12 +820,13 @@ module Exp = struct
             L.die InternalError "virtual call with 0 args: %a" QualifiedProcName.pp proc )
       | NonVirtual ->
           F.fprintf fmt "%a%a" QualifiedProcName.pp proc pp_list args )
-    | Closure {proc; captured; params} ->
+    | Closure {proc; captured; params; attributes} ->
         let captured_and_params =
           captured @ List.map params ~f:(fun varname -> Load {exp= Lvar varname; typ= None})
         in
-        F.fprintf fmt "fun (%a) -> %a(%a)" (pp_list_with_comma VarName.pp) params
-          QualifiedProcName.pp proc (pp_list_with_comma pp) captured_and_params
+        F.fprintf fmt "@[<hov>%afun (%a) -> %a(%a)@]" pp_fun_attributes attributes
+          (pp_list_with_comma VarName.pp) params QualifiedProcName.pp proc (pp_list_with_comma pp)
+          captured_and_params
     | Typ typ ->
         F.fprintf fmt "<%a>" Typ.pp typ
 
@@ -906,14 +984,22 @@ module Terminator = struct
 end
 
 module Node = struct
-  type t =
-    { label: NodeName.t
-    ; ssa_parameters: (Ident.t * Typ.t) list
-    ; exn_succs: NodeName.t list
-    ; last: Terminator.t
-    ; instrs: Instr.t list
-    ; last_loc: Location.t
-    ; label_loc: Location.t }
+  module T = struct
+    type t =
+      { label: NodeName.t
+      ; ssa_parameters: (Ident.t * Typ.t) list
+      ; exn_succs: NodeName.t list
+      ; last: Terminator.t
+      ; instrs: Instr.t list
+      ; last_loc: Location.t
+      ; label_loc: Location.t }
+
+    let equal node1 node2 = NodeName.equal node1.label node2.label
+
+    let compare node1 node2 = NodeName.compare node1.label node2.label
+  end
+
+  include T
 
   (* see the specification of Instr.is_ready_for_to_sil_conversion above *)
   let is_ready_for_to_sil_conversion node =
@@ -937,7 +1023,7 @@ module Node = struct
     F.fprintf fmt "@\n@]"
 
 
-  let equal node1 node2 = NodeName.equal node1.label node2.label
+  module Set = Stdlib.Set.Make (T)
 end
 
 module ProcDesc = struct

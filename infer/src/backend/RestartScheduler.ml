@@ -17,9 +17,15 @@ let read_procs_to_analyze () =
 
 type target_with_dependency = {target: TaskSchedulerTypes.target; dependency_filenames: string list}
 
-let restart_count = ref 0
+module FinalizerMap = Stdlib.Hashtbl.Make (struct
+  type t = TaskSchedulerTypes.target [@@deriving equal, hash]
+end)
 
-let of_queue ready : ('a, TaskSchedulerTypes.analysis_result) ProcessPool.TaskGenerator.t =
+let of_queue ready :
+    ( TaskSchedulerTypes.target
+    , TaskSchedulerTypes.analysis_result
+    , WorkerPoolState.worker_id )
+    TaskGenerator.t =
   let remaining = ref (Queue.length ready) in
   let remaining_tasks () = !remaining in
   let is_empty () = Int.equal !remaining 0 in
@@ -28,7 +34,11 @@ let of_queue ready : ('a, TaskSchedulerTypes.analysis_result) ProcessPool.TaskGe
   (* a ref to avoid checking if the same first job in the [blocked] queue is blocked multiple times
      for different idle workers in the same process pool update cycle *)
   let waiting_for_blocked_target = ref false in
+  let finalizers = FinalizerMap.create 1 in
+  let restart_count = ref 0 in
   let finished ~result target =
+    FinalizerMap.find_opt finalizers target |> Option.iter ~f:ProcLocker.unlock_all ;
+    FinalizerMap.remove finalizers target ;
     match result with
     | None | Some Ok ->
         decr remaining ;
@@ -39,17 +49,18 @@ let of_queue ready : ('a, TaskSchedulerTypes.analysis_result) ProcessPool.TaskGe
         incr restart_count ;
         Queue.enqueue blocked {target; dependency_filenames}
   in
-  let dequeue_from_blocked child_pid =
+  let dequeue_from_blocked worker_id =
     match Queue.peek blocked with
     | Some w when not !waiting_for_blocked_target -> (
       (* see if we can acquire the locks needed by this job *)
-      match ProcLocker.lock_all child_pid w.dependency_filenames with
+      match ProcLocker.lock_all worker_id w.dependency_filenames with
       | `LocksAcquired locks ->
           (* success! remove the job from [blocked] since we only [peek]ed before *)
           Queue.dequeue_exn blocked |> ignore ;
           (* the scheduler will need to unlock the locks we acquired on behalf of the child once it
              is done with this work packet *)
-          Some (w.target, fun () -> ProcLocker.unlock_all locks)
+          FinalizerMap.add finalizers w.target locks ;
+          Some w.target
       | `FailedToLockAll ->
           (* failure; leave the job at the head of the queue and set the flag to avoid checking
              again for a while. This is better (perf wise) than trying to run jobs further down the
@@ -60,17 +71,17 @@ let of_queue ready : ('a, TaskSchedulerTypes.analysis_result) ProcessPool.TaskGe
     | _ ->
         None
   in
-  let next {ProcessPool.TaskGenerator.child_pid; is_first_update} =
+  let next {TaskGenerator.child_id; is_first_update} =
     if is_first_update then
       (* new update cycle, worth checking if the first job in the queue is still blocked again *)
       waiting_for_blocked_target := false ;
-    match dequeue_from_blocked child_pid with
+    match dequeue_from_blocked child_id with
     | Some _ as some_result ->
         some_result
     | None ->
         (* if there are no blocked jobs available to be run, continue with the original queue or
            wait for the next update if it's empty *)
-        Queue.dequeue ready |> Option.map ~f:(fun target -> (target, Fn.id))
+        Queue.dequeue ready
   in
   {remaining_tasks; is_empty; finished; next}
 
@@ -106,21 +117,19 @@ let make sources =
   of_queue queue
 
 
-let setup () =
-  match Config.scheduler with Restart when not Config.multicore -> ProcLocker.setup () | _ -> ()
-
+let setup () = match Config.scheduler with Restart -> ProcLocker.setup () | _ -> ()
 
 type locked_proc = {start: ExecutionDuration.counter; mutable callees_useful: ExecutionDuration.t}
 
-let locked_procs = Stack.create ()
+let locked_procs = DLS.new_key Stack.create
 
 let unlock ~after_exn pname =
-  match Stack.pop locked_procs with
+  match Stack.pop @@ DLS.get locked_procs with
   | None ->
       L.internal_error "Trying to unlock %a but it does not appear to be locked.@\n" Procname.pp
         pname
   | Some {start; callees_useful} ->
-      ( match Stack.top locked_procs with
+      ( match Stack.top @@ DLS.get locked_procs with
       | Some caller ->
           caller.callees_useful <-
             ( if after_exn then ExecutionDuration.add caller.callees_useful callees_useful
@@ -134,12 +143,12 @@ let unlock ~after_exn pname =
 
 let with_lock ~get_actives ~f pname =
   match Config.scheduler with
-  | Restart when not Config.multicore -> (
+  | Restart -> (
     match ProcLocker.try_lock pname with
     | `AlreadyLockedByUs ->
         f ()
     | `LockAcquired ->
-        Stack.push locked_procs
+        Stack.push (DLS.get locked_procs)
           {start= ExecutionDuration.counter (); callees_useful= ExecutionDuration.zero} ;
         let res =
           try f () with exn -> IExn.reraise_after ~f:(fun () -> unlock ~after_exn:true pname) exn

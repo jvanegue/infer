@@ -71,7 +71,7 @@ OPTIONS
            values: ant, buck1, buck, buck2, gradle, gradlew, java, javac,
            kotlinc, cc, clang, gcc, clang++, c++, g++, hackc, make,
            configure, cmake, waf, mvn, mvnw, ndk-build, python3, rebar3,
-           erlc, xcodebuild.
+           swiftc, erlc, xcodebuild.
 
        --help
            Show this manual
@@ -227,6 +227,10 @@ BUCK OPTIONS
            Use this flag if infer doesn't find any files to analyze after a
            successful capture. Only valid for --buck-clang. (Conversely:
            --no-buck-merge-all-deps)
+
+       --buck-python
+           Activates: Buck integration for Python. (Conversely:
+           --no-buck-python)
 
        --buck-targets-block-list +regex
            Skip capture of buck targets matched by the specified regular

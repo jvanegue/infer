@@ -23,6 +23,8 @@ module rec Ident : sig
 
   val pp : F.formatter -> t -> unit
 
+  val to_textual_base_type_name : t -> Textual.BaseTypeName.t
+
   module Special : sig
     val aiter : t
 
@@ -46,6 +48,8 @@ end = struct
   let pp fmt ident = F.pp_print_string fmt ident
 
   let mk ident = remove_angles ident
+
+  let to_textual_base_type_name value = Textual.{BaseTypeName.value; loc= Location.Unknown}
 
   module Special = struct
     let aiter = "__aiter__"
@@ -77,7 +81,7 @@ and QualName : sig
 
   val init : module_name:string -> t
 
-  val extend : t -> string -> t
+  val extend : t -> string -> int -> t
 
   val pp : F.formatter -> t -> unit
 
@@ -93,10 +97,12 @@ end = struct
 
   let init ~module_name = {function_name= ""; module_name}
 
-  let extend {module_name; function_name} attr =
+  let extend {module_name; function_name} attr counter =
     let attr = remove_angles attr in
+    let str_counter = match counter with 0 -> "" | _ -> string_of_int counter in
     let function_name =
-      if String.is_empty function_name then attr else F.asprintf "%s.%s" function_name attr
+      if String.is_empty function_name then F.asprintf "%s%s" attr str_counter
+      else F.asprintf "%s.%s%s" function_name attr str_counter
     in
     {function_name; module_name}
 
@@ -387,7 +393,7 @@ module Const = struct
     | Float of float
     | Complex of {real: float; imag: float}
     | String of string
-    | InvalidUnicode of int array
+    | InvalidUnicode
     | Bytes of bytes
     | None
   [@@deriving equal]
@@ -403,7 +409,7 @@ module Const = struct
         F.fprintf fmt "Complex[real:%f; imag:%f ]" real imag
     | String s ->
         F.fprintf fmt "\"%s\"" s
-    | InvalidUnicode _ ->
+    | InvalidUnicode ->
         F.pp_print_string fmt "InvalidUnicode"
     | Bytes bytes ->
         Bytes.pp fmt bytes
@@ -436,7 +442,6 @@ module Exp = struct
     | Const of Const.t
     | Function of
         { qual_name: QualName.t
-        ; short_name: Ident.t
         ; default_values: t
         ; default_values_kw: t
         ; annotations: t
@@ -455,7 +460,6 @@ module Exp = struct
     | Subscript of {exp: t; index: t}  (** foo[bar] *)
     | Temp of SSA.t
     | Var of ScopedIdent.t
-    | Yield of t
   [@@deriving equal]
 
   type opstack_symbol =
@@ -514,14 +518,9 @@ module Exp = struct
         F.fprintf fmt "$LoadDeref(%d,\"%a\")" slot Ident.pp name
     | LoadClassDeref {name; slot} ->
         F.fprintf fmt "$LoadClassDeref(%d,\"%a\")" slot Ident.pp name
-    | Function
-        {qual_name; short_name; default_values; default_values_kw; annotations; cells_for_closure}
-      ->
-        F.fprintf fmt "$MakeFunction[\"%a\", \"%a\", %a, %a, %a, %a]" Ident.pp short_name
-          QualName.pp qual_name pp default_values pp default_values_kw pp annotations pp
-          cells_for_closure
-    | Yield exp ->
-        F.fprintf fmt "$Yield(%a)" pp exp
+    | Function {qual_name; default_values; default_values_kw; annotations; cells_for_closure} ->
+        F.fprintf fmt "$MakeFunction[\"%a\", %a, %a, %a, %a]" QualName.pp qual_name pp
+          default_values pp default_values_kw pp annotations pp cells_for_closure
 
 
   let pp_opstack_symbol fmt = function
@@ -621,10 +620,6 @@ type 'a pyresult = ('a, Error.t) result
 module Stmt = struct
   let pp_call_arg fmt value = Exp.pp fmt value
 
-  let unnamed_call_arg value = value
-
-  let unnamed_call_args args = List.map ~f:unnamed_call_arg args
-
   type gen_kind = Generator | Coroutine | AsyncGenerator
 
   type t =
@@ -643,6 +638,7 @@ module Stmt = struct
     | ImportStar of Exp.t
     | GenStart of {kind: gen_kind}
     | SetupAnnotations
+    | Yield of {lhs: SSA.t; rhs: Exp.t}
 
   let pp fmt = function
     | Let {lhs; rhs} ->
@@ -686,6 +682,8 @@ module Stmt = struct
         F.fprintf fmt "$GenStart%s()" kind
     | SetupAnnotations ->
         F.pp_print_string fmt "$SETUP_ANNOTATIONS"
+    | Yield {lhs; rhs} ->
+        F.fprintf fmt "%a <- $Yield(%a)" SSA.pp lhs Exp.pp rhs
 end
 
 let cast_exp ~loc = function
@@ -731,7 +729,7 @@ module Stack = struct
 end
 
 module TerminatorBuilder = struct
-  (** This is a terminator in a tempory state. We will cast the [ssa_args] when finalizing the
+  (** This is a terminator in a temporary state. We will cast the [ssa_args] when finalizing the
       consrtruction *)
   type node_call = {label: NodeName.t; ssa_args: Exp.opstack_symbol list}
 
@@ -1206,13 +1204,14 @@ let read_code_qual_name st c =
       internal_error st (Error.CodeWithoutQualifiedName c)
 
 
-let call_function_with_unnamed_args st ?arg_names exp args =
+let call_function st ?arg_names arg =
   let open IResult.Let_syntax in
-  let args = Stmt.unnamed_call_args args in
+  let* args, st = State.pop_n_and_cast st arg in
+  let* fun_exp, st = State.pop st in
   let lhs, st = State.fresh_id st in
   let arg_names = Option.value arg_names ~default:Exp.none in
   let* stmt =
-    match exp with
+    match fun_exp with
     | Exp.BuiltinCaller call ->
         Ok (Stmt.BuiltinCall {lhs; call; args; arg_names})
     | Exp.ContextManagerExit self_if_needed ->
@@ -1223,12 +1222,12 @@ let call_function_with_unnamed_args st ?arg_names exp args =
         Stmt.Call {lhs; exp; args; arg_names}
   in
   let st = State.push_stmt st stmt in
-  Ok (lhs, st)
+  let st = State.push st (Exp.Temp lhs) in
+  Ok (st, None)
 
 
 let call_builtin_function st ?arg_names call args =
   let lhs, st = State.fresh_id st in
-  let args = Stmt.unnamed_call_args args in
   let arg_names = Option.value arg_names ~default:Exp.none in
   let stmt = Stmt.BuiltinCall {lhs; call; args; arg_names} in
   let st = State.push_stmt st stmt in
@@ -1265,7 +1264,6 @@ let make_function st flags =
         internal_error st (Error.MakeFunction ("a code object", codeobj))
   in
   let* qual_name = read_code_qual_name st code in
-  let short_name = Ident.mk code.FFI.Code.co_name in
   let* cells_for_closure, st =
     if flags land 0x08 <> 0 then State.pop_and_cast st else Ok (Exp.none, st)
   in
@@ -1280,8 +1278,7 @@ let make_function st flags =
   in
   let lhs, st = State.fresh_id st in
   let rhs =
-    Exp.Function
-      {short_name; qual_name; default_values; default_values_kw; annotations; cells_for_closure}
+    Exp.Function {qual_name; default_values; default_values_kw; annotations; cells_for_closure}
   in
   let stmt = Stmt.Let {lhs; rhs} in
   let st = State.push_stmt st stmt in
@@ -1289,35 +1286,10 @@ let make_function st flags =
   Ok (st, None)
 
 
-let call_function st arg =
-  let open IResult.Let_syntax in
-  let* args, st = State.pop_n_and_cast st arg in
-  let* fun_exp, st = State.pop st in
-  let* id, st = call_function_with_unnamed_args st fun_exp args in
-  let st = State.push st (Exp.Temp id) in
-  Ok (st, None)
-
-
 let call_function_kw st argc =
   let open IResult.Let_syntax in
   let* arg_names, st = State.pop_and_cast st in
-  let arg_names = Some arg_names in
-  (* a tuple containing the arguments names *)
-  let* args, st = State.pop_n_and_cast st argc in
-  let* exp, st = State.pop st in
-  let lhs, st = State.fresh_id st in
-  let arg_names = Option.value arg_names ~default:Exp.none in
-  let* stmt =
-    match exp with
-    | Exp.BuiltinCaller call ->
-        Ok (Stmt.BuiltinCall {lhs; call; args; arg_names})
-    | exp ->
-        let+ exp = State.cast_exp st exp in
-        Stmt.Call {lhs; exp; args; arg_names}
-  in
-  let st = State.push_stmt st stmt in
-  let st = State.push st (Exp.Temp lhs) in
-  Ok (st, None)
+  call_function st ~arg_names argc
 
 
 let call_function_ex st flags =
@@ -1492,7 +1464,11 @@ let get_cell_name {FFI.Code.co_cellvars; co_freevars} arg =
 let build_collection st count ~f =
   let open IResult.Let_syntax in
   let* values, st = State.pop_n_and_cast st count in
-  let exp = f values in
+  let rhs = f values in
+  let id, st = State.fresh_id st in
+  let exp = Exp.Temp id in
+  let stmt = Stmt.Let {lhs= id; rhs} in
+  let st = State.push_stmt st stmt in
   let st = State.push st exp in
   Ok (st, None)
 
@@ -1562,8 +1538,8 @@ let rec convert_ffi_const st (const : FFI.Constant.t) : Exp.opstack_symbol pyres
       Ok (Exp (Const (Complex {real; imag})))
   | PYCString s ->
       Ok (Exp (Const (String s)))
-  | PYCInvalidUnicode arg ->
-      Ok (Exp (Const (InvalidUnicode arg)))
+  | PYCInvalidUnicode ->
+      Ok (Exp (Const InvalidUnicode))
   | PYCBytes bytes ->
       Ok (Exp (Const (Bytes bytes)))
   | PYCTuple array ->
@@ -1661,21 +1637,9 @@ let parse_bytecode st ({FFI.Code.co_consts; co_names; co_varnames} as code)
       call_function_kw st arg
   | "CALL_FUNCTION_EX" ->
       call_function_ex st arg
-  | "POP_TOP" -> (
-      (* TODO: rethink this in the future.
-         Keep the popped values around in case their construction involves side effects.
-         dpichardie: I don't see any raison to keep the popped value, except special care
-         with the YIELD operations. *)
-      let* rhs, st = State.pop st in
-      match (rhs : Exp.opstack_symbol) with
-      | Exp (Temp _) ->
-          Ok (st, None)
-      | _ ->
-          let id, st = State.fresh_id st in
-          let* rhs = State.cast_exp st rhs in
-          let stmt = Stmt.Let {lhs= id; rhs} in
-          let st = State.push_stmt st stmt in
-          Ok (st, None) )
+  | "POP_TOP" ->
+      let* _, st = State.pop st in
+      Ok (st, None)
   | "BINARY_ADD" ->
       parse_op st (Binary Add) 2
   | "BINARY_SUBTRACT" ->
@@ -1991,7 +1955,7 @@ let parse_bytecode st ({FFI.Code.co_consts; co_names; co_varnames} as code)
   | "POP_EXCEPT" ->
       internal_error st (Error.UnsupportedOpcode opname)
   | "BUILD_TUPLE_UNPACK_WITH_CALL"
-    (* No real difference betwen the two but in case of an error, which shouldn't happen since
+    (* No real difference between the two but in case of an error, which shouldn't happen since
        the code is known to compile *)
   | "BUILD_TUPLE_UNPACK" ->
       build_collection st arg ~f:(fun values -> Exp.Collection {kind= Tuple; values; unpack= true})
@@ -2000,15 +1964,14 @@ let parse_bytecode st ({FFI.Code.co_consts; co_names; co_varnames} as code)
   | "BUILD_SET_UNPACK" ->
       build_collection st arg ~f:(fun values -> Exp.Collection {kind= Set; values; unpack= true})
   | "BUILD_MAP_UNPACK_WITH_CALL" | "BUILD_MAP_UNPACK" ->
-      (* No real difference betwen the two but in case of an error, which shouldn't happen since
+      (* No real difference between the two but in case of an error, which shouldn't happen since
          the code is known to compile *)
       build_collection st arg ~f:(fun values -> Exp.Collection {kind= Map; values; unpack= true})
   | "YIELD_VALUE" ->
-      (* TODO: it is quite uncertain how we'll deal with these in textual.
-         At the moment this seems to correctly model the stack life-cycle, so
-         I'm happy. We might change/improve things in the future *)
-      let* tos, st = State.pop_and_cast st in
-      let st = State.push st (Exp.Yield tos) in
+      let lhs, st = State.fresh_id st in
+      let* rhs, st = State.pop_and_cast st in
+      let st = State.push_stmt st (Yield {lhs; rhs}) in
+      let st = State.push st (Temp lhs) in
       Ok (st, None)
   | "YIELD_FROM" ->
       (* TODO: it is quite uncertain how we'll deal with these in textual.
@@ -2113,7 +2076,7 @@ let parse_bytecode st ({FFI.Code.co_consts; co_names; co_varnames} as code)
          https://quentin.pradet.me/blog/using-asynchronous-for-loops-in-python.html
          https://superfastpython.com/asyncio-async-for/
          We model it like a throwing exception for now. This offset will not be reached
-         by our DFS anyway since we don't model exceptionnal edges yet.
+         by our DFS anyway since we don't model exceptional edges yet.
       *)
       Ok (st, Some (TerminatorBuilder.Throw Exp.none))
   | "RERAISE" | "WITH_EXCEPT_START" ->
@@ -2326,8 +2289,8 @@ module Subroutine = struct
      Then, we hit a END_FINALLY, the current frame is either [None]
      or [Some offset] and we can make a decision.
      This approach is rather fragile because a the order of return
-     adresses in the real operand stack could **in theory** be messed
-     up by some stack operaion like ROT_TWO, ROT_THREE and so one.
+     addresses in the real operand stack could **in theory** be messed
+     up by some stack operation like ROT_TWO, ROT_THREE and so one.
      We do not try to detect such a strange situation for now.
   *)
 
@@ -2657,13 +2620,16 @@ let build_code_object_unique_name module_name code =
     if CodeMap.mem code map then map
     else
       let map = CodeMap.add code outer_name map in
-      Array.fold co_consts ~init:map ~f:(fun map constant ->
+      Array.fold co_consts ~init:(map, IString.Map.empty) ~f:(fun (map, counter_map) constant ->
           match constant with
           | FFI.Constant.PYCCode code ->
-              let outer_name = QualName.extend outer_name code.FFI.Code.co_name in
-              visit map outer_name code
+              let name = code.FFI.Code.co_name in
+              let counter = IString.Map.find_opt name counter_map |> Option.value ~default:0 in
+              let outer_name = QualName.extend outer_name name counter in
+              (visit map outer_name code, IString.Map.add name (counter + 1) counter_map)
           | _ ->
-              map )
+              (map, counter_map) )
+      |> fst
   in
   let map = visit CodeMap.empty (QualName.init ~module_name) code in
   fun code -> CodeMap.find_opt code map
@@ -2724,19 +2690,26 @@ let test_cfg_skeleton ~code_qual_name code =
       F.printf "topological order: %a@\n@\n" (Pp.seq ~sep:" " F.pp_print_int) topological_order
 
 
-let module_name {FFI.Code.co_filename} =
-  let sz = String.length co_filename in
+let module_name ~path_prefixes {FFI.Code.co_filename} =
+  let remove_prefix str prefix =
+    if String.is_prefix str ~prefix then
+      let prefix_len = String.length prefix in
+      String.sub str ~pos:prefix_len ~len:(String.length str - prefix_len)
+    else str
+  in
+  let file_path = List.fold path_prefixes ~init:co_filename ~f:remove_prefix in
+  (* if any prefixes have been removed, then also remove any leading / *)
   let file_path =
-    if sz >= 2 && String.equal "./" (String.sub co_filename ~pos:0 ~len:2) then
-      String.sub co_filename ~pos:2 ~len:(sz - 2)
-    else co_filename
+    if String.equal file_path co_filename then file_path else remove_prefix file_path "/"
   in
   Stdlib.Filename.remove_extension file_path |> String.substr_replace_all ~pattern:"/" ~with_:"::"
 
 
-let mk ~debug code =
+let mk ~debug ~path_prefix code =
   let open IResult.Let_syntax in
-  let module_name = module_name code in
+  let module_name =
+    module_name ~path_prefixes:(List.concat [["./"]; Option.to_list path_prefix]) code
+  in
   let code_qual_name = build_code_object_unique_name module_name code in
   let name = Ident.mk module_name in
   let f = build_cfg ~debug ~code_qual_name in
@@ -2773,7 +2746,7 @@ let test_generator ~filename ~f source =
 let test ?(filename = "dummy.py") ?(debug = false) ?run source =
   let open IResult.Let_syntax in
   let f code =
-    let+ module_ = mk ~debug code in
+    let+ module_ = mk ~debug ~path_prefix:None code in
     let run = Option.value run ~default:(F.printf "%a" Module.pp) in
     run module_
   in
@@ -2784,7 +2757,7 @@ let test_files ?(debug = false) ?run list =
   let open IResult.Let_syntax in
   let units = ref [] in
   let f code =
-    let+ module_ = mk ~debug code in
+    let+ module_ = mk ~debug ~path_prefix:None code in
     units := module_ :: !units
   in
   List.iter list ~f:(fun (filename, source) -> test_generator ~filename ~f source) ;
@@ -2795,7 +2768,7 @@ let test_files ?(debug = false) ?run list =
 let test_cfg_skeleton ?(filename = "dummy.py") source =
   let open IResult.Let_syntax in
   let f code =
-    let file_path = module_name code in
+    let file_path = module_name code ~path_prefixes:[] in
     let code_qual_name = build_code_object_unique_name file_path code in
     test_cfg_skeleton ~code_qual_name code ;
     let f code = Ok (test_cfg_skeleton ~code_qual_name code) in

@@ -7,38 +7,6 @@
 
 open! IStd
 
-module TaskGenerator : sig
-  type for_child_info = {child_slot: int; child_pid: Pid.t; is_first_update: bool}
-
-  (** abstraction for generating jobs *)
-  type ('a, 'b) t =
-    { remaining_tasks: unit -> int
-          (** number of tasks remaining to complete -- only used for reporting, so imprecision is
-              not a bug *)
-    ; is_empty: unit -> bool
-          (** when should the main loop of the task manager stop expecting new tasks *)
-    ; finished: result:'b option -> 'a -> unit
-          (** Process pool calls [finished result:r x] when a worker finishes item [x]. [result] is
-              [None] when the item was completed successfully and [Some pname] when it failed
-              because it could not lock [pname]. This is only called if [next ()] has previously
-              returned [Some x] and [x] was sent to a worker. *)
-    ; next: for_child_info -> ('a * (unit -> unit)) option
-          (** [next ()] generates the next work item together with a "finalizer" for that work item
-              that will be run once the work has completed (just before calling [finished]). If
-              [is_empty ()] is true then [next ()] must return [None]. However, it is OK to for
-              [next ()] to return [None] when [is_empty] is false. This corresponds to the case
-              where there is more work to be done, but it is not schedulable until some already
-              scheduled work is finished. *) }
-
-  val chain : ('a, 'b) t -> ('a, 'b) t -> ('a, 'b) t
-  (** chain two generators in order *)
-
-  val of_list : finish:('b option -> 'a -> 'a option) -> 'a list -> ('a, 'b) t
-  (** schedule tasks out of a concrete list *)
-
-  val finish_always_none : _ option -> _ -> _ option
-end
-
 (** Pool of parallel workers that can both receive tasks from the orchestrator process and start
     doing tasks on their own. Unix pipes are used for communication, all while refreshing a task bar
     periodically.
@@ -53,7 +21,7 @@ end
     respectively send them more tasks ("Do x") or update the task bar with the description provided
     by the child.
 
-    See also {!module-ProcessPoolState}. *)
+    See also {!module-WorkerPoolState}. *)
 
 (** A [('work, 'final) t] process pool accepts tasks of type ['work] and produces an array of
     results of type ['final]. ['work] and ['final] will be marshalled over a Unix pipe.*)
@@ -65,15 +33,17 @@ module Worker : sig
 end
 
 val create :
-     jobs:int
+     ?with_primary_db:bool
+  -> jobs:int
   -> child_prologue:(Worker.id -> unit)
   -> f:('work -> 'result option)
   -> child_epilogue:(Worker.id -> 'final)
-  -> tasks:(unit -> ('work, 'result) TaskGenerator.t)
+  -> tasks:(unit -> ('work, 'result, WorkerPoolState.worker_id) TaskGenerator.t)
+  -> unit
   -> ('work, 'final, 'result) t
 (** Create a new pool of processes running [jobs] jobs in parallel *)
 
-val run : (_, 'final, 'result) t -> 'final option Array.t
+val run : (_, 'final, _) t -> 'final option Array.t
 (** use the processes in the given process pool to run all the given tasks in parallel and return
     the results of the epilogues *)
 
@@ -81,3 +51,8 @@ val run_as_child : unit -> never_returns
 (** run a child that has been started by [create_process], on platforms where [fork] is not
     available. The child will take care of executing the proper code. Once it has started, it
     receives order from the parent through [stdin], and send status updates through [stdout]. *)
+
+type ('a, 'b) doer = 'a -> 'b option
+
+val run_sequentially : finish:('b option -> 'a -> 'a option) -> f:('a, 'b) doer -> 'a list -> unit
+(** Run the tasks sequentially *)

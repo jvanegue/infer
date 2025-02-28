@@ -16,10 +16,6 @@ val incr_summary_file_try_load : unit -> unit
 val incr_summary_read_from_disk : unit -> unit
 (** a summary file is deserialized from disk *)
 
-val incr_summary_cache_hits : unit -> unit
-
-val incr_summary_cache_misses : unit -> unit
-
 val incr_summary_specializations : unit -> unit
 
 val incr_ondemand_procs_analyzed : unit -> unit
@@ -84,3 +80,7 @@ val get : unit -> t
 
 val log_aggregate : t list -> unit
 (** log aggregated stats to infer's log file and to stats *)
+
+val add_cache_hit : name:string -> unit
+
+val add_cache_miss : name:string -> unit

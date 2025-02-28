@@ -47,6 +47,8 @@ module Ident : sig
 
   val pp : Format.formatter -> t -> unit
 
+  val to_textual_base_type_name : t -> Textual.BaseTypeName.t
+
   module Hashtbl : Stdlib.Hashtbl.S with type key = t
 
   module Special : sig
@@ -138,7 +140,7 @@ module Const : sig
     | Float of float
     | Complex of {real: float; imag: float}
     | String of string
-    | InvalidUnicode of int array
+    | InvalidUnicode
     | Bytes of bytes
     | None
 end
@@ -155,7 +157,6 @@ module Exp : sig
     | Const of Const.t
     | Function of
         { qual_name: QualName.t
-        ; short_name: Ident.t
         ; default_values: t
         ; default_values_kw: t
         ; annotations: t
@@ -174,7 +175,6 @@ module Exp : sig
     | Subscript of {exp: t; index: t}
     | Temp of SSA.t
     | Var of ScopedIdent.t
-    | Yield of t
 
   val pp : Format.formatter -> t -> unit
 end
@@ -198,6 +198,7 @@ module Stmt : sig
     | ImportStar of Exp.t
     | GenStart of {kind: gen_kind}
     | SetupAnnotations
+    | Yield of {lhs: SSA.t; rhs: Exp.t}
 end
 
 module Terminator : sig
@@ -246,7 +247,7 @@ module Module : sig
   type t = {name: Ident.t; toplevel: CFG.t; functions: CFG.t QualName.Map.t}
 end
 
-val mk : debug:bool -> FFI.Code.t -> (Module.t, Error.t) result
+val mk : debug:bool -> path_prefix:string option -> FFI.Code.t -> (Module.t, Error.t) result
 
 val test : ?filename:string -> ?debug:bool -> ?run:(Module.t -> unit) -> string -> unit
 [@@warning "-unused-value-declaration"]

@@ -13,33 +13,19 @@ module F = Format
 module L = Logging
 open TaskSchedulerTypes
 
-(** do a compaction if heap size over this value *)
-let compaction_if_heap_greater_equal_to_words =
-  (* we don't try hard to avoid overflow, apart from assuming that word size
-     divides 1024 perfectly, thus multiplying with a smaller factor *)
-  Config.compaction_if_heap_greater_equal_to_GB * 1024 * 1024 * (1024 / Sys.word_size_in_bits)
-
-
-let do_compaction_if_needed () =
-  let stat = Stdlib.Gc.quick_stat () in
-  let heap_words = stat.Stdlib.Gc.heap_words in
-  if heap_words >= compaction_if_heap_greater_equal_to_words then (
-    L.log_task "Triggering compaction, heap size= %d GB@\n"
-      (heap_words * Sys.word_size_in_bits / 1024 / 1024 / 1024) ;
-    Gc.compact () )
-  else ()
-
-
 let clear_caches () =
-  Summary.OnDisk.clear_cache () ;
-  BufferOverrunUtils.clear_cache () ;
-  Attributes.clear_cache () ;
+  if not Config.multicore then (
+    Summary.OnDisk.clear_cache () ;
+    Attributes.clear_cache () ;
+    BufferOverrunUtils.clear_cache () ;
+    Exe_env.clear_caches () ) ;
   Dependencies.clear ()
 
 
 let useful_time = DLS.new_key (fun () -> ExecutionDuration.zero)
 
-let analyze_target : (TaskSchedulerTypes.target, TaskSchedulerTypes.analysis_result) Tasks.doer =
+let analyze_target :
+    (TaskSchedulerTypes.target, TaskSchedulerTypes.analysis_result) ProcessPool.doer =
   let run_and_interpret_result ~f =
     try
       f () ;
@@ -50,34 +36,32 @@ let analyze_target : (TaskSchedulerTypes.target, TaskSchedulerTypes.analysis_res
     | MissingDependencyException.MissingDependencyException ->
         Some Ok
   in
-  let analyze_source_file exe_env source_file =
+  let analyze_source_file source_file =
     DB.Results_dir.init source_file ;
     L.task_progress SourceFile.pp source_file ~f:(fun () ->
         let result =
           run_and_interpret_result ~f:(fun () ->
-              Ondemand.analyze_file exe_env AnalysisRequest.all source_file )
+              Ondemand.analyze_file AnalysisRequest.all source_file )
         in
         if Config.write_html then Printer.write_all_html_files source_file ;
         result )
   in
-  let analyze_proc_name exe_env ~specialization proc_name =
+  let analyze_proc_name ~specialization proc_name =
     run_and_interpret_result ~f:(fun () ->
-        Ondemand.analyze_proc_name_toplevel exe_env AnalysisRequest.all ~specialization proc_name )
+        Ondemand.analyze_proc_name_toplevel AnalysisRequest.all ~specialization proc_name )
   in
   fun target ->
     let start = ExecutionDuration.counter () in
-    let exe_env = Exe_env.mk () in
     let result =
       match target with
       | Procname {proc_name; specialization} ->
-          analyze_proc_name exe_env ~specialization proc_name
+          analyze_proc_name ~specialization proc_name
       | File source_file ->
-          analyze_source_file exe_env source_file
+          analyze_source_file source_file
     in
     (* clear cache for each source file to avoid it growing unboundedly; we do it here to
        release memory before potentially going idle *)
     clear_caches () ;
-    do_compaction_if_needed () ;
     Utils.with_dls useful_time ~f:(fun useful_time ->
         ExecutionDuration.add_duration_since useful_time start ) ;
     result
@@ -170,10 +154,34 @@ let analyze replay_call_graph source_files_to_analyze =
       | Some (RaceOn _) ->
           L.die InternalError "Race detected in -j 1"
     in
-    Tasks.run_sequentially ~finish:fail_on_race ~f:analyze_target target_files ;
+    ProcessPool.run_sequentially ~finish:fail_on_race ~f:analyze_target target_files ;
     ( [Stats.get ()]
     , [GCStats.get ~since:(PreviousStats pre_analysis_gc_stats)]
     , [MissingDependencies.get ()] ) )
+  else if Config.multicore then (
+    Attributes.set_lru_limit ~lru_limit:(Some Config.attributes_lru_max_size) ;
+    BufferOverrunUtils.set_cache_lru_limit ~lru_limit:(Some Config.inferbo_lru_max_size) ;
+    Summary.OnDisk.set_lru_limit ~lru_limit:(Some Config.summaries_lru_max_size) ;
+    Exe_env.set_lru_limit ~lru_limit:(Some Config.tenvs_lru_max_size) ;
+    RestartScheduler.setup () ;
+    Stats.reset () ;
+    let gc_stats_pre_spawn = DLS.new_key (fun () -> None) in
+    let gc_stats =
+      DomainPool.create ~jobs:Config.jobs ~f:analyze_target
+        ~child_prologue:(fun _ ->
+          Config.set_gc_params () ;
+          DLS.set gc_stats_pre_spawn (Some (GCStats.get ~since:ProgramStart)) )
+        ~child_epilogue:(fun _ ->
+          match DLS.get gc_stats_pre_spawn with
+          | Some stats ->
+              GCStats.get ~since:(PreviousStats stats)
+          | None ->
+              L.die InternalError "domain did not store GC stats in its prologue, what happened?@\n" )
+        ~tasks:(fun () ->
+          tasks_generator_builder_for replay_call_graph (Lazy.force source_files_to_analyze) )
+      |> DomainPool.run
+    in
+    ([Stats.get ()], Array.to_list gc_stats |> List.filter_opt, [MissingDependencies.get ()]) )
   else (
     L.environment_info "Parallel jobs: %d@." Config.jobs ;
     let build_tasks_generator () =
@@ -227,10 +235,10 @@ let analyze replay_call_graph source_files_to_analyze =
         (Stats.get (), gc_stats_in_fork, MissingDependencies.get ())
       in
       StatsLogging.log_count ~label:"num_analysis_workers" ~value:Config.jobs ;
-      Tasks.Runner.create ~jobs:Config.jobs ~f:analyze_target ~child_prologue ~child_epilogue
-        build_tasks_generator
+      ProcessPool.create ~jobs:Config.jobs ~f:analyze_target ~child_prologue ~child_epilogue
+        ~tasks:build_tasks_generator ()
     in
-    let workers_stats = Tasks.Runner.run runner in
+    let workers_stats = ProcessPool.run runner in
     let collected_backend_stats, collected_gc_stats, collected_missing_deps =
       Array.fold workers_stats ~init:([], [], [])
         ~f:(fun ((backend_stats_list, gc_stats_list, missing_deps_list) as stats_list) stats_opt ->

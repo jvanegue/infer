@@ -6,6 +6,7 @@
  *)
 
 open! IStd
+module F = Format
 module L = Logging
 open PulseBasicInterface
 open PulseDomainInterface
@@ -116,11 +117,22 @@ module ModeledField = struct
   let delegated_release = Fieldname.make pulse_model_type "__infer_model_delegated_release"
 end
 
-let conservatively_initialize_args arg_values astate =
+let fold_reachable_from ~f args astate =
   let reachable_values =
-    AbductiveDomain.reachable_addresses_from (Stdlib.List.to_seq arg_values) astate `Post
+    AbductiveDomain.reachable_addresses_from (Stdlib.List.to_seq args) astate `Post
   in
-  AbstractValue.Set.fold AddressAttributes.initialize reachable_values astate
+  AbstractValue.Set.fold f reachable_values astate
+
+
+let conservatively_initialize_args arg_values astate =
+  fold_reachable_from ~f:AddressAttributes.initialize arg_values astate
+
+
+let remove_allocation_attr_transitively arg_values astate =
+  L.d_printfln ~color:Orange "remove_allocation_attr_transitively from [%a]"
+    (Pp.seq ~sep:"; " AbstractValue.pp)
+    arg_values ;
+  fold_reachable_from ~f:AddressAttributes.remove_allocation_attr arg_values astate
 
 
 let eval_access_to_value_origin path ?must_be_valid_reason mode location addr_hist access astate =
@@ -340,6 +352,13 @@ let eval_to_operand path location exp astate =
       (astate, `ValueOrigin value_origin)
 
 
+let pp_operand fmt = function
+  | `Constant c ->
+      Const.pp Pp.text fmt c
+  | `ValueOrigin vo ->
+      ValueOrigin.pp fmt vo
+
+
 let is_pvar vo astate ~f =
   match Decompiler.find (ValueOrigin.value vo) astate with
   | SourceExpr ((PVar pvar, [Dereference]), _) ->
@@ -359,10 +378,9 @@ let is_non_this_param pdesc vo astate =
 
 let is_constructor pdesc = Procname.is_constructor (Procdesc.get_proc_name pdesc)
 
-let is_infeasible pdesc ~negated bop lhs_op rhs_op astate =
+let is_this_equal_to_param_in_constructor pdesc ~negated bop lhs_op rhs_op astate =
   match ((negated, (bop : Binop.t)), lhs_op, rhs_op) with
   | (false, Eq | true, Ne), `ValueOrigin lhs, `ValueOrigin rhs ->
-      (* [this == param] is alwasy false inside a constructor. *)
       ( (is_this lhs astate && is_non_this_param pdesc rhs astate)
       || (is_non_this_param pdesc lhs astate && is_this rhs astate) )
       && is_constructor pdesc
@@ -378,7 +396,16 @@ let prune pdesc path location ~condition astate =
         let** astate, lhs_op = eval_to_operand path location exp_lhs astate in
         let** astate, rhs_op = eval_to_operand path location exp_rhs astate in
 
-        if is_infeasible pdesc ~negated bop lhs_op rhs_op astate then Unsat
+        if is_this_equal_to_param_in_constructor pdesc ~negated bop lhs_op rhs_op astate then
+          let reason () =
+            F.asprintf
+              "%a=%a and %a=%a are \"this\" and a parameter and %a is a constructor, so cannot be \
+               equal"
+              Exp.pp exp_lhs pp_operand lhs_op Exp.pp exp_rhs pp_operand rhs_op Procname.pp
+              (Procdesc.get_proc_name pdesc)
+          in
+          Unsat {reason; source= __POS__}
+
         else
           let is_bop_equal =
             match (bop, negated) with Eq, false | Ne, true -> true | _ -> false
@@ -561,6 +588,8 @@ let always_reachable address astate = AddressAttributes.always_reachable address
 let allocate allocator location addr astate =
   AddressAttributes.allocate allocator addr location astate
 
+
+let is_allocated addr astate = AddressAttributes.get_allocation_attr addr astate |> Option.is_some
 
 let java_resource_release ~recursive address astate =
   let if_valid_access_then_eval addr access astate =
@@ -820,11 +849,13 @@ let mark_address_of_stack_variable history variable location address astate =
            (AddressOfStackVariable (variable, location, history))
            astate )
   | Some (variable', location', _) ->
-      L.d_printfln ~color:Orange
-        "UNSAT: variables %a and %a have the same address on the stack.@\n  %a: %a@\n  %a: %a"
-        Var.pp variable Var.pp variable' Var.pp variable Location.pp location Var.pp variable'
-        Location.pp location' ;
-      Unsat
+      let reason () =
+        F.asprintf
+          "UNSAT: variables %a and %a have the same address on the stack.@\n  %a: %a@\n  %a: %a"
+          Var.pp variable Var.pp variable' Var.pp variable Location.pp location Var.pp variable'
+          Location.pp location'
+      in
+      Unsat {reason; source= __POS__}
 
 
 let get_dynamic_type_unreachable_values vars astate =

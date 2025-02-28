@@ -11,10 +11,8 @@ open Option.Monad_infix
 
 (** Module for Type Environments. *)
 
-(** Hash tables on type names. *)
-module TypenameHash = Stdlib.Hashtbl.Make (Typ.Name)
+module TypenameHash = Concurrent.MakeHashtbl (Typ.Name.Hash)
 
-(** Type for type environment. *)
 type t = Struct.t TypenameHash.t
 
 let pp fmt (tenv : t) =
@@ -25,7 +23,6 @@ let length tenv = TypenameHash.length tenv
 
 let fold tenv ~init ~f = TypenameHash.fold f tenv init
 
-(** Create a new type environment. *)
 let create () = TypenameHash.create 1000
 
 (** Construct a struct type in a type environment *)
@@ -46,8 +43,10 @@ let mk_struct tenv ?default ?fields ?statics ?methods ?exported_objc_methods ?su
 (** Look up a name in the given type environment. *)
 let lookup tenv name : Struct.t option =
   let result =
-    try Some (TypenameHash.find tenv name)
-    with Stdlib.Not_found -> (
+    match TypenameHash.find_opt tenv name with
+    | Some _ as some_s ->
+        some_s
+    | None -> (
       (* ToDo: remove the following additional lookups once C/C++ interop is resolved *)
       match (name : Typ.Name.t) with
       | CStruct m ->
@@ -95,7 +94,7 @@ let reorder_hack_supers tenv ~ignore_require_extends ({Struct.supers} as str) =
 
 
 let fold_supers ?(ignore_require_extends = false) tenv name ~init ~f =
-  let is_hack = Typ.Name.is_hack_class name in
+  let is_hack = Typ.Name.Hack.is_class name in
   let rec aux worklist visited result =
     match worklist with
     | [] ->
@@ -202,7 +201,7 @@ let pp_per_file fmt = function
 
 module SQLite : SqliteUtils.Data with type t = per_file = struct
   module Serializer = SqliteUtils.MarshalledDataNOTForComparison (struct
-    type nonrec t = t
+    type nonrec t = Struct.t Typ.Name.Hash.t
   end)
 
   type t = per_file
@@ -213,21 +212,21 @@ module SQLite : SqliteUtils.Data with type t = per_file = struct
     | Global ->
         Sqlite3.Data.TEXT global_string
     | FileLocal tenv ->
-        Serializer.serialize tenv
+        TypenameHash.with_hashtable Serializer.serialize tenv
 
 
   let deserialize = function
     | Sqlite3.Data.TEXT g when String.equal g global_string ->
         Global
     | blob ->
-        FileLocal (Serializer.deserialize blob)
+        FileLocal (Serializer.deserialize blob |> TypenameHash.wrap_hashtable)
 end
 
 let merge ~src ~dst =
   let merge_internal typename newer =
     match TypenameHash.find_opt dst typename with
     | None ->
-        TypenameHash.add dst typename newer
+        TypenameHash.replace dst typename newer
     | Some current ->
         let merged_struct = Struct.merge typename ~newer ~current in
         if not (phys_equal merged_struct current) then
@@ -247,27 +246,104 @@ let merge_per_file ~src ~dst =
       L.die InternalError "Cannot merge Global tenv with FileLocal tenv"
 
 
-(** Serializer for type environments *)
-let tenv_serializer : t Serialization.serializer =
-  Serialization.create_serializer Serialization.Key.tenv
+let store_debug_file tenv tenv_filename =
+  let debug_filename = DB.filename_to_string (DB.filename_add_suffix tenv_filename ".debug") in
+  let out_channel = Out_channel.create debug_filename in
+  let fmt = F.formatter_of_out_channel out_channel in
+  pp fmt tenv ;
+  Out_channel.close out_channel
 
 
-let global_tenv : t option ref = ref None
-
-let global_tenv_path = ResultsDir.get_path GlobalTypeEnvironment |> DB.filename_from_string
-
-let read path = Serialization.read_from_file tenv_serializer path
-
-let read_global () = read global_tenv_path
-
-let force_load_global () =
-  global_tenv := read_global () ;
-  !global_tenv
+let store_debug_file_for_source source_file tenv =
+  let tenv_filename_of_source_file =
+    DB.source_dir_get_internal_file (DB.source_dir_from_source_file source_file) ".tenv"
+  in
+  store_debug_file tenv tenv_filename_of_source_file
 
 
-let load_global () : t option =
-  if Option.is_some !global_tenv then !global_tenv else force_load_global ()
+let write tenv tenv_filename =
+  let tenv_path = DB.filename_to_string tenv_filename in
+  TypenameHash.with_hashtable
+    (fun hashtable ->
+      Utils.with_intermediate_temp_file_out ~retry:Sys.win32 tenv_path ~f:(fun outc ->
+          Marshal.to_channel outc hashtable [] ) )
+    tenv ;
+  if Config.debug_mode then store_debug_file tenv tenv_filename ;
+  let lstat = DB.filename_to_string tenv_filename |> Unix.lstat in
+  let size = Int64.to_int lstat.st_size |> Option.value_exn in
+  let value = size / 1024 / 1024 in
+  let label = "global_tenv_size_mb" in
+  L.debug Capture Quiet "Global tenv size %s: %d@\n" label value ;
+  StatsLogging.log_count ~label:"global_tenv_size_mb" ~value
 
+
+module Normalizer = struct
+  let normalize tenv =
+    let new_tenv = TypenameHash.create (TypenameHash.length tenv) in
+    let normalize_mapping name tstruct =
+      let name = Typ.Name.hash_normalize name in
+      let tstruct = Struct.hash_normalize tstruct in
+      TypenameHash.replace new_tenv name tstruct
+    in
+    TypenameHash.iter normalize_mapping tenv ;
+    new_tenv
+end
+
+let read filename =
+  try
+    DB.filename_to_string filename
+    |> Utils.with_file_in ~f:Marshal.from_channel
+    |> TypenameHash.wrap_hashtable |> Option.some
+  with Sys_error _ -> None
+
+
+module Global : sig
+  val read : unit -> t option
+
+  val load : unit -> t option
+
+  val force_load : unit -> t option
+
+  val store : normalize:bool -> t -> unit
+end = struct
+  let global_tenv : t option Atomic.t = Atomic.make None
+
+  let global_tenv_path = ResultsDir.get_path GlobalTypeEnvironment |> DB.filename_from_string
+
+  let read () = read global_tenv_path
+
+  let global_tenv_mutex = Error_checking_mutex.create ()
+
+  let set tenv =
+    Error_checking_mutex.critical_section global_tenv_mutex ~f:(fun () ->
+        Atomic.set global_tenv tenv )
+
+
+  let force_load () =
+    let tenv = read () in
+    set tenv ;
+    tenv
+
+
+  let load () : t option =
+    let tenv = Atomic.get global_tenv in
+    if Option.is_some tenv then tenv else force_load ()
+
+
+  let store ~normalize tenv =
+    (* update in-memory global tenv for later uses by this process, e.g. in single-core mode the
+       frontend and backend run in the same process *)
+    if Config.debug_level_capture > 0 then
+      L.debug Capture Quiet "Tenv.store: global tenv has size %d bytes.@."
+        (Obj.(reachable_words (repr tenv)) * (Sys.word_size_in_bits / 8)) ;
+    let tenv = if normalize then Normalizer.normalize tenv else tenv in
+    HashNormalizer.reset_all_normalizers () ;
+    if Config.debug_level_capture > 0 then
+      L.debug Capture Quiet "Tenv.store: canonicalized tenv has size %d bytes.@."
+        (Obj.(reachable_words (repr tenv)) * (Sys.word_size_in_bits / 8)) ;
+    set (Some tenv) ;
+    write tenv global_tenv_path
+end
 
 let load =
   let load_statement =
@@ -288,62 +364,9 @@ let load =
         MissingDependencies.record_sourcefile source ;
         None
     | Some Global ->
-        load_global ()
+        Global.load ()
     | Some (FileLocal tenv) ->
         Some tenv
-
-
-let store_debug_file tenv tenv_filename =
-  let debug_filename = DB.filename_to_string (DB.filename_add_suffix tenv_filename ".debug") in
-  let out_channel = Out_channel.create debug_filename in
-  let fmt = F.formatter_of_out_channel out_channel in
-  pp fmt tenv ;
-  Out_channel.close out_channel
-
-
-let store_debug_file_for_source source_file tenv =
-  let tenv_filename_of_source_file =
-    DB.source_dir_get_internal_file (DB.source_dir_from_source_file source_file) ".tenv"
-  in
-  store_debug_file tenv tenv_filename_of_source_file
-
-
-let write tenv tenv_filename =
-  Serialization.write_to_file tenv_serializer tenv_filename ~data:tenv ;
-  if Config.debug_mode then store_debug_file tenv tenv_filename ;
-  let lstat = DB.filename_to_string tenv_filename |> Unix.lstat in
-  let size = Int64.to_int lstat.st_size |> Option.value_exn in
-  let value = size / 1024 / 1024 in
-  let label = "global_tenv_size_mb" in
-  L.debug Capture Quiet "Global tenv size %s: %d@\n" label value ;
-  StatsLogging.log_count ~label:"global_tenv_size_mb" ~value
-
-
-module Normalizer = struct
-  let normalize tenv =
-    let new_tenv = TypenameHash.create (TypenameHash.length tenv) in
-    let normalize_mapping name tstruct =
-      let name = Typ.Name.hash_normalize name in
-      let tstruct = Struct.hash_normalize tstruct in
-      TypenameHash.add new_tenv name tstruct
-    in
-    TypenameHash.iter normalize_mapping tenv ;
-    new_tenv
-end
-
-let store_global ~normalize tenv =
-  (* update in-memory global tenv for later uses by this process, e.g. in single-core mode the
-     frontend and backend run in the same process *)
-  if Config.debug_level_capture > 0 then
-    L.debug Capture Quiet "Tenv.store: global tenv has size %d bytes.@."
-      (Obj.(reachable_words (repr tenv)) * (Sys.word_size_in_bits / 8)) ;
-  let tenv = if normalize then Normalizer.normalize tenv else tenv in
-  HashNormalizer.reset_all_normalizers () ;
-  if Config.debug_level_capture > 0 then
-    L.debug Capture Quiet "Tenv.store: canonicalized tenv has size %d bytes.@."
-      (Obj.(reachable_words (repr tenv)) * (Sys.word_size_in_bits / 8)) ;
-  global_tenv := Some tenv ;
-  write tenv global_tenv_path
 
 
 let normalize = function

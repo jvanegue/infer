@@ -31,13 +31,12 @@ val register : init:(unit -> unit) -> save:(unit -> 'a) -> restore:('a -> unit) 
     - [init] is called when the analysis of a procedure starts *)
 
 val register_ref : init:(unit -> 'a) -> 'a ref -> unit
+[@@deprecated "Do not use refs, use [*_dls] functions instead"]
 (** special case of a value stored in a reference; [init] sets the ref to [init ()] *)
 
-val register_dls : init:(unit -> 'a) -> 'a DLS.key -> unit
-(** special case of a value stored in domain-local storage; [init] sets the ref to [init ()] *)
+val make_dls : init:(unit -> 'a) -> 'a DLS.key
+(** create a value stored in domain-local storage; [init] is used to set the value on initialization
+    and when spawning a new domain *)
 
 val register_dls_with_proc_desc_and_tenv : init:(Procdesc.t -> Tenv.t -> 'a) -> 'a DLS.key -> unit
 (** special case of a value stored in domain local storage *)
-
-val register_ref_with_proc_desc_and_tenv : init:(Procdesc.t -> Tenv.t -> 'a) -> 'a ref -> unit
-(** same as [register_ref] but [init] takes a proc desc and a tenv *)

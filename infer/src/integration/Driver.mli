@@ -21,6 +21,7 @@ type mode =
   | BuckJavaFlavor of {build_cmd: string list}
   | BxlClang of {build_cmd: string list}
   | BxlJava of {build_cmd: string list}
+  | BxlPython of {build_cmd: string list}
   | Clang of {compiler: Clang.compiler; prog: string; args: string list}
   | ClangCompilationDB of {db_files: [`Escaped of string | `Raw of string] list}
   | Erlc of {args: string list}
@@ -34,6 +35,7 @@ type mode =
   | Python of {prog: string; args: string list}
   | PythonBytecode of {files: string list}
   | Rebar3 of {args: string list}
+  | Swiftc of {prog: string; args: string list}
   | Textual of {textualfiles: string list}
   | XcodeBuild of {prog: string; args: string list}
   | XcodeXcpretty of {prog: string; args: string list}

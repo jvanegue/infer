@@ -13,11 +13,11 @@ module TypeNameBridge = struct
   include TypeName
 
   (** the name of the Textual string type *)
-  let sil_string = {value= "String"; loc= Unknown}
+  let sil_string = of_string "String"
 
   (** the name of the Textual type of all types (do not ask what it the type of this type itself
       please...) *)
-  let sil_type_of_types = {value= "TYPE"; loc= Unknown}
+  let sil_type_of_types = of_string "TYPE"
 end
 
 (** is it safe to assign a value of type [given] to a variable of type [assigned] *)
@@ -41,6 +41,8 @@ let rec compat ~assigned:(t1 : Typ.t) ~given:(t2 : Typ.t) =
       true (* no subtyping check yet *)
   | Array t1, Array t2 ->
       compat ~assigned:t1 ~given:t2
+  | (Fun _ as fun1), (Fun _ as fun2) ->
+      Typ.equal fun1 fun2
   | _, _ ->
       false
 
@@ -554,12 +556,12 @@ and typeof_exp (exp : Exp.t) : (Exp.t * Typ.t) monad =
       let* loc = get_location in
       let+ lang = get_lang in
       (Exp.Apply {closure; args}, TextualSil.default_return_type lang loc)
-  | Closure {proc; captured; params} ->
+  | Closure {proc; captured; params; attributes} ->
       let* captured_and_types = mapM captured ~f:typeof_exp in
       let captured = List.map ~f:fst captured_and_types in
       let* loc = get_location in
       let+ lang = get_lang in
-      (Exp.Closure {proc; captured; params}, TextualSil.default_return_type lang loc)
+      (Exp.Closure {proc; captured; params; attributes}, TextualSil.default_return_type lang loc)
   | Typ _ ->
       ret (exp, Typ.Struct TypeNameBridge.sil_type_of_types)
 

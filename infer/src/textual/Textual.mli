@@ -61,9 +61,24 @@ module FieldName : NAME (* field names, without their enclosing types *)
 
 module NodeName : NAME (* node names, also called labels *)
 
+module BaseTypeName : NAME
+
 module TypeName : sig
   (* structured value type name *)
-  include NAME
+  type t = {name: BaseTypeName.t; args: t list} [@@deriving compare, equal, hash]
+
+  val of_string : ?loc:Location.t -> string -> t
+  (** we replace any dot in the string by '::' because dot is a reserved separator in Textual *)
+
+  val pp : F.formatter -> t -> unit
+
+  module Hashtbl : Hashtbl.S with type key = t
+
+  module HashSet : HashSet.S with type elt = t
+
+  module Map : Stdlib.Map.S with type key = t
+
+  module Set : Stdlib.Set.S with type elt = t
 
   val hack_generics : t
 
@@ -150,10 +165,13 @@ module Typ : sig
     | Float  (** float type *)
     | Null
     | Void  (** void type *)
+    | Fun of function_prototype option  (** function type *)
     | Ptr of t  (** pointer type *)
     | Struct of TypeName.t  (** structured value type name *)
     | Array of t  (** array type *)
   [@@deriving equal]
+
+  and function_prototype = {params_type: t list; return_type: t} [@@deriving equal]
 
   val pp : F.formatter -> t -> unit
 
@@ -199,12 +217,11 @@ module ProcSig : sig
         (** Hack doesn't support function overloading but it does support functions with default
             arguments. This means that a procedure is uniquely identified by its name and the number
             of arguments. *)
-    | Python of {qualified_name: QualifiedProcName.t; arity: int option}
-        (** Python supports function overloading and default arguments. This means that a procedure
-            is uniquely identified by its name and the number of arguments. *)
     | Other of {qualified_name: QualifiedProcName.t}
         (** Catch-all case for languages that currently lack support for function overloading at the
             Textual level.
+
+            Python does not need overloading.
 
             For instance, in C++ and Java the signature consists of a procedure name and types of
             formals. However, the syntax of procedure calls in Textual doesn't give us the types of
@@ -261,6 +278,16 @@ module ProcDecl : sig
 
   val is_allocate_object_builtin : QualifiedProcName.t -> bool
 
+  val malloc_name : QualifiedProcName.t [@@warning "-unused-value-declaration"]
+
+  val is_malloc_builtin : QualifiedProcName.t -> bool
+
+  val free_name : QualifiedProcName.t [@@warning "-unused-value-declaration"]
+
+  val cast_name : QualifiedProcName.t [@@warning "-unused-value-declaration"]
+
+  val is_free_builtin : QualifiedProcName.t -> bool
+
   val allocate_array_name : QualifiedProcName.t
 
   val is_allocate_array_builtin : QualifiedProcName.t -> bool
@@ -297,7 +324,11 @@ module Exp : sig
     | Index of t * t  (** an array index offset: [exp1[exp2]] *)
     | Const of Const.t
     | Call of {proc: QualifiedProcName.t; args: t list; kind: call_kind}
-    | Closure of {proc: QualifiedProcName.t; captured: t list; params: VarName.t list}
+    | Closure of
+        { proc: QualifiedProcName.t
+        ; captured: t list
+        ; params: VarName.t list
+        ; attributes: Attr.t list }
     | Apply of {closure: t; args: t list}
     | Typ of Typ.t
 
@@ -353,6 +384,8 @@ module Terminator : sig
     | Unreachable
 end
 
+[@@@warning "-unused-module"]
+
 module Node : sig
   type t =
     { label: NodeName.t
@@ -363,6 +396,8 @@ module Node : sig
     ; last_loc: Location.t  (** location of last instruction in file *)
     ; label_loc: Location.t  (** location of label in file *) }
   [@@deriving equal]
+
+  module Set : Stdlib.Set.S with type elt = t
 end
 
 module ProcDesc : sig

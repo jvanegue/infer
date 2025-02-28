@@ -278,7 +278,7 @@ let run_files modules =
             Int i
         | String s ->
             String s
-        | Float _ | Complex _ | InvalidUnicode _ | Bytes _ ->
+        | Float _ | Complex _ | InvalidUnicode | Bytes _ ->
             (* I don't think it makes sense to deal with this kind of constant in the interpreter *)
             todo "eval_const"
       in
@@ -345,8 +345,7 @@ let run_files modules =
         | Collection _
         | LoadClosure _
         | LoadDeref _
-        | LoadClassDeref _
-        | Yield _ ->
+        | LoadClassDeref _ ->
             todo "eval_exp"
       in
       let exec_stmt stmt =
@@ -432,7 +431,8 @@ let run_files modules =
         | StoreDeref _
         | SetupAnnotations
         | ImportStar _
-        | GenStart _ ->
+        | GenStart _
+        | Yield _ ->
             todo "exec_stmt"
       in
       let rec exec_terminator terminator =

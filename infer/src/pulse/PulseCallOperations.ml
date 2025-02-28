@@ -65,9 +65,7 @@ module GlobalForStats = struct
 
   let empty = {node_is_not_stuck= false; one_call_is_stuck= false}
 
-  let global = DLS.new_key (fun () -> empty)
-
-  let () = AnalysisGlobalState.register_dls ~init:(fun () -> empty) global
+  let global = AnalysisGlobalState.make_dls ~init:(fun () -> empty)
 
   let init_before_call () =
     Utils.with_dls global ~f:(fun global -> {global with node_is_not_stuck= false})
@@ -427,10 +425,12 @@ let apply_callee ({InterproceduralAnalysis.tenv; proc_desc} as analysis_data)
             with
             | None ->
                 (* the address became unreachable so the bug can never be reached; drop it *)
-                L.d_printfln ~color:Orange
-                  "%a seems no longer reachable, dropping the latent invalid access altogether"
-                  DecompilerExpr.pp address_callee ;
-                Unsat
+                let reason () =
+                  F.asprintf
+                    "%a seems no longer reachable, dropping the latent invalid access altogether"
+                    DecompilerExpr.pp address_callee
+                in
+                Unsat {reason; source= __POS__}
             | Some (invalid_address, default_caller_history) -> (
                 let access_trace =
                   Trace.add_call (Call callee_proc_name) call_loc hist_map ~default_caller_history
@@ -539,7 +539,8 @@ let call_aux disjunct_limit ({InterproceduralAnalysis.tenv} as analysis_data) pa
             apply_callee analysis_data path callee_pname call_loc call_flags callee_exec_state
               ~captured_formals ~captured_actuals ~formals ~actuals ~ret astate
           with
-          | Unsat, new_contradiction ->
+          | Unsat unsat_info, new_contradiction ->
+              SatUnsat.log_unsat unsat_info ;
               (* couldn't apply pre/post pair *)
               (posts, PulseInterproc.merge_contradictions contradiction new_contradiction)
           | Sat post, new_contradiction ->
@@ -952,9 +953,8 @@ let call ?disjunct_limit ({InterproceduralAnalysis.analyze_dependency} as analys
                            exec_state ) )
                 in
                 case_if_specialization_is_impossible res
-            | Error ((AnalysisFailed | InBlockList | UnknownProcedure) as no_summary) ->
-                L.die InternalError "No summary found by specialization: %a"
-                  AnalysisResult.pp_no_summary no_summary
+            | Error (AnalysisFailed | InBlockList | UnknownProcedure) ->
+                case_if_specialization_is_impossible res
             | Ok (summary, is_pulse_specialization_limit_not_reached) ->
                 let already_given = Specialization.Pulse.Set.add specialization already_given in
                 iter_call ~max_iteration ~nth_iteration:(nth_iteration + 1)

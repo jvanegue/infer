@@ -187,9 +187,7 @@ module DisjunctiveMetadata = struct
      of metadata since otherwise we would need to carry the metadata around the analysis while being
      careful to avoid double-counting. With a reference this is simpler to achieve as we can simply
      update it whenever a relevant action is taken (eg dropping a disjunct). *)
-  let proc_metadata = DLS.new_key (fun () -> empty)
-
-  let () = AnalysisGlobalState.register_dls ~init:(fun () -> empty) proc_metadata
+  let proc_metadata = AnalysisGlobalState.make_dls ~init:(fun () -> empty)
 
   (* This is used to remember the CFG node otherwise we would need to carry the node around in widen
      and join as well as other places that may need to access the current CFG node during analysis *)
@@ -655,7 +653,7 @@ module AbstractInterpreterCommon (TransferFunctions : NodeTransferFunctions) = s
     let instrs = CFG.instrs node in
     if Config.write_html then L.d_printfln "PRE STATE:@\n@[%a@]@\n" pp_domain_html pre ;
     let exec_instr idx pre instr =
-      call_once_in_ten ~f:!ProcessPoolState.update_heap_words () ;                        
+      call_once_in_ten ~f:!WorkerPoolState.update_heap_words () ;
       AnalysisState.set_instr instr ;
       let pp_result f result = dump_html f pre result in
       let result =

@@ -6,9 +6,7 @@
  * LICENSE file in the root directory of this source tree.
  *)
 open! IStd
-open PolyVariantEqual
 module F = Format
-module Hashtbl = Stdlib.Hashtbl
 module L = Die
 
 let fold_file_tree ~init ~f_dir ~f_reg ~path =
@@ -171,10 +169,13 @@ let filename_to_relative ?(force_full_backtrack = false) ?(backtrack = 0) ~root 
 let directory_fold f init path =
   let collect current_dir (accu, dirs) path =
     let full_path = current_dir ^/ path in
-    try
-      if Sys.is_directory full_path = `Yes then (accu, full_path :: dirs)
-      else (f accu full_path, dirs)
-    with Sys_error _ -> (accu, dirs)
+    match Sys.is_directory full_path with
+    | `Yes ->
+        (accu, full_path :: dirs)
+    | _ ->
+        (f accu full_path, dirs)
+    | exception Sys_error _ ->
+        (accu, dirs)
   in
   let rec loop accu dirs =
     match dirs with
@@ -184,29 +185,10 @@ let directory_fold f init path =
         let new_accu, new_dirs = Array.fold ~f:(collect d) ~init:(accu, tl) (Sys.readdir d) in
         loop new_accu new_dirs
   in
-  if Sys.is_directory path = `Yes then loop init [path] else f init path
+  match Sys.is_directory path with `Yes -> loop init [path] | _ -> f init path
 
 
-let directory_iter f path =
-  let apply current_dir dirs path =
-    let full_path = current_dir ^/ path in
-    try
-      if Sys.is_directory full_path = `Yes then full_path :: dirs
-      else
-        let () = f full_path in
-        dirs
-    with Sys_error _ -> dirs
-  in
-  let rec loop dirs =
-    match dirs with
-    | [] ->
-        ()
-    | d :: tl ->
-        let new_dirs = Array.fold ~f:(apply d) ~init:tl (Sys.readdir d) in
-        loop new_dirs
-  in
-  if Sys.is_directory path = `Yes then loop [path] else f path
-
+let directory_iter f path = directory_fold (fun () path -> f path) () path
 
 let string_crc_hex32 s = Stdlib.Digest.to_hex (Stdlib.Digest.string s)
 
@@ -316,26 +298,13 @@ let out_channel_create_with_dir fname =
     Out_channel.create fname
 
 
-let realpath_cache = Hashtbl.create 1023
-
 let realpath ?(warn_on_error = true) path =
-  match Hashtbl.find realpath_cache path with
-  | exception Stdlib.Not_found -> (
-    match Filename.realpath path with
-    | realpath ->
-        Hashtbl.add realpath_cache path (Ok realpath) ;
-        realpath
-    | exception (Unix.Unix_error (code, _, arg) as exn) ->
-        IExn.reraise_after exn ~f:(fun () ->
-            if warn_on_error then
-              F.eprintf "WARNING: Failed to resolve file %s with \"%s\" @\n@." arg
-                (Unix.Error.message code) ;
-            (* cache failures as well *)
-            Hashtbl.add realpath_cache path (Error exn) ) )
-  | Ok path ->
-      path
-  | Error exn ->
-      raise exn
+  try Filename.realpath path
+  with Unix.Unix_error (code, _, arg) as exn ->
+    IExn.reraise_after exn ~f:(fun () ->
+        if warn_on_error then
+          F.eprintf "WARNING: Failed to resolve file %s with \"%s\" @\n@." arg
+            (Unix.Error.message code) )
 
 
 (* never closed *)

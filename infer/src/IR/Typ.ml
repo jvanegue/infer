@@ -574,7 +574,9 @@ module Name = struct
     F.fprintf fmt "%s %a" (prefix tname) (pp_name_c_syntax Pp.text) tname
 
 
-  let to_string = F.asprintf "%a" pp
+  let to_string t = F.asprintf "%a" pp t
+
+  let show = to_string
 
   let is_class = function
     | CppClass _ | JavaClass _ | HackClass _ | ObjcClass _ | CSharpClass _ | PythonClass _ ->
@@ -591,35 +593,6 @@ module Name = struct
 
   let is_objc_block name = match name with ObjcBlock _ -> true | _ -> false
 
-  let is_hack_class name = match name with HackClass _ -> true | _ -> false
-
-  let is_python_class name = match name with PythonClass _ -> true | _ -> false
-
-  let is_python_final name =
-    match name with PythonClass py -> PythonClassName.is_final py | _ -> false
-
-
-  let is_python_module name =
-    match name with PythonClass py -> PythonClassName.is_module py | _ -> false
-
-
-  let is_python_module_attribute name =
-    match name with PythonClass py -> PythonClassName.is_module_attribute py | _ -> false
-
-
-  let get_python_module_name name =
-    match name with PythonClass py -> PythonClassName.get_module_name py | _ -> None
-
-
-  let get_python_module_attribute_infos name =
-    match name with
-    | PythonClass py ->
-        PythonClassName.get_module_attribute_infos py
-        |> Option.map ~f:(fun (py_name, str) -> (PythonClass py_name, str))
-    | _ ->
-        None
-
-
   let is_same_type t1 t2 =
     match (t1, t2) with
     | CStruct _, CStruct _
@@ -627,6 +600,7 @@ module Name = struct
     | CppClass _, CppClass _
     | JavaClass _, JavaClass _
     | HackClass _, HackClass _
+    | PythonClass _, PythonClass _
     | ObjcClass _, ObjcClass _
     | ObjcProtocol _, ObjcProtocol _
     | CSharpClass _, CSharpClass _ ->
@@ -654,6 +628,8 @@ module Name = struct
   end
 
   module Hack = struct
+    let is_class = function HackClass _ -> true | _ -> false
+
     let static_companion typename =
       match typename with
       | HackClass class_name ->
@@ -700,6 +676,28 @@ module Name = struct
           String.equal "HH::classname" (HackClassName.classname hack_typ)
       | _ ->
           false
+  end
+
+  module Python = struct
+    let is_class name = match name with PythonClass _ -> true | _ -> false
+
+    let is_final name = match name with PythonClass py -> PythonClassName.is_final py | _ -> false
+
+    let is_singleton name =
+      match name with PythonClass py -> PythonClassName.is_singleton py | _ -> false
+
+
+    let split_module_attr name =
+      match name with PythonClass py -> PythonClassName.split_module_attr py | _ -> None
+
+
+    let concatenate_package_name_and_file_name name filename =
+      match name with
+      | PythonClass py ->
+          PythonClassName.concatenate_package_name_and_file_name py filename
+          |> Option.map ~f:(fun py_name -> PythonClass py_name)
+      | _ ->
+          None
   end
 
   module Java = struct

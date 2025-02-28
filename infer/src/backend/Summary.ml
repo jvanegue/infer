@@ -179,26 +179,27 @@ let mk_full_summary payloads (report_summary : ReportSummary.t)
 
 
 module OnDisk = struct
-  module M = Stdlib.Map.Make (struct
-    type t = Procname.t * AnalysisRequest.t [@@deriving compare]
-  end)
+  (* a two-layer cache: procname -> analysis request -> summary *)
+  module Cache = Procname.Cache
 
-  module Cache = PrettyPrintable.MakeConcurrentMap (M)
-
-  let clear_cache, remove_from_cache, add_to_cache, find_in_cache =
-    let cache = Cache.empty () in
+  let clear_cache, remove_from_cache, add_to_cache, find_in_cache, set_lru_limit =
+    let cache = Cache.create ~name:"summaries" in
     let clear_cache () = Cache.clear cache in
-    (* Remove an element from the cache of summaries. Contrast to reset which re-initializes a
-        summary keeping the same Procdesc and updates the cache accordingly. *)
-    let remove_from_cache pname =
-      Cache.filter cache (fun (pname', _) _ -> not (Procname.equal pname pname'))
+    let remove_from_cache pname = Cache.remove cache pname in
+    let add proc_name analysis_req summary =
+      Cache.with_hashqueue
+        (fun hq ->
+          Cache.HQ.lookup_and_remove hq proc_name
+          |> Option.value ~default:AnalysisRequest.Map.empty
+          |> AnalysisRequest.Map.add analysis_req summary
+          |> Cache.HQ.enqueue_front_exn hq proc_name )
+        cache
     in
-    (* Add the summary to the table for the given function *)
-    let add proc_name analysis_req summary : unit =
-      Cache.add cache (proc_name, analysis_req) summary
+    let find_opt (proc_name, analysis_req) =
+      Cache.lookup cache proc_name |> Option.bind ~f:(AnalysisRequest.Map.find_opt analysis_req)
     in
-    let find_opt key = Cache.find_opt cache key in
-    (clear_cache, remove_from_cache, add, find_opt)
+    let set_lru_limit ~lru_limit = Cache.set_lru_mode ~lru_limit cache in
+    (clear_cache, remove_from_cache, add, find_opt, set_lru_limit)
 
 
   let spec_of_procname, spec_of_model =
@@ -260,17 +261,12 @@ module OnDisk = struct
 
 
   let get ~lazy_payloads analysis_req proc_name =
-    let found_from_cache summary =
-      BStats.incr_summary_cache_hits () ;
-      Some summary
-    in
     let not_found_from_cache () =
-      BStats.incr_summary_cache_misses () ;
       load_summary_to_spec_table ~lazy_payloads analysis_req proc_name
     in
     match find_in_cache (proc_name, analysis_req) with
-    | Some summary ->
-        found_from_cache summary
+    | Some _ as some_summary ->
+        some_summary
     | None -> (
       match (analysis_req : AnalysisRequest.t) with
       | All ->
@@ -279,8 +275,8 @@ module OnDisk = struct
       | One _ | CheckerWithoutPayload _ -> (
         (* If there is a cache for [All], we use it. *)
         match find_in_cache (proc_name, AnalysisRequest.all) with
-        | Some summary ->
-            found_from_cache summary
+        | Some _ as some_summary ->
+            some_summary
         | None ->
             not_found_from_cache () ) )
 
@@ -288,8 +284,6 @@ module OnDisk = struct
   (** Save summary for the procedure into the spec database *)
   let rec store (analysis_req : AnalysisRequest.t)
       ({proc_name; dependencies; payloads} as summary : t) =
-    (* Make sure the summary in memory is identical to the saved one *)
-    add_to_cache proc_name analysis_req summary ;
     summary.dependencies <- Dependencies.(Complete (freeze proc_name dependencies)) ;
     let report_summary = ReportSummary.of_full_summary summary in
     let summary_metadata =
@@ -304,6 +298,8 @@ module OnDisk = struct
         ~merge_pulse_payload:(Payloads.SQLite.serialize payloads)
         ~merge_report_summary:(ReportSummary.SQLite.serialize report_summary)
         ~merge_summary_metadata:(SummaryMetadata.SQLite.serialize summary_metadata) ;
+      (* Make sure the summary in memory is identical to the saved one *)
+      add_to_cache proc_name analysis_req summary ;
       summary
     with SqliteUtils.DataTooBig ->
       (* Serialization exceeded size limits, write and return an empty summary  *)
@@ -317,18 +313,14 @@ module OnDisk = struct
       store analysis_req new_summary
 
 
-  let reset proc_name analysis_req =
-    let summary =
-      { sessions= 0
-      ; payloads= Payloads.empty
-      ; stats= Stats.empty
-      ; proc_name
-      ; err_log= Errlog.empty ()
-      ; dependencies= Dependencies.reset proc_name
-      ; is_complete_result= false }
-    in
-    add_to_cache proc_name analysis_req summary ;
-    summary
+  let empty proc_name =
+    { sessions= 0
+    ; payloads= Payloads.empty
+    ; stats= Stats.empty
+    ; proc_name
+    ; err_log= Errlog.empty ()
+    ; dependencies= Dependencies.reset proc_name
+    ; is_complete_result= false }
 
 
   let delete_all ~procedures =
@@ -374,11 +366,11 @@ module OnDisk = struct
              in
              let cost_opt : CostDomain.summary option =
                Sqlite3.column stmt 2 |> Payloads.SQLite.deserialize_payload_opt
-               |> ILazy.force_option
+               |> SafeLazy.force_option
              in
              let config_impact_opt : ConfigImpactAnalysis.Summary.t option =
                Sqlite3.column stmt 3 |> Payloads.SQLite.deserialize_payload_opt
-               |> ILazy.force_option
+               |> SafeLazy.force_option
              in
              f proc_name loc cost_opt config_impact_opt err_log )
 
@@ -414,4 +406,5 @@ module OnDisk = struct
     let report_summary = ReportSummary.of_err_log proc_name err_log in
     DBWriter.update_report_summary ~proc_uid:(Procname.to_unique_id proc_name)
       ~merge_report_summary:(ReportSummary.SQLite.serialize report_summary)
+      ()
 end

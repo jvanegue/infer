@@ -29,6 +29,7 @@ type build_system =
   | BNdk
   | BPython
   | BRebar3
+  | BSwiftc
   | BXcode
 
 type scheduler = File | Restart | SyntacticCallGraph [@@deriving equal]
@@ -39,7 +40,8 @@ val build_system_of_exe_name : string -> build_system
 
 val string_of_build_system : build_system -> string
 
-val env_inside_maven : Unix.env
+val maven_env : Unix.env
+(** tell Infer it's running inside maven and disable JAVA_HOME *)
 
 (** {2 Constant configuration values} *)
 
@@ -137,6 +139,8 @@ val annotation_reachability_no_allocation : bool
 val annotation_reachability_report_source_and_sink : bool
 
 val append_buck_flavors : string list
+
+val attributes_lru_max_size : int
 
 val biabduction_abs_struct : int
 
@@ -280,6 +284,8 @@ val classpath : string option
 val command : InferCommand.t
 
 val compaction_if_heap_greater_equal_to_GB : int
+
+val compaction_if_heap_greater_equal_to_GB_multicore : int
 
 val complete_capture_from : string option
 
@@ -453,6 +459,8 @@ val infer_is_clang : bool
 
 val infer_is_javac : bool
 
+val inferbo_lru_max_size : int
+
 val inferconfig_file : string option
 
 val inline_func_pointer_for_testing : string option
@@ -557,7 +565,7 @@ val merge_summaries : string list
 
 val modeled_expensive : string * Yojson.Safe.t
 
-val multicore : bool [@@warning "-unused-value-declaration"]
+val multicore : bool
 
 val never_returning_null : string * Yojson.Safe.t
 
@@ -657,6 +665,8 @@ val pulse_model_alloc_pattern : Str.regexp option
 
 val pulse_model_cheap_copy_type : Str.regexp option
 
+val pulse_model_deep_release_pattern : Str.regexp option
+
 val pulse_model_free_pattern : Str.regexp option
 
 val pulse_model_malloc_pattern : Str.regexp option
@@ -750,6 +760,8 @@ val pure_by_default : bool
 val pyc_file : string list
 
 val python_files_index : string option
+
+val python_trim_source_paths : bool
 
 val python_skip_db : bool
 
@@ -891,13 +903,15 @@ val subtype_multirange : bool
 
 val suffix_match_changed_files : bool
 
-val summaries_caches_max_size : int [@@warning "-unused-value-declaration"]
+val summaries_lru_max_size : int
 
 val suppress_lint_ignore_types : bool
 
 val suppressions : bool
 
 val tenv_json : string option
+
+val tenvs_lru_max_size : int
 
 val testing_mode : bool
 
@@ -958,3 +972,6 @@ val is_originator : bool
 (** {2 Global variables with initial values specified by command-line options} *)
 
 val clang_compilation_dbs : [`Escaped of string | `Raw of string] list
+
+val set_gc_params : unit -> unit
+(** set GC paramemters according to command line arguments and defaults *)

@@ -174,6 +174,12 @@ endif
 endif # HAS_OBJC
 endif # BUILD_C_ANALYZERS
 
+ifneq ($(BUILD_SWIFT_ANALYZERS),no)
+DIRECT_TESTS += \
+  swift_frontend \
+
+endif
+
 ifeq ($(BUILD_ERLANG_ANALYZERS),yes)
 ifneq ($(ERLC),no)
 ifneq ($(ESCRIPT),no)
@@ -364,7 +370,7 @@ DUNE_ML:=$(shell find * -name 'dune*.in' | grep -v workspace | grep -v infer-sou
 fmt_dune:
 	parallel $(OCAMLFORMAT_EXE) $(OCAMLFORMAT_ARGS) -i ::: $(DUNE_ML)
 
-SRC_ML:=$(shell find * \( -name _build -or -name facebook-clang-plugins -or -path facebook/dependencies \) -not -prune -or -type f -and -name '*'.ml -or -name '*'.mli 2>/dev/null)
+SRC_ML:=$(shell find * \( -name _build -or -name facebook-clang-plugins -or -path facebook/dependencies -or -path sledge/llvm -or -path sledge/.llvm_build \) -not -prune -or -type f -and -name '*'.ml -or -name '*'.mli 2>/dev/null)
 
 .PHONY: fmt_all
 fmt_all:

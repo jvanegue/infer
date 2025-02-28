@@ -89,17 +89,40 @@ module TypeNameBridge = struct
     JavaClass (replace_2colons_with_dot string |> JavaClassName.from_string)
 
 
-  let value_to_sil (lang : Lang.t) value : SilTyp.Name.t =
-    match lang with
-    | Java ->
+  let to_python_class_name value args : PythonClassName.t =
+    let to_string {TypeName.name= {BaseTypeName.value}} = value in
+    match (value, args) with
+    | "PyClosure", [tname] ->
+        PythonClassName.Closure (to_string tname)
+    | "PyGlobals", [tname] ->
+        PythonClassName.Globals (to_string tname)
+    | "PyClassCompanion", [module_tname; attr_tname] ->
+        let module_name = to_string module_tname in
+        let attr_name = to_string attr_tname in
+        PythonClassName.ClassCompanion {module_name; attr_name}
+    | "PyModuleAttr", [module_tname; attr_tname] ->
+        let module_name = to_string module_tname in
+        let attr_name = to_string attr_tname in
+        PythonClassName.ModuleAttribute {module_name; attr_name}
+    | value, [] ->
+        PythonClassName.Filename value
+    | _, _ ->
+        L.die InternalError "to_python_class_name failed"
+
+
+  let to_sil (lang : Lang.t) {name= {value}; args} : SilTyp.Name.t =
+    match (lang, args) with
+    | Java, [] ->
         string_to_java_sil value
-    | Hack ->
+    | Java, _ ->
+        L.die InternalError "to_sil conversion failed on Java type name with non-empty args"
+    | Hack, [] ->
         HackClass (HackClassName.make value)
-    | Python ->
-        PythonClass (PythonClassName.make value)
+    | Hack, _ ->
+        L.die InternalError "to_sil conversion failed on Hack type name with non-empty args"
+    | Python, _ ->
+        PythonClass (to_python_class_name value args)
 
-
-  let to_sil (lang : Lang.t) {value} = value_to_sil lang value
 
   let java_lang_object = of_string "java.lang.Object"
 end
@@ -126,7 +149,7 @@ let hack_mixed_type_name = SilTyp.HackClass (HackClassName.make "HackMixed")
 
 let hack_awaitable_type_name = SilTyp.HackClass (HackClassName.make "HH::Awaitable")
 
-let mk_hack_mixed_type_textual loc = Typ.Struct TypeName.{value= "HackMixed"; loc}
+let mk_hack_mixed_type_textual loc = Typ.Struct (TypeName.of_string ~loc "HackMixed")
 
 let hack_mixed_static_companion_type_name = SilTyp.Name.Hack.static_companion hack_mixed_type_name
 
@@ -135,17 +158,23 @@ let hack_builtins_type_name = SilTyp.HackClass (HackClassName.make "$builtins")
 (* pseudo-class for top-level functions *)
 let hack_root_type_name = SilTyp.HackClass (HackClassName.make "$root")
 
-let python_mixed_type_name = SilTyp.PythonClass (PythonClassName.make "PyObject")
+let python_mixed_type_name = SilTyp.PythonClass (PythonClassName.Builtin PyObject)
 
-let python_dict_type_name = SilTyp.PythonClass (PythonClassName.make "PyDict")
+let python_dict_type_name = SilTyp.PythonClass (PythonClassName.Builtin PyDict)
 
-let python_int_type_name = SilTyp.PythonClass (PythonClassName.make "PyInt")
+let python_int_type_name = SilTyp.PythonClass (PythonClassName.Builtin PyInt)
 
-let python_none_type_name = SilTyp.PythonClass (PythonClassName.make "PyNone")
+let python_bool_type_name = SilTyp.PythonClass (PythonClassName.Builtin PyBool)
 
-let python_tuple_type_name = SilTyp.PythonClass (PythonClassName.make "PyTuple")
+let python_none_type_name = SilTyp.PythonClass (PythonClassName.Builtin PyNone)
 
-let mk_python_mixed_type_textual loc = Typ.Struct TypeName.{value= "PyObject"; loc}
+let python_string_type_name = SilTyp.PythonClass (PythonClassName.Builtin PyString)
+
+let python_tuple_type_name = SilTyp.PythonClass (PythonClassName.Builtin PyTuple)
+
+let mk_python_mixed_type_textual loc =
+  Typ.Struct (TypeName.of_string ~loc PythonClassName.(classname (Builtin PyObject)))
+
 
 let default_return_type (lang : Lang.t option) loc =
   match lang with
@@ -214,7 +243,7 @@ let wildcard_sil_fieldname lang name =
   | Hack ->
       SilFieldname.make (HackClass HackClassName.wildcard) name
   | Python ->
-      SilFieldname.make (PythonClass PythonClassName.wildcard) name
+      SilFieldname.make (PythonClass PythonClassName.Wildcard) name
 
 
 module TypBridge = struct
@@ -233,6 +262,12 @@ module TypBridge = struct
           Tfloat FFloat (* FIXME: add size *)
       | Void ->
           Tvoid
+      | Fun None ->
+          Tfun None
+      | Fun (Some {params_type; return_type}) ->
+          let params_type = List.map ~f:(to_sil lang) params_type in
+          let return_type = to_sil lang return_type in
+          Tfun (Some {params_type; return_type})
       | Ptr t ->
           Tptr (to_sil lang t, Pk_pointer)
       | Struct name ->
@@ -353,15 +388,17 @@ module ProcDeclBridge = struct
   let hack_class_name_to_sil = function
     | QualifiedProcName.TopLevel ->
         None
-    | QualifiedProcName.Enclosing name ->
+    | QualifiedProcName.Enclosing {TypeName.name; args= []} ->
         Some (HackClassName.make name.value)
+    | _ ->
+        L.die InternalError "hack_class_name_to_sil failed"
 
 
   let python_class_name_to_sil = function
     | QualifiedProcName.TopLevel ->
         None
-    | QualifiedProcName.Enclosing name ->
-        Some (PythonClassName.make name.value)
+    | QualifiedProcName.Enclosing {name= {value}; args} ->
+        Some (TypeNameBridge.to_python_class_name value args)
 
 
   let to_sil lang t : SilProcname.t =
@@ -411,7 +448,7 @@ module ProcDeclBridge = struct
            of the call site signature. This way we'll be able to match a particular overload of the
            procname with its definition from a different translation unit during the analysis
            phase. *)
-        let arity = match callsig with Hack {arity} | Python {arity} -> arity | Other _ -> None in
+        let arity = ProcSig.arity callsig in
         let improved_match name_to_sil make =
           if Option.is_some t.formals_types then to_sil lang t
           else
@@ -726,7 +763,7 @@ module InstrBridge = struct
         L.die InternalError
           "to_sil should come after type transformation remove_effects_in_subexprs"
     | Let {id= Some id; exp= Call {proc; args= [Typ typ]}; loc}
-      when ProcDecl.is_allocate_object_builtin proc ->
+      when ProcDecl.is_allocate_object_builtin proc || ProcDecl.is_malloc_builtin proc ->
         let typ = TypBridge.to_sil lang typ in
         let sizeof =
           SilExp.Sizeof
@@ -736,8 +773,23 @@ module InstrBridge = struct
         let args = [(sizeof, class_type)] in
         let ret = IdentBridge.to_sil id in
         let loc = LocationBridge.to_sil sourcefile loc in
-        let builtin_new = SilExp.Const (SilConst.Cfun BuiltinDecl.__new) in
-        Call ((ret, class_type), builtin_new, args, loc, CallFlags.default)
+        let builtin_name =
+          if ProcDecl.is_allocate_object_builtin proc then
+            SilExp.Const (SilConst.Cfun BuiltinDecl.__new)
+          else SilExp.Const (SilConst.Cfun BuiltinDecl.malloc)
+        in
+        Call ((ret, class_type), builtin_name, args, loc, CallFlags.default)
+    | Let {id= Some id; exp= Call {proc; args= [exp]}; loc} when ProcDecl.is_free_builtin proc ->
+        let ret = IdentBridge.to_sil id in
+        let e = ExpBridge.to_sil lang decls_env procname exp in
+        let loc = LocationBridge.to_sil sourcefile loc in
+        let builtin_free = SilExp.Const (SilConst.Cfun BuiltinDecl.free) in
+        Call
+          ( (ret, SilTyp.mk SilTyp.Tvoid)
+          , builtin_free
+          , [(e, SilTyp.mk SilTyp.Tvoid)]
+          , loc
+          , CallFlags.default )
     | Let {id= Some id; exp= Call {proc; args= target :: Typ typ :: rest}; loc}
       when ProcDecl.is_instanceof_builtin proc ->
         let typ = TypBridge.to_sil lang typ in
@@ -1281,10 +1333,10 @@ let module_to_sil lang module_ decls_env =
 let pp_copyright fmt =
   F.fprintf fmt "// \n" ;
   F.fprintf fmt "// Copyright (c) Facebook, Inc. and its affiliates.\n" ;
-  F.fprintf fmt "// \n" ;
+  F.fprintf fmt "//\n" ;
   F.fprintf fmt "// This source code is licensed under the MIT license found in the\n" ;
   F.fprintf fmt "// LICENSE file in the root directory of this source tree.\n" ;
-  F.fprintf fmt "//\n\n"
+  F.fprintf fmt "\n"
 
 
 let from_java ~filename tenv cfg =

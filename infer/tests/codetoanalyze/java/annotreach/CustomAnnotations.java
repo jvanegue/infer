@@ -283,4 +283,77 @@ class CustomAnnotations {
   public void callsDeprecatedMethodBad() {
     deprecatedMethod();
   }
+
+  // Testing bridge methods: there will be a synthetic version of source, that will
+  // call the original source and we want to report the issue on the original one
+  abstract class GenericBase<T> {
+    @UserDefinedSource1
+    public abstract void source(T t);
+  }
+
+  class Dummy {}
+
+  class GenericDerived extends GenericBase<Dummy> {
+    @Override
+    public void source(Dummy d) {
+      sink();
+    }
+
+    @UserDefinedSink1
+    public void sink() {}
+  }
+
+  // Testing implicit constructors
+  class BaseConstructorCallsSink {
+    public BaseConstructorCallsSink() {
+      sink();
+    }
+
+    @UserDefinedSink1
+    public void sink() {}
+  }
+
+  @UserDefinedSource1
+  class DerivedWithSourceConstructor extends BaseConstructorCallsSink {}
+}
+
+// Testing that Infer can break a cycle
+class Recursion {
+  // Breaks it in the "wrong" way, misses trace
+  @UserDefinedSource1
+  void sourceBad_FN() {
+    g();
+  }
+
+  void g() {
+    f();
+  }
+
+  void f() {
+    g();
+    sink();
+  }
+
+  @UserDefinedSink1
+  void sink() {}
+}
+
+// Same example as above, just "f" and "g" swapped, Infer finds the trace
+class RecursionSlightlyRenamed {
+  @UserDefinedSource1
+  void sourceBad() {
+    f();
+  }
+
+  void f() {
+    g();
+  }
+
+  void g() {
+    f();
+    sink();
+  }
+
+  @UserDefinedSink1
+  void sink() {}
 }

@@ -300,7 +300,8 @@ end = struct
           | True ->
               Sat in_constr
           | False ->
-              Unsat
+              let reason () = "false TOPL predicate" in
+              Unsat {reason; source= __POS__}
         in
         SatUnsat.list_fold constr ~f ~init:C.empty
       in
@@ -336,7 +337,9 @@ end = struct
           let is_trivial_valid () =
             match op with Eq | Ge | Le -> Formula.equal_operand l r | _ -> false
           in
-          if is_trivial_unsat () then Unsat
+          if is_trivial_unsat () then
+            let reason () = "TOPL detected trivial unsat" in
+            Unsat {reason; source= __POS__}
           else if is_trivial_valid () || is_implied_by_heap () || is_implied_by_pathcondition ()
           then (* drop (op.l.r) *) Sat (path_condition, heap, out_constr)
           else
@@ -365,7 +368,12 @@ end = struct
                 | Equal (v1, v2) ->
                     Memory.subst_var ~for_summary:true (v1, v2) heap
                 | EqZero v ->
-                    if Memory.is_allocated heap v then Unsat else Sat heap
+                    if Memory.is_allocated heap v then
+                      let reason () =
+                        F.asprintf "value %a is both zero and allocated" AbstractValue.pp v
+                      in
+                      Unsat {reason; source= __POS__}
+                    else Sat heap
               in
               SatUnsat.list_fold (RevList.to_list new_eqs) ~init:heap ~f:incorporate_eq
             in
@@ -438,7 +446,9 @@ end = struct
         in
         if List.for_all in_constr.C.notleadsto_constr ~f:ok then
           Sat C.{out_constr with notleadsto_constr= in_constr.C.notleadsto_constr}
-        else Unsat
+        else
+          let reason () = F.asprintf "a NotLeadsTo constraint is violated" in
+          Unsat {reason; source= __POS__}
       in
       Sat out_constr
     in
@@ -447,7 +457,8 @@ end = struct
         List.map out_constr.path_constr ~f:(function op, l, r -> Binary (Builtin op, l, r))
         @ List.map out_constr.leadsto_constr ~f:(function l, r -> Binary (LeadsTo, l, r))
         @ List.map out_constr.notleadsto_constr ~f:(function l, r -> Binary (NotLeadsTo, l, r))
-    | Unsat ->
+    | Unsat unsat_info ->
+        SatUnsat.log_unsat unsat_info ;
         [False]
 
 
@@ -652,7 +663,8 @@ let static_match_array_write arr index label : tcontext option =
 let typ_void = Typ.{desc= Tvoid; quals= mk_type_quals ()}
 
 let static_match_call tenv return arguments procname label : tcontext option =
-  let is_match re text = Option.for_all re ~f:(fun re -> Str.string_match re.ToplAst.re text 0) in
+  let cnot a b = (* "controlled not", aka xor *) if a then not b else b in
+  let is_match {ToplAst.re; re_negated} text = cnot re_negated (Str.string_match re text 0) in
   let is_match_type_base re typ = is_match re (Fmt.to_to_string pp_type typ) in
   let is_match_type_name mk_typ re name _struct = is_match_type_base re (mk_typ name) in
   (* NOTE: If B has supertype A, and we get type B**, then regex is matched against A** and B**.
@@ -669,10 +681,22 @@ let static_match_call tenv return arguments procname label : tcontext option =
     | _ ->
         is_match_type_base re (map typ)
   in
+  let is_match_type map re typ =
+    match re with
+    | None ->
+        true
+    | Some re ->
+        (* When a negated regex like !"foo" is given, we want it to match [typ] when "foo" does not
+           match [typ]. And "foo" matches [typ] when [typ] has some super-type (possibly itself) that
+           matches (in the regexp sense) the regex "foo". *)
+        if Config.trace_topl then
+          L.d_printfln "is_match_type %a %s" ToplAst.pp_regex re (Fmt.to_to_string pp_type typ) ;
+        cnot re.ToplAst.re_negated (is_match_type map {re with ToplAst.re_negated= false} typ)
+  in
   let match_name () : bool =
     match label.ToplAst.pattern with
     | CallPattern {procedure_name_regex; type_regexes} -> (
-        is_match (Some procedure_name_regex) (Fmt.to_to_string pp_procname procname)
+        is_match procedure_name_regex (Fmt.to_to_string pp_procname procname)
         &&
         match type_regexes with
         | None ->
@@ -716,34 +740,35 @@ let static_match_call tenv return arguments procname label : tcontext option =
 
 
 module Debug = struct
-  let dropped_disjuncts_count = DLS.new_key (fun () -> 0)
+  let dropped_disjuncts_count = AnalysisGlobalState.make_dls ~init:(fun () -> 0)
 
-  let rec matched_transitions =
+  let matched_transitions =
     lazy
-      ( Epilogues.register ~f:log_unseen
-          ~description:"log which transitions never match because of their static pattern" ;
-        let automaton = Topl.automaton () in
-        let tcount = ToplAutomaton.tcount automaton in
-        Array.create ~len:tcount false )
+      (let matched_transitions =
+         let automaton = Topl.automaton () in
+         let tcount = ToplAutomaton.tcount automaton in
+         Array.create ~len:tcount false
+       in
+       let get_unseen () =
+         let f index seen = if seen then None else Some index in
+         Array.filter_mapi ~f matched_transitions
+       in
+       (* The transitions reported here *probably* have patterns that were miswrote by the user. *)
+       let log_unseen () =
+         let unseen = Array.to_list (get_unseen ()) in
+         let pp f i = ToplAutomaton.pp_tindex (Topl.automaton ()) f i in
+         if Config.trace_topl && not (List.is_empty unseen) then
+           L.user_warning "@[<v>@[<v2>The following Topl transitions never match:@;%a@]@;@]"
+             (F.pp_print_list pp) unseen
+       in
+       let () =
+         Epilogues.register ~f:log_unseen
+           ~description:"log which transitions never match because of their static pattern"
+       in
+       matched_transitions )
 
 
-  and set_seen tindex = (Lazy.force matched_transitions).(tindex) <- true
-
-  and get_unseen () =
-    let f index seen = if seen then None else Some index in
-    Array.filter_mapi ~f (Lazy.force matched_transitions)
-
-
-  (** The transitions reported here *probably* have patterns that were miswrote by the user. *)
-  and log_unseen () =
-    let unseen = Array.to_list (get_unseen ()) in
-    let pp f i = ToplAutomaton.pp_tindex (Topl.automaton ()) f i in
-    if Config.trace_topl && not (List.is_empty unseen) then
-      L.user_warning "@[<v>@[<v2>The following Topl transitions never match:@;%a@]@;@]"
-        (F.pp_print_list pp) unseen
-
-
-  let () = AnalysisGlobalState.register_dls dropped_disjuncts_count ~init:(fun () -> 0)
+  let set_seen tindex = (Lazy.force matched_transitions).(tindex) <- true
 
   let get_dropped_disjuncts_count () = DLS.get dropped_disjuncts_count
 
@@ -1063,8 +1088,8 @@ let report_errors proc_desc err_log ~pulse_is_manifest state =
     match q.last_step with
     | Some {step_data= LargeStep {post; pulse_is_manifest; topl_is_manifest}} ->
         is_issue post
-        && Bool.(equal caller_pulse_is_manifest pulse_is_manifest)
-        && Bool.(equal caller_topl_is_manifest topl_is_manifest)
+        && Bool.(caller_pulse_is_manifest <= pulse_is_manifest)
+        && Bool.(caller_topl_is_manifest <= topl_is_manifest)
     | _ ->
         false
   in

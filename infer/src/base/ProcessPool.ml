@@ -10,58 +10,6 @@ module F = Format
 module CLOpt = CommandLineOption
 module L = Logging
 
-module TaskGenerator = struct
-  type for_child_info = {child_slot: int; child_pid: Pid.t; is_first_update: bool}
-
-  type ('a, 'b) t =
-    { remaining_tasks: unit -> int
-    ; is_empty: unit -> bool
-    ; finished: result:'b option -> 'a -> unit
-    ; next: for_child_info -> ('a * (unit -> unit)) option }
-
-  let chain (gen1 : ('a, 'b) t) (gen2 : ('a, 'b) t) : ('a, 'b) t =
-    let remaining_tasks () = gen1.remaining_tasks () + gen2.remaining_tasks () in
-    let gen1_returned_empty = ref false in
-    let gen1_is_empty () =
-      gen1_returned_empty := !gen1_returned_empty || gen1.is_empty () ;
-      !gen1_returned_empty
-    in
-    let is_empty () = gen1_is_empty () && gen2.is_empty () in
-    let finished ~result work_item =
-      if gen1_is_empty () then gen2.finished ~result work_item else gen1.finished ~result work_item
-    in
-    let next for_child_info =
-      if gen1_is_empty () then gen2.next for_child_info else gen1.next for_child_info
-    in
-    {remaining_tasks; is_empty; finished; next}
-
-
-  let of_list ~finish (lst : 'a list) : ('a, _) t =
-    let content = ref lst in
-    let length = ref (List.length lst) in
-    let remaining_tasks () = !length in
-    let is_empty () = List.is_empty !content in
-    let finished ~result work_item =
-      match finish result work_item with
-      | None ->
-          decr length
-      | Some task ->
-          content := task :: !content
-    in
-    let next _for_child_info =
-      match !content with
-      | [] ->
-          None
-      | x :: xs ->
-          content := xs ;
-          Some (x, Fn.id)
-    in
-    {remaining_tasks; is_empty; finished; next}
-
-
-  let finish_always_none result _ = match result with Some _ -> assert false | None -> None
-end
-
 let log_or_die fmt = if Config.keep_going then L.internal_error fmt else L.die InternalError fmt
 
 type child_info = {pid: Pid.t; down_pipe: Out_channel.t}
@@ -74,7 +22,7 @@ type child_info = {pid: Pid.t; down_pipe: Out_channel.t}
       work item.
     - [Processing (x, finalizer)] means the worker is currently processing [x] and we should run
       [finalizer] when the worker has finished. *)
-type 'a child_state = Initializing | Idle | Processing of 'a * (unit -> unit)
+type 'a child_state = Initializing | Idle | Processing of 'a
 
 (** the state of the pool *)
 type ('work, 'final, 'result) t =
@@ -87,7 +35,8 @@ type ('work, 'final, 'result) t =
   ; children_updates: Unix.File_descr.t list
         (** each child has it's own pipe to send updates to the pool *)
   ; task_bar: TaskBar.t
-  ; tasks: ('work, 'result) TaskGenerator.t  (** generator for work remaining to be done *) }
+  ; tasks: ('work, 'result, WorkerPoolState.worker_id) TaskGenerator.t
+        (** generator for work remaining to be done *) }
 
 (** {2 Constants} *)
 
@@ -195,6 +144,8 @@ let wait_for_updates pool buffer =
   update
 
 
+let has_running_children = ref false
+
 let killall slots =
   Array.iter slots ~f:(fun {pid} ->
       match Signal_unix.send Signal.term (`Pid pid) with `Ok | `No_such_process -> () ) ;
@@ -202,7 +153,7 @@ let killall slots =
       try Unix.wait (`Pid pid) |> ignore
       with Unix.Unix_error (ECHILD, _, _) ->
         (* some children may have died already, it's fine *) () ) ;
-  ProcessPoolState.has_running_children := false
+  has_running_children := false
 
 
 let one_child_died pool ~slot status =
@@ -256,15 +207,15 @@ let send_work_to_idle_children pool =
   let exception NoMoreWork in
   let is_first_update_ref = ref true in
   let send_work_to_child pool slot =
-    let child_pid = pool.slots.(slot).pid in
+    let child_id = WorkerPoolState.Pid pool.slots.(slot).pid in
     let is_first_update = !is_first_update_ref in
     is_first_update_ref := false ;
-    match pool.tasks.next {child_slot= slot; child_pid; is_first_update} with
+    match pool.tasks.next {child_slot= slot; child_id; is_first_update} with
     | None ->
         raise_notrace NoMoreWork
-    | Some (x, finish) ->
+    | Some x ->
         let {down_pipe} = pool.slots.(slot) in
-        pool.children_states.(slot) <- Processing (x, finish) ;
+        pool.children_states.(slot) <- Processing x ;
         marshal_to_pipe down_pipe (Do x)
   in
   let throttled = Option.exists Config.oom_threshold ~f:should_throttle in
@@ -295,8 +246,7 @@ let process_update pool = function
       ( match pool.children_states.(slot) with
       | Initializing ->
           ()
-      | Processing (work, finish) ->
-          finish () ;
+      | Processing work ->
           pool.tasks.finished ~result work
       | Idle ->
           L.die InternalError "Received a Ready message from an idle worker@." ) ;
@@ -357,7 +307,7 @@ let wait_all pool =
             (* Collect all children errors and die only at the end to avoid creating zombies. *)
             (slot, status) :: errors )
   in
-  ProcessPoolState.has_running_children := false ;
+  has_running_children := false ;
   ( if not (List.is_empty errors) then
       let pp_error f (slot, status) =
         F.fprintf f "Error in infer subprocess %d: %s@." slot
@@ -365,6 +315,23 @@ let wait_all pool =
       in
       log_or_die "@[<v>%a@]%!" (Pp.seq ~print_env:Pp.text_break ~sep:"" pp_error) errors ) ;
   results
+
+
+(** do a compaction if heap size over this value *)
+let compaction_if_heap_greater_equal_to_words =
+  (* we don't try hard to avoid overflow, apart from assuming that word size
+     divides 1024 perfectly, thus multiplying with a smaller factor *)
+  Config.compaction_if_heap_greater_equal_to_GB * 1024 * 1024 * (1024 / Sys.word_size_in_bits)
+
+
+let do_compaction_if_needed () =
+  let stat = Stdlib.Gc.quick_stat () in
+  let heap_words = stat.Stdlib.Gc.heap_words in
+  if heap_words >= compaction_if_heap_greater_equal_to_words then (
+    L.log_task "Triggering compaction, heap size= %d GB@\n"
+      (heap_words * Sys.word_size_in_bits / 1024 / 1024 / 1024) ;
+    Gc.compact () )
+  else ()
 
 
 (** worker loop: wait for tasks and run [f] on them until we are told to go home *)
@@ -394,7 +361,10 @@ let rec child_loop ~slot send_to_parent send_final receive_from_parent ~f ~epilo
               true ) ) )
   | Do stuff ->
       let result =
-        try f stuff
+        try
+          let result = f stuff in
+          do_compaction_if_needed () ;
+          result
         with e ->
           IExn.reraise_if e ~f:(fun () ->
               if Config.keep_going then (
@@ -420,8 +390,8 @@ let rec child_loop ~slot send_to_parent send_final receive_from_parent ~f ~epilo
 
     Children never return. Instead they exit when done. *)
 let child slot ~f ~child_prologue ~epilogue ~updates_oc ~orders_ic =
-  ProcessPoolState.in_child := Some slot ;
-  ProcessPoolState.reset_pid () ;
+  WorkerPoolState.set_in_child (Some slot) ;
+  WorkerPoolState.reset_pid () ;
   child_prologue () ;
   let send_to_parent (message : 'b worker_message) = marshal_to_pipe updates_oc message in
   let send_final (final_message : 'a final_worker_message) =
@@ -443,7 +413,7 @@ let child slot ~f ~child_prologue ~epilogue ~updates_oc ~orders_ic =
         in
         send_to_parent (UpdateStatus (slot, t, status))
   in
-  ProcessPoolState.update_status := update_status ;
+  WorkerPoolState.update_status := update_status ;
   let update_heap_words () =
     match Config.progress_bar with
     | `MultiLine ->
@@ -452,7 +422,7 @@ let child slot ~f ~child_prologue ~epilogue ~updates_oc ~orders_ic =
     | `Quiet | `Plain ->
         ()
   in
-  ProcessPoolState.update_heap_words := update_heap_words ;
+  WorkerPoolState.update_heap_words := update_heap_words ;
   let receive_from_parent () =
     PerfEvent.log (fun logger ->
         PerfEvent.log_begin_event logger ~categories:["sys"] ~name:"receive from pipe" () ) ;
@@ -547,7 +517,7 @@ let create :
     -> child_prologue:(Worker.id -> unit)
     -> f:('work -> 'result option)
     -> child_epilogue:(Worker.id -> 'final)
-    -> tasks:(unit -> ('work, 'result) TaskGenerator.t)
+    -> tasks:(unit -> ('work, 'result, WorkerPoolState.worker_id) TaskGenerator.t)
     -> ('work, 'final, 'result) t =
  fun ~jobs ~child_prologue ~f ~child_epilogue ~tasks ->
   let task_bar = TaskBar.create ~jobs in
@@ -563,13 +533,35 @@ let create :
           ~slot child_pipe ~f
           ~epilogue:(fun () -> child_epilogue (slot :> Worker.id)) )
   in
-  ProcessPoolState.has_running_children := true ;
+  has_running_children := true ;
   Epilogues.register ~description:"Wait children processes exit" ~f:(fun () ->
-      if !ProcessPoolState.has_running_children then killall slots ) ;
+      if !has_running_children then killall slots ) ;
   (* we have forked the child processes and are now in the parent *)
   let children_updates = List.map children_pipes ~f:(fun (pipe_child_r, _) -> pipe_child_r) in
   let children_states = Array.create ~len:jobs Initializing in
   {slots; children_updates; jobs; task_bar; tasks= tasks (); children_states}
+
+
+let with_primary_db_connection ~f () =
+  Database.new_database_connections Primary ;
+  f ()
+
+
+let create ?(with_primary_db = true) ~jobs ~child_prologue ~f ~child_epilogue ~tasks () =
+  PerfEvent.(log (fun logger -> log_begin_event logger ~categories:["sys"] ~name:"fork prepare" ())) ;
+  (* Close database connections before forking *)
+  Database.db_close () ;
+  let tasks = if with_primary_db then with_primary_db_connection ~f:tasks else tasks in
+  let pool =
+    create ~jobs ~f ~child_epilogue ~tasks
+      ~child_prologue:
+        ((* hack: we'll continue executing after the function passed to [protect], despite what he name might suggest *)
+         ForkUtils.protect ~f:child_prologue )
+  in
+  PerfEvent.(log (fun logger -> log_end_event logger ())) ;
+  (* Re-open database connections after forking *)
+  Database.new_database_connections Primary ;
+  pool
 
 
 let run pool =
@@ -593,3 +585,38 @@ let run pool =
   let results = run pool in
   PerfEvent.(log (fun logger -> log_instant_event logger ~name:"end process pool" Global)) ;
   results
+
+
+let run runner =
+  (* Flush here all buffers to avoid passing unflushed data to forked processes, leading to duplication *)
+  Stdlib.flush_all () ;
+  (* Compact heap before forking *)
+  Gc.compact () ;
+  run runner
+
+
+type ('a, 'b) doer = 'a -> 'b option
+
+let run_sequentially ~finish ~(f : ('a, 'b) doer) (tasks : 'a list) : unit =
+  let task_generator = TaskGenerator.of_list ~finish tasks in
+  let task_bar = TaskBar.create ~jobs:1 in
+  (WorkerPoolState.update_status :=
+     fun t status ->
+       TaskBar.update_status task_bar ~slot:0 t status ;
+       TaskBar.refresh task_bar ) ;
+  TaskBar.set_tasks_total task_bar (task_generator.remaining_tasks ()) ;
+  TaskBar.tasks_done_reset task_bar ;
+  let for_child_info =
+    {TaskGenerator.child_slot= -1; child_id= Unix.getpid (); is_first_update= true}
+  in
+  let rec run_tasks () =
+    if not (task_generator.is_empty ()) then (
+      Option.iter (task_generator.next for_child_info) ~f:(fun t ->
+          let result = f t in
+          task_generator.finished ~result t ) ;
+      TaskBar.set_remaining_tasks task_bar (task_generator.remaining_tasks ()) ;
+      TaskBar.refresh task_bar ;
+      run_tasks () )
+  in
+  run_tasks () ;
+  TaskBar.finish task_bar

@@ -275,6 +275,11 @@ OPTIONS
            --no-buck-merge-all-deps)
            See also infer-capture(1).
 
+       --buck-python
+           Activates: Buck integration for Python. (Conversely:
+           --no-buck-python)
+           See also infer-capture(1).
+
        --buck-targets-block-list +regex
            Skip capture of buck targets matched by the specified regular
            expression.
@@ -871,7 +876,7 @@ OPTIONS
            values: ant, buck1, buck, buck2, gradle, gradlew, java, javac,
            kotlinc, cc, clang, gcc, clang++, c++, g++, hackc, make,
            configure, cmake, waf, mvn, mvnw, ndk-build, python3, rebar3,
-           erlc, xcodebuild.
+           swiftc, erlc, xcodebuild.
            See also infer-capture(1) and infer-run(1).
 
        --no-fragment-retains-view
@@ -1519,6 +1524,11 @@ OPTIONS
 
        --pulse-model-cheap-copy-type-list +regex
            Regex of methods that should be cheap to copy in Pulse
+           See also infer-analyze(1).
+
+       --pulse-model-deep-release-pattern string
+           Regex of methods that should be modelled as deep release in Pulse
+           (i.e. await all unawaited values reachable from its arguments).
            See also infer-analyze(1).
 
        --pulse-model-free-pattern string
@@ -2298,7 +2308,8 @@ OPTIONS
 
        --timeout float
            Time after which any checker (except biabduction) should give up
-           analysing the current function or method, in seconds
+           analysing the current function or method, in seconds. Not
+           implemented for multicore mode
            See also infer-analyze(1) and infer-run(1).
 
        --top-longest-proc-duration-size int
@@ -2413,6 +2424,10 @@ INTERNAL OPTIONS
 
        --append-buck-flavors-reset
            Set --append-buck-flavors to the empty list.
+
+       --attributes-lru-max-size int
+           Specify size of procedure attribute LRU cache. Relevant only to
+           multicore mode. Defaults to 500
 
        --backtrack-level int
            Maximum level of backtracking to convert an absolute path to path
@@ -2649,6 +2664,10 @@ INTERNAL OPTIONS
        --compaction-if-heap-greater-equal-to-GB int
            An analysis worker will trigger compaction if its heap size is
            equal or great to this value in Gigabytes. Defaults to 8
+
+       --compaction-if-heap-greater-equal-to-GB-multicore int
+           Multicore analysis will trigger compaction if the total heap size
+           is equal or great to this value in Gigabytes. Defaults to 40
 
        --compilation-database-escaped-reset
            Set --compilation-database-escaped to the empty list.
@@ -2906,6 +2925,10 @@ INTERNAL OPTIONS
            Deactivates: Computes the inclusive cost (Conversely:
            --inclusive-cost)
 
+       --inferbo-lru-max-size int
+           Specify size of inferbo LRU cache. Relevant only to multicore
+           mode. Defaults to 500
+
        --inferconfig-path path
            Path to the .inferconfig file, overriding the effects of the
            INFERCONFIG environment variable as well as the filesystem search
@@ -3005,6 +3028,9 @@ INTERNAL OPTIONS
 
        --merge-summaries-reset
            Set --merge-summaries to the empty list.
+
+       --minor-heap-size-mb int
+           Set minor heap size (in Mb) for each process/domain. Defaults to 8
 
        --noescaping-function-list-reset
            Set --noescaping-function-list to the empty list.
@@ -3113,6 +3139,9 @@ INTERNAL OPTIONS
 
        --pulse-model-cheap-copy-type-reset
            Cancel the effect of --pulse-model-cheap-copy-type.
+
+       --pulse-model-deep-release-pattern-reset
+           Cancel the effect of --pulse-model-deep-release-pattern.
 
        --pulse-model-free-pattern-reset
            Cancel the effect of --pulse-model-free-pattern.
@@ -3265,6 +3294,11 @@ INTERNAL OPTIONS
            Activates: Skip the DB writing during Python capture (Conversely:
            --no-python-skip-db)
 
+       --python-trim-source-paths
+           Activates: Remove any prefix calculated from the relative
+           difference between --buck2-root and --project-root from captured
+           source paths. (Conversely: --no-python-trim-source-paths)
+
        --qualified-cpp-name-block-list-reset
            Set --qualified-cpp-name-block-list to the empty list.
 
@@ -3348,26 +3382,6 @@ INTERNAL OPTIONS
            }
                
 
-       --scuba-execution-id int64
-           [DOES NOTHING] Execution ID attached to all samples logged to
-           scuba
-
-       --scuba-execution-id-reset
-           Cancel the effect of --scuba-execution-id.
-
-       --scuba-logging
-           Activates: [DOES NOTHING] (direct) logging to scuba (Conversely:
-           --no-scuba-logging)
-
-       --scuba-normal +key=value
-           [DOES NOTHING] add an extra string (normal) field to be set for
-           each sample of scuba, format <name>=<value>
-
-       --scuba-tags +key=value
-           [DOES NOTHING] add an extra set of strings (tagset) field to be
-           set for each sample of scuba, format
-           <name>=(<value>,<value>,<value>|NONE)
-
        --select-reset
            Cancel the effect of --select.
 
@@ -3448,8 +3462,9 @@ INTERNAL OPTIONS
            changed files index is a suffix of its name. (Conversely:
            --no-suffix-match-changed-files)
 
-       --summaries-caches-max-size int
-           The maximum amount of elements the summaries LRU caches can hold
+       --summaries-lru-max-size int
+           Specify size of summary LRU cache. Relevant only to multicore
+           mode. Defaults to 2000
 
        --suppress-lint-ignore-types
            Activates: [DEPRECATED] Check only the presence of @SuppressLint
@@ -3459,6 +3474,10 @@ INTERNAL OPTIONS
 
        --tenv-json-reset
            Cancel the effect of --tenv-json.
+
+       --tenvs-lru-max-size int
+           Specify size of type environment LRU cache. Relevant only to
+           multicore mode. Defaults to 500
 
        --testing-mode
            Activates: Mode for testing, where no headers are translated, and

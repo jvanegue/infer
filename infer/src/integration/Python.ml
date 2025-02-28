@@ -16,16 +16,18 @@ module Error = struct
     | TextualVerification of (Textual.SourceFile.t * TextualVerification.error list)
     | TextualTransformation of (Textual.SourceFile.t * Textual.transform_error list)
 
+  let log level =
+    let level = if Config.keep_going then L.InternalError else level in
+    match (level : L.error) with
+    | InternalError ->
+        L.internal_error
+    | ExternalError ->
+        L.external_error
+    | UserError ->
+        L.user_error
+
+
   let format_error file error =
-    let log level =
-      match (level : L.error) with
-      | InternalError ->
-          L.internal_error
-      | ExternalError ->
-          L.external_error
-      | UserError ->
-          L.user_error
-    in
     match error with
     | FFI (level, err) ->
         log level "[python:%s][-1] %a@\n" file FFI.Error.pp_kind err
@@ -33,9 +35,9 @@ module Error = struct
         log level "[python:%s][%a] %a@\n" file PyIR.Location.pp loc PyIR.Error.pp_kind err
     | TextualVerification (sourcefile, errs) ->
         List.iter errs
-          ~f:(L.internal_error "%a@\n" (TextualVerification.pp_error_with_sourcefile sourcefile))
+          ~f:(log L.InternalError "%a@\n" (TextualVerification.pp_error_with_sourcefile sourcefile))
     | TextualTransformation (sourcefile, errs) ->
-        List.iter errs ~f:(L.internal_error "%a@\n" (Textual.pp_transform_error sourcefile))
+        List.iter errs ~f:(log L.InternalError "%a@\n" (Textual.pp_transform_error sourcefile))
 
 
   let ffi x = FFI x
@@ -51,7 +53,7 @@ module Interpreter = struct
   let process_file file =
     let open IResult.Let_syntax in
     let* code = Result.map_error ~f:Error.ffi @@ FFI.from_file ~is_binary:false file in
-    Result.map_error ~f:Error.ir @@ PyIR.mk ~debug:false code
+    Result.map_error ~f:Error.ir @@ PyIR.mk ~debug:false ~path_prefix:None code
 
 
   let process_files files =
@@ -86,9 +88,25 @@ let dump_textual_file ~version pyc module_ =
 
 let process_file ~is_binary file =
   let open IResult.Let_syntax in
-  let sourcefile = Textual.SourceFile.create file in
+  let project_root_prefix =
+    if Config.python_trim_source_paths then
+      Utils.filename_to_relative ~root:Config.buck2_root Config.project_root
+    else None
+  in
+  let sourcefile =
+    let file' =
+      (* if buck2_root and project_root are different, we need to use absolute paths in
+         order for Config.project_root to be properly applied in SourceFile.create *)
+      if Option.is_some project_root_prefix then
+        Utils.filename_to_absolute ~root:Config.buck2_root file
+      else file
+    in
+    Textual.SourceFile.create file'
+  in
   let* code = FFI.from_file ~is_binary file |> Result.map_error ~f:Error.ffi in
-  let* pyir = PyIR.mk ~debug:false code |> Result.map_error ~f:Error.ir in
+  let* pyir =
+    PyIR.mk ~debug:false ~path_prefix:project_root_prefix code |> Result.map_error ~f:Error.ir
+  in
   let textual = PyIR2Textual.mk_module pyir in
   if Config.debug_mode then dump_textual_file ~version:0 file textual ;
   let* verified_textual =
@@ -118,7 +136,7 @@ let capture_files ~is_binary files =
     let child_tenv = Tenv.create () in
     let child_action file =
       let t0 = Mtime_clock.now () in
-      !ProcessPoolState.update_status (Some t0) file ;
+      !WorkerPoolState.update_status (Some t0) file ;
       match capture_file ~is_binary file with
       | Ok file_tenv ->
           Option.iter file_tenv ~f:(fun file_tenv -> Tenv.merge ~src:file_tenv ~dst:child_tenv) ;
@@ -143,7 +161,7 @@ let capture_files ~is_binary files =
   (* TODO(vsiles) keep track of the number of success / failures like Hack *)
   let n_captured, n_error = (ref 0, ref 0) in
   let tasks () =
-    ProcessPool.TaskGenerator.of_list files ~finish:(fun result _ ->
+    TaskGenerator.of_list files ~finish:(fun result _ ->
         match result with
         | Some () ->
             incr n_error ;
@@ -157,23 +175,23 @@ let capture_files ~is_binary files =
     min ((per_worker + n_files) / per_worker) Config.jobs
   in
   L.debug Capture Quiet "Preparing to capture with %d workers@\n" jobs ;
-  let runner = Tasks.Runner.create ~jobs ~child_prologue ~f:child_action ~child_epilogue tasks in
-  let child_tenv_paths = Tasks.Runner.run runner in
-  (* Merge worker tenvs into a global tenv *)
-  let child_tenv_paths =
-    Array.mapi child_tenv_paths ~f:(fun child_num tenv_path ->
-        match tenv_path with
-        | Some tenv_path ->
-            tenv_path
-        | None ->
-            L.die ExternalError "Child %d did't return a path to its tenv" child_num )
-  in
+  let runner = ProcessPool.create ~jobs ~child_prologue ~f:child_action ~child_epilogue ~tasks () in
+  let child_tenv_paths = ProcessPool.run runner in
   L.progress "Success: %d files@\n" !n_captured ;
   L.progress "Failure: %d files@\n" !n_error ;
   L.progress "Merging type environments...@\n%!" ;
-  if not Config.python_skip_db then
-    MergeCapture.merge_global_tenv ~normalize:true (Array.to_list child_tenv_paths) ;
-  Array.iter child_tenv_paths ~f:(fun filename -> DB.filename_to_string filename |> Unix.unlink)
+  (* Merge worker tenvs into a global tenv *)
+  let child_tenv_paths =
+    Array.foldi child_tenv_paths ~init:[] ~f:(fun child_num acc tenv_path ->
+        match tenv_path with
+        | Some tenv_path ->
+            tenv_path :: acc
+        | None ->
+            Error.log L.ExternalError "Child %d did't return a path to its tenv" child_num ;
+            acc )
+  in
+  if not Config.python_skip_db then MergeCapture.merge_global_tenv ~normalize:true child_tenv_paths ;
+  List.iter child_tenv_paths ~f:(fun filename -> DB.filename_to_string filename |> Unix.unlink)
 
 
 let capture input =
