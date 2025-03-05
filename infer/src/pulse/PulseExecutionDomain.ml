@@ -110,9 +110,18 @@ let pp fmt (exec_state: 'abductive_domain_t base_t) =
 (* We record the global widening state *)
 (* Note: this will record the widen state once per analyzed object, which may not be enough *)
 (* TODO: Find out how to have one widen state key per loop *)                      
-let widenstate = ref None;; 
-let () = AnalysisGlobalState.register_ref ~init:(fun () -> Some (Stdlib.Hashtbl.create 16)) widenstate;;
+(* let widenstate = ref None;; 
+let () = AnalysisGlobalState.register_ref ~init:(fun () -> Some (Stdlib.Hashtbl.create 16)) widenstate;; *)
 
+let widenstate = AnalysisGlobalState.make_dls ~init:(fun () -> (Some (Stdlib.Hashtbl.create 16)))
+
+let get_widenstate () = DLS.get widenstate
+
+let add_widenstate key = Utils.with_dls widenstate ~f:(fun widenstate ->
+                             match widenstate with
+                             | None -> widenstate
+                             | Some state -> Stdlib.Hashtbl.add state key (); widenstate)
+                      
 let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
 
   (* L.debug Analysis Quiet "PULSEINF: Entered BACK-EDGE! \n"; *)
@@ -231,28 +240,36 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
     match ws with
     | [] -> (-1)
     | (hd,idx)::tl ->
-       match !widenstate with
-       | None -> L.debug Analysis Quiet "PULSEINF: widenstate htable NONE - should never happen! num_iter %u \n" num_iters; -1
-       | Some wstate ->
+       (* let wstate = get_widenstate in *)
+       (* | None -> L.debug Analysis Quiet "PULSEINF: widenstate htable NONE - should never happen! num_iter %u \n" num_iters; -1 *)
+       (*| Some wstate -> *)
           let cond = extract_pathcond hd in
           let pathcond = Formula.extract_path_cond cond in
           let termcond = Formula.extract_term_cond cond in
           let termcond2 = Formula.extract_term_cond2 cond in
-          let prevstate = (if true then
-                             (Stdlib.Hashtbl.find_opt wstate (cfgnode,termcond,pathcond,termcond2))
+          let dl_ws = get_widenstate () in
+
+          match dl_ws with
+
+          | None -> L.debug Analysis Quiet "PULSEINF: widenstate htable NONE - should never happen! num_iter %u \n" num_iters; -1 
+          | Some ws ->
+          
+          let prevstate = (* (if true then *)
+                             (Stdlib.Hashtbl.find_opt ws (cfgnode,termcond,pathcond,termcond2))
                                (* Old mode - more FP *)
-                           else
-                             (Stdlib.Hashtbl.find_opt wstate (cfgnode,Formula.Atom.Set.empty,pathcond,Formula.Term.Set.empty)))
+                           (* else
+                             (Stdlib.Hashtbl.find_opt get_wstate (cfgnode,Formula.Atom.Set.empty,pathcond,Formula.Term.Set.empty))) *)
                         
           in
           match prevstate with
           | None ->
-             let key = (if true then (cfgnode,termcond,pathcond,termcond2)
+             let key = (* (if true then *)
+                          (cfgnode,termcond,pathcond,termcond2)
                                        (* Old mode - more FP *)
-                        else (cfgnode,Formula.Atom.Set.empty,pathcond,Formula.Term.Set.empty))
+                            (* else (cfgnode,Formula.Atom.Set.empty,pathcond,Formula.Term.Set.empty)) *)
              in
              (* L.debug Analysis Quiet "PULSEINF: Recorded pathcond NOT in htable (ADDING) idx %d numiter %u \n" idx num_iters; *)
-             Stdlib.Hashtbl.add wstate key ();
+             let _ = add_widenstate key in
              record_pathcond tl
           | Some _ ->
              match (Formula.set_is_empty termcond),(Formula.map_is_empty pathcond),(Formula.termset_is_empty termcond2) with 

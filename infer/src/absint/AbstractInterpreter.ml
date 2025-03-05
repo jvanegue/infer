@@ -191,25 +191,21 @@ module DisjunctiveMetadata = struct
 
   (* This is used to remember the CFG node otherwise we would need to carry the node around in widen
      and join as well as other places that may need to access the current CFG node during analysis *)
-  let (cfg_node: Procdesc.Node.t ref) = ref (Procdesc.Node.dummy Procname.empty_block)
-                                         
-  let record_cfg_node (cfgnode: Procdesc.Node.t) : unit =
-    cfg_node := cfgnode; ()
 
-  let get_cfg_node () : Procdesc.Node.t = !cfg_node
+  let cfg_node = AnalysisGlobalState.make_dls ~init:(fun () -> (Procdesc.Node.dummy Procname.empty_block)) 
+                    
+  let record_cfg_node (cfgnode: Procdesc.Node.t) =
+    Utils.with_dls cfg_node ~f:(fun cfg_node -> let _ = cfg_node in cfgnode)
 
-  let () = AnalysisGlobalState.register_ref ~init:(fun () -> (Procdesc.Node.dummy Procname.empty_block)) cfg_node
+  let get_cfg_node () = DLS.get cfg_node
 
-  let (alert_node: Procdesc.Node.t ref) = ref (Procdesc.Node.dummy Procname.empty_block)
-                                         
-  let record_alert_node (alertnode: Procdesc.Node.t) : unit =
-    alert_node := alertnode; ()
-
-  let get_alert_node () : Procdesc.Node.t = !alert_node
-
-  let () = AnalysisGlobalState.register_ref ~init:(fun () -> (Procdesc.Node.dummy Procname.empty_block)) alert_node
+  let alert_node = AnalysisGlobalState.make_dls ~init:(fun () -> (Procdesc.Node.dummy Procname.empty_block))
   (* End CFG node tracking for alerts *)
-         
+                                        
+  let record_alert_node (alertnode: Procdesc.Node.t) =
+    Utils.with_dls alert_node ~f:(fun alert_node -> let _ = alert_node in alertnode)
+
+  let get_alert_node () = DLS.get alert_node
                    
   let add_dropped_disjuncts dropped_disjuncts =
     Utils.with_dls proc_metadata ~f:(fun proc_metadata ->
