@@ -13,9 +13,9 @@ module ServerSocket = struct
 
   let socket_path = Config.toplevel_results_dir ^/ socket_name
 
-  let socket_addr = Unix.ADDR_UNIX socket_name
+  let socket_addr = Caml_unix.ADDR_UNIX socket_name
 
-  let socket_domain = Unix.domain_of_sockaddr socket_addr
+  let socket_domain = Caml_unix.domain_of_sockaddr socket_addr
 
   (** Unix socket *paths* have a historical length limit of ~100 chars (!?*@&*$). However, this only
       applies to the argument passed in the system call to create the socket, not to the actual
@@ -29,19 +29,19 @@ module ServerSocket = struct
      not using DbWriter at all in case it fails. See {!can_use_socket} below. *)
   let setup_socket () =
     if socket_exists () then L.die InternalError "Sqlite write daemon: socket already exists@." ;
-    let socket = Unix.socket ~domain:socket_domain ~kind:SOCK_STREAM ~protocol:0 () in
-    in_results_dir ~f:(fun () -> Unix.bind socket ~addr:socket_addr) ;
+    let socket = IUnix.socket ~domain:socket_domain ~kind:SOCK_STREAM ~protocol:0 () in
+    in_results_dir ~f:(fun () -> IUnix.bind socket ~addr:socket_addr) ;
     (* [backlog] is (supposedly) the length of the queue for pending connections ;
        there are no rules about the implied behaviour though.  Here use optimistically
        the number of workers, though even that is a guess. *)
-    Unix.listen socket ~backlog:Config.jobs ;
+    IUnix.listen socket ~backlog:Config.jobs ;
     socket
 
 
-  let remove_socket_file () = if socket_exists () then Unix.unlink socket_path
+  let remove_socket_file () = if socket_exists () then Caml_unix.unlink socket_path
 
   let remove_socket socket =
-    Unix.close socket ;
+    Caml_unix.close socket ;
     remove_socket_file ()
 
 
@@ -104,9 +104,9 @@ module Server = struct
 
 
   let rec server_loop ?(useful_time = ExecutionDuration.zero) socket =
-    let client_sock, _client = Unix.accept socket in
-    let in_channel = Unix.in_channel_of_descr client_sock
-    and out_channel = Unix.out_channel_of_descr client_sock in
+    let client_sock, _client = Caml_unix.accept socket in
+    let in_channel = Caml_unix.in_channel_of_descr client_sock
+    and out_channel = Caml_unix.out_channel_of_descr client_sock in
     let now = ExecutionDuration.counter () in
     let command : DBWriterCommand.t = Marshal.from_channel in_channel in
     ( try
@@ -141,7 +141,7 @@ module Server = struct
 
   let send cmd =
     let in_channel, out_channel =
-      ServerSocket.in_results_dir ~f:(fun () -> Unix.open_connection ServerSocket.socket_addr)
+      ServerSocket.in_results_dir ~f:(fun () -> Caml_unix.open_connection ServerSocket.socket_addr)
     in
     Marshal.to_channel out_channel cmd [Closures] ;
     Out_channel.flush out_channel ;
@@ -158,7 +158,7 @@ module Server = struct
     L.debug Analysis Quiet "Sqlite write daemon: starting up@." ;
     let socket = ServerSocket.setup_socket () in
     L.debug Analysis Quiet "Sqlite write daemon: set up complete, waiting for connections@." ;
-    match Unix.fork () with
+    match IUnix.fork () with
     | `In_the_child ->
         ForkUtils.protect ~f:server socket ;
         L.exit 0
@@ -170,19 +170,19 @@ end
 let remove_socket_file () = ServerSocket.remove_socket_file ()
 
 let terminate () =
-  (try Server.send DBWriterCommand.Terminate with Unix.Unix_error _ -> ()) ;
+  (try Server.send DBWriterCommand.Terminate with Caml_unix.Unix_error _ -> ()) ;
   (* don't terminate the main infer process before the server has finished *)
   Option.iter !server_pid ~f:(fun server_pid ->
       L.debug Analysis Quiet "Sqlite write daemon: waiting for process %a to finish@." Pid.pp
         server_pid ;
       try
-        let pid, exit_or_signal = Unix.wait (`Pid server_pid) in
+        let exit_or_signal = IUnix.waitpid server_pid in
         Result.iter_error exit_or_signal ~f:(function error ->
             ( L.internal_error "ERROR: Sqlite write daemon terminated with an error: %s@\n"
-                (Core_unix.Exit_or_signal.to_string_hum (Error error)) ;
-              try ServerSocket.remove_socket_file () with Unix.Unix_error _ -> () ) ) ;
-        L.debug Analysis Quiet "Sqlite write daemon: process %a terminated@." Pid.pp pid
-      with Unix.Unix_error _ -> () )
+                (IUnix.Exit_or_signal.to_string_hum (Error error)) ;
+              try ServerSocket.remove_socket_file () with Caml_unix.Unix_error _ -> () ) ) ;
+        L.debug Analysis Quiet "Sqlite write daemon: process %a terminated@." Pid.pp server_pid
+      with Caml_unix.Unix_error _ -> () )
 
 
 let start =

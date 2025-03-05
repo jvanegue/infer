@@ -32,11 +32,11 @@ let invoke_cmd (source_file, (cmd : CompilationDatabase.compilation_data)) =
         !WorkerPoolState.update_status
           (Some (Mtime_clock.now ()))
           (SourceFile.to_string source_file) ;
-        Unix.waitpid (Pid.of_int pid)
+        IUnix.waitpid (Pid.of_int pid)
         |> Result.map_error ~f:(fun unix_error ->
-               Unix.Exit_or_signal.to_string_hum (Error unix_error) )
-    | exception Unix.Unix_error (err, f, arg) ->
-        Error (F.asprintf "%s(%s): %s@." f arg (Unix.Error.message err)) )
+               IUnix.Exit_or_signal.to_string_hum (Error unix_error) )
+    | exception Caml_unix.Unix_error (err, f, arg) ->
+        Error (F.asprintf "%s(%s): %s@." f arg (IUnix.Error.message err)) )
   |> function
   | Ok () ->
       ()

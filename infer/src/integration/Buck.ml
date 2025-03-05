@@ -103,13 +103,13 @@ let wrap_buck_call ?(extend_env = []) version ~label cmd =
   let IUnix.Process_info.{stdin; stdout; stderr; pid} =
     IUnix.create_process_env ~prog:"sh" ~args:["-c"; command] ~env
   in
-  let buck_stderr = Unix.in_channel_of_descr stderr in
+  let buck_stderr = Caml_unix.in_channel_of_descr stderr in
   let buck_logger = if is_buck2 then L.progress "BUCK2: %s@\n" else L.progress "BUCK: %s@\n" in
   Utils.with_channel_in buck_stderr ~f:buck_logger ;
-  Unix.close stdin ;
-  Unix.close stdout ;
+  Caml_unix.close stdin ;
+  Caml_unix.close stdout ;
   In_channel.close buck_stderr ;
-  match Unix.waitpid pid with
+  match IUnix.waitpid pid with
   | Ok () -> (
     match Utils.read_file stdout_file with
     | Ok lines ->
@@ -118,7 +118,7 @@ let wrap_buck_call ?(extend_env = []) version ~label cmd =
         L.die ExternalError "*** failed to read output of buck command %s: %s" command err )
   | Error _ as err ->
       L.die ExternalError "*** failed to execute buck command %s: %s" command
-        (Unix.Exit_or_signal.to_string_hum err)
+        (IUnix.Exit_or_signal.to_string_hum err)
 
 
 module Target = struct

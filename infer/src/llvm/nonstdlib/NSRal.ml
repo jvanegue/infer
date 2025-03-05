@@ -5,8 +5,9 @@
  * LICENSE file in the root directory of this source tree.
  *)
 
-(** Globals *)
+open! NS0
+include CCRAL
 
-include module type of struct
-  include LlairExp.Global
-end
+let pp ?pre ?suf sep pp_elt fs ral = NSList.pp ?pre ?suf sep pp_elt fs (to_list ral)
+
+let fold l s ~f = fold ~f:(fun s x -> f x s) ~x:s l

@@ -6,8 +6,9 @@
  *)
 
 open! NS0
-include CCRAL
 
-let pp ?pre ?suf sep pp_elt fs ral = List.pp ?pre ?suf sep pp_elt fs (to_list ral)
+(** Hash tables *)
 
-let fold l s ~f = fold ~f:(fun s x -> f x s) ~x:s l
+include module type of NSHashTable_intf
+
+module Make (Key : HashedType) : S with type key = Key.t

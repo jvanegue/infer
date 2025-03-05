@@ -331,8 +331,8 @@ let version_string = F.asprintf "%a" pp_version ()
 
 (** System call configuration values *)
 
-(** Initial time of the analysis, i.e. when this module is loaded, gotten from Unix.time *)
-let initial_analysis_time = Unix.time ()
+(** Initial time of the analysis, i.e. when this module is loaded, gotten from Caml_unix.time *)
+let initial_analysis_time = Caml_unix.time ()
 
 let clang_exe_aliases =
   [ (* this must be kept in sync with the clang-like symlinks in [wrappers_dir] (see below) *)
@@ -411,7 +411,7 @@ let locate_sdk_root () =
       try
         let path, _ = Utils.with_process_in cmd In_channel.input_line in
         path
-      with Unix.Unix_error _ -> None )
+      with Caml_unix.Unix_error _ -> None )
   | _ ->
       None
 
@@ -1180,6 +1180,13 @@ and capture_block_list =
       ~in_help:InferCommand.[(Capture, manual_generic); (Run, manual_generic)]
       "Matcher or list of matchers for names of files that should not be captured, hence not \
        analyzed either. Clang, Java, and Hack only." )
+
+
+and capture_llair =
+  CLOpt.mk_path_opt ~long:"capture-llair" ~meta:"path"
+    "Generate a SIL program from a Llair program obtained from running sledge, for example with \
+     $(b,sledge llvm translate foo.bc -output foo.llair). This requires $(b,--llair-source-file) \
+     to also be set."
 
 
 and capture_textual =
@@ -2121,6 +2128,12 @@ and liveness_ignored_constant =
   CLOpt.mk_string_list ~default:["0"] ~long:"liveness-ignored-constant"
     ~in_help:InferCommand.[(Analyze, manual_generic)]
     "List of integer constants to be ignored by liveness analysis"
+
+
+and llair_source_file =
+  CLOpt.mk_path_opt ~long:"llair-source-file" ~meta:"path"
+    "Path to the original source file corresponding to the Llair program passed to \
+     $(b,--capture-llair)."
 
 
 and load_average =
@@ -4050,6 +4063,8 @@ and capture = !capture
 
 and capture_block_list = match capture_block_list with k, r -> (k, !r)
 
+and capture_llair = !capture_llair
+
 and capture_textual = RevList.to_list !capture_textual
 
 and censor_report =
@@ -4401,6 +4416,8 @@ and liveness_dangerous_classes = !liveness_dangerous_classes
 
 and liveness_ignored_constant = RevList.to_list !liveness_ignored_constant
 
+and llair_source_file = !llair_source_file
+
 and load_average =
   match !load_average with None when !buck -> Some (float_of_int Utils.cpus) | _ -> !load_average
 
@@ -4503,7 +4520,7 @@ and progress_bar =
   let style =
     if !progress_bar && not !quiet then
       match !progress_bar_style with
-      | `Auto when Unix.(isatty stdin && isatty stderr) && not (Utils.is_term_dumb ()) ->
+      | `Auto when Caml_unix.(isatty stdin && isatty stderr) && not (Utils.is_term_dumb ()) ->
           `MultiLine
       | `Auto ->
           `Plain
@@ -4698,7 +4715,7 @@ and pulse_taint_config =
   in
   List.fold (pulse_default_taint_config :: RevList.to_list !pulse_taint_config)
     ~init:base_taint_config ~f:(fun taint_config path ->
-      match (Unix.stat path).st_kind with
+      match (Caml_unix.stat path).st_kind with
       | S_DIR ->
           Utils.fold_files ~init:taint_config
             ~f:(fun taint_config filepath ->
@@ -4709,7 +4726,7 @@ and pulse_taint_config =
           explore_file taint_config path
       | _ ->
           taint_config
-      | exception Unix.Unix_error (ENOENT, _, _) ->
+      | exception Caml_unix.Unix_error (ENOENT, _, _) ->
           taint_config )
 
 

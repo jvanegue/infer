@@ -4,11 +4,12 @@
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
  *)
+open! IStd
 
-open! NS0
+type t = Stdlib.Mutex.t
 
-type t = Neg | Zero | Pos
+let create () = Stdlib.Mutex.create ()
 
-let of_int i = if i < 0 then Neg else if i = 0 then Zero else Pos
-
-let of_float f = if Float.(f < 0.) then Neg else if Float.(f = 0.) then Zero else Pos
+let critical_section l ~f =
+  Stdlib.Mutex.lock l ;
+  Exn.protect ~f ~finally:(fun () -> Stdlib.Mutex.unlock l)

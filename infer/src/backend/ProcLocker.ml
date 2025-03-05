@@ -22,8 +22,8 @@ module ProcessLocks = struct
   let lock_of_procname pname = lock_of_filename (Procname.to_filename pname)
 
   let unlock pname =
-    try Unix.unlink (lock_of_procname pname)
-    with Unix.Unix_error (ENOENT, _, _) ->
+    try Caml_unix.unlink (lock_of_procname pname)
+    with Caml_unix.Unix_error (ENOENT, _, _) ->
       L.die InternalError "Tried to unlock not-locked pname: %a@\n" Procname.pp pname
 
 
@@ -42,14 +42,14 @@ module ProcessLocks = struct
       try_taking_lock pid filename ;
       (* the lock file did not exist and we were the first to create it, i.e. lock it *)
       `LockAcquired
-    with Unix.Unix_error ((EEXIST | EACCES), _, _) | Sys_error _ -> (
+    with Caml_unix.Unix_error ((EEXIST | EACCES), _, _) | Sys_error _ -> (
       (* the lock file already existed; now to figure which process locked it in case it was us *)
       match read_lock_value filename with
       | Some owner_pid ->
           if Int.equal owner_pid (Pid.to_int pid) then `AlreadyLockedByUs
           else `LockedByAnotherProcess
-      | None | (exception (Sys_error _ | Unix.Unix_error ((ENOENT | EINVAL), _, _) | End_of_file))
-        ->
+      | None
+      | (exception (Sys_error _ | Caml_unix.Unix_error ((ENOENT | EINVAL), _, _) | End_of_file)) ->
           (* the lock file went away, opportunistically try taking the lock for ourselves again *)
           do_try_lock pid filename )
 
@@ -60,7 +60,8 @@ module ProcessLocks = struct
 
 
   let unlock_all proc_filenames =
-    List.iter proc_filenames ~f:(fun proc_filename -> Unix.unlink (lock_of_filename proc_filename))
+    List.iter proc_filenames ~f:(fun proc_filename ->
+        Caml_unix.unlink (lock_of_filename proc_filename) )
 
 
   let lock_all pid proc_filenames =
@@ -85,7 +86,7 @@ end
 module DomainLocks = struct
   module LockMap = IString.Hash
 
-  let mutex = Error_checking_mutex.create ()
+  let mutex = IMutex.create ()
 
   let lock_map = LockMap.create 1009
 
@@ -98,12 +99,11 @@ module DomainLocks = struct
 
   let unlock pname =
     let proc_uid = Procname.to_unique_id pname in
-    Error_checking_mutex.critical_section mutex ~f:(fun () -> unsafe_unlock_proc_uid proc_uid)
+    IMutex.critical_section mutex ~f:(fun () -> unsafe_unlock_proc_uid proc_uid)
 
 
   let unlock_all proc_filenames =
-    Error_checking_mutex.critical_section mutex ~f:(fun () ->
-        List.iter proc_filenames ~f:unsafe_unlock_proc_uid )
+    IMutex.critical_section mutex ~f:(fun () -> List.iter proc_filenames ~f:unsafe_unlock_proc_uid)
 
 
   let unsafe_try_lock_key domain_id key =
@@ -120,12 +120,12 @@ module DomainLocks = struct
   let try_lock pname =
     let our_id = WorkerPoolState.get_in_child () |> Option.value_exn in
     let proc_uid = Procname.to_unique_id pname in
-    Error_checking_mutex.critical_section mutex ~f:(fun () -> unsafe_try_lock_key our_id proc_uid)
+    IMutex.critical_section mutex ~f:(fun () -> unsafe_try_lock_key our_id proc_uid)
 
 
   let lock_all domain_id keys =
     let lock_result =
-      Error_checking_mutex.critical_section mutex ~f:(fun () ->
+      IMutex.critical_section mutex ~f:(fun () ->
           List.fold_result keys ~init:[] ~f:(fun locks key ->
               match unsafe_try_lock_key domain_id key with
               | `AlreadyLockedByUs ->

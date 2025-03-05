@@ -5,10 +5,10 @@
  * LICENSE file in the root directory of this source tree.
  *)
 
-open! NS0
+open! IStd
 
-(** Hash tables *)
+type t = Stdlib.Mutex.t
 
-include module type of HashTable_intf
+val create : unit -> t
 
-module Make (Key : HashedType) : S with type key = Key.t
+val critical_section : t -> f:(unit -> 'a) -> 'a

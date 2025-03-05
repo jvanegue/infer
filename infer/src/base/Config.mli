@@ -40,7 +40,7 @@ val build_system_of_exe_name : string -> build_system
 
 val string_of_build_system : build_system -> string
 
-val maven_env : Unix.env
+val maven_env : IUnix.Env.t
 (** tell Infer it's running inside maven and disable JAVA_HOME *)
 
 (** {2 Constant configuration values} *)
@@ -248,6 +248,8 @@ val buck_targets_block_list : string list
 val capture : bool
 
 val capture_block_list : string * Yojson.Safe.t
+
+val capture_llair : string option
 
 val capture_textual : string list
 
@@ -534,6 +536,8 @@ val liveness_block_list_var_regex : Str.regexp option
 val liveness_dangerous_classes : Yojson.Safe.t
 
 val liveness_ignored_constant : string list
+
+val llair_source_file : string option
 
 val load_average : float option
 
