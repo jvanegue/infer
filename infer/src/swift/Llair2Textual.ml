@@ -69,6 +69,40 @@ let block_to_node_name block =
   Textual.NodeName.of_string name
 
 
+let to_textual_arith_exp_builtin (op : Llair.Exp.op2) typ =
+  match (op, typ) with
+  | Add, Llair.Typ.Integer _ ->
+      "__sil_plusa_int"
+  | Sub, Llair.Typ.Integer _ ->
+      "__sil_minusa_int"
+  | Mul, Llair.Typ.Integer _ ->
+      "__sil_mult_int"
+  | Div, Llair.Typ.Integer _ ->
+      "__sil_divi"
+  | Div, Llair.Typ.Float _ ->
+      "__sil_divf"
+  | Rem, Llair.Typ.Integer _ ->
+      "__sil_mod"
+  | _ ->
+      assert false
+
+
+let to_textual_bool_exp_builtin (op : Llair.Exp.op2) =
+  match op with
+  | Eq ->
+      "__sil_eq"
+  | Dq ->
+      "__sil_ne"
+  | Gt ->
+      "__sil_gt"
+  | Ge ->
+      "__sil_ge"
+  | Le ->
+      "__sil_le"
+  | _ ->
+      assert false
+
+
 (* TODO: translate expressions *)
 let rec to_textual_exp ?generate_typ_exp (exp : Llair.Exp.t) : Textual.Exp.t =
   match exp with
@@ -94,11 +128,28 @@ let rec to_textual_exp ?generate_typ_exp (exp : Llair.Exp.t) : Textual.Exp.t =
         ; field=
             { enclosing_class= typ_name
             ; name= Textual.FieldName.of_string (Llair2TextualType.field_of_pos n) } }
-  | Ap1 (Convert _, dst_typ, exp) ->
+  | Ap1 ((Convert _ | Signed _ | Unsigned _), dst_typ, exp) ->
+      (* Signed is the translation of llvm's trunc and SExt and Unsigned is the translation of ZExt, all different types of cast,
+         and convert translates other types of cast *)
       let exp = to_textual_exp exp in
       let typ = to_textual_typ dst_typ in
       let proc = Textual.ProcDecl.cast_name in
       Call {proc; args= [Textual.Exp.Typ typ; exp]; kind= Textual.Exp.NonVirtual}
+  | Ap1 (Splat, _, _) ->
+      (* [splat exp] initialises every element of an array with the element exp, so to be precise it
+         needs to be translated as a loop. We translate here to a non-deterministic value for the array *)
+      let proc = builtin_qual_proc_name "llvm_nondet" in
+      Call {proc; args= []; kind= Textual.Exp.NonVirtual}
+  | Ap2 (((Add | Sub | Mul | Div | Rem) as op), typ, e1, e2) ->
+      let proc = builtin_qual_proc_name (to_textual_arith_exp_builtin op typ) in
+      let exp1 = to_textual_exp e1 in
+      let exp2 = to_textual_exp e2 in
+      Call {proc; args= [exp1; exp2]; kind= Textual.Exp.NonVirtual}
+  | Ap2 (((Eq | Dq | Gt | Ge | Le) as op), _, e1, e2) ->
+      let proc = builtin_qual_proc_name (to_textual_bool_exp_builtin op) in
+      let exp1 = to_textual_exp e1 in
+      let exp2 = to_textual_exp e2 in
+      Call {proc; args= [exp1; exp2]; kind= Textual.Exp.NonVirtual}
   | _ ->
       assert false
 

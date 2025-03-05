@@ -10,7 +10,34 @@ include Core
 [@@@warning "-unused-value-declaration"]
 
 (* easier to write Unix than Core_unix *)
-module Unix = Core_unix
+module Unix = struct
+  include Core_unix
+
+  let rename ~src:_ ~dst:_ = `Dont_use_istd_unix
+
+  let mkdir_p ?perm:_ _name = `Dont_use_istd_unix
+
+  let nanosleep _ = `Dont_use_istd_unix
+
+  let readdir_opt _ = `Dont_use_istd_unix
+
+  let mkdtemp _ = `Dont_use_istd_unix
+
+  let putenv ~key:_ ~data:_ = `Dont_use_istd_unix
+
+  let create_process_env ?working_dir:_ ?prog_search_path:_ ?argv0:_ ?setpgid:_ ~prog:_ ~args:_
+      ~env:_ () =
+    `Dont_use_istd_unix
+
+
+  let create_process ~prog:_ ~args:_ = `Dont_use_istd_unix
+
+  let open_process_in _ = `Dont_use_istd_unix
+
+  let close_process_in _ = `Dont_use_istd_unix
+
+  let getpid () = `Dont_use_istd_unix
+end
 
 (* we don't care about the _unix distinction *)
 module Filename = struct

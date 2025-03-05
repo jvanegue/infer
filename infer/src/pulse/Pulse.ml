@@ -1708,8 +1708,8 @@ end
 let summary_count_channel =
   lazy
     (let output_dir = Filename.concat Config.results_dir "pulse" in
-     Unix.mkdir_p output_dir ;
-     let filename = Format.asprintf "pulse-summary-count-%a.txt" Pid.pp (Unix.getpid ()) in
+     IUnix.mkdir_p output_dir ;
+     let filename = Format.asprintf "pulse-summary-count-%a.txt" Pid.pp (IUnix.getpid ()) in
      let channel = Filename.concat output_dir filename |> Out_channel.create in
      let close_channel () = Out_channel.close_no_err channel in
      Epilogues.register ~f:close_channel ~description:"close summary_count_channel for Pulse" ;

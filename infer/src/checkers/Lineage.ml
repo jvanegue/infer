@@ -945,10 +945,10 @@ module Out = struct
     (* We keep the old simple-lineage output dir for historical reasons and should change it to
        lineage once no external infra code depends on it anymore *)
     let output_dir = Filename.concat Config.results_dir "simple-lineage" in
-    Unix.mkdir_p output_dir ;
+    IUnix.mkdir_p output_dir ;
     match DLS.get channel_key with
     | None ->
-        let filename = Format.asprintf "lineage-%a.json" Pid.pp (Unix.getpid ()) in
+        let filename = Format.asprintf "lineage-%a.json" Pid.pp (IUnix.getpid ()) in
         let channel = Filename.concat output_dir filename |> Out_channel.create in
         let close_channel () =
           DLS.get channel_key |> Option.iter ~f:Out_channel.close_no_err ;

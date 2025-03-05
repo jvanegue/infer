@@ -437,7 +437,7 @@ let implicit_sdk_root =
         path
     | None ->
         let maybe_root = locate_sdk_root () in
-        let putenv x = Unix.putenv ~key:infer_sdkroot_env_var ~data:x in
+        let putenv x = IUnix.putenv ~key:infer_sdkroot_env_var ~data:x in
         Option.iter ~f:putenv maybe_root ;
         maybe_root )
 
@@ -3034,6 +3034,12 @@ and python_skip_db =
   CLOpt.mk_bool ~long:"python-skip-db" ~default:false "Skip the DB writing during Python capture"
 
 
+and python_exe =
+  CLOpt.mk_path_opt ~long:"python-exe" ~meta:"path"
+    ~in_help:InferCommand.[(Capture, manual_generic)]
+    "A filepath to a python interpreter. It will bypass the interpreter set by PYTHON variable"
+
+
 and qualified_cpp_name_block_list =
   CLOpt.mk_string_list ~long:"qualified-cpp-name-block-list" ~meta:"string"
     ~in_help:InferCommand.[(Analyze, manual_generic)]
@@ -3773,7 +3779,7 @@ let post_parsing_initialization command_opt =
             CLOpt.init_work_dir ^/ filename
           else filename
         in
-        Unix.putenv ~key:CommandDoc.inferconfig_env_var ~data:abs_filename ) ;
+        IUnix.putenv ~key:CommandDoc.inferconfig_env_var ~data:abs_filename ) ;
   ( match !version with
   | `Full when !buck ->
       (* Buck reads stderr in some versions, stdout in others *)
@@ -4735,6 +4741,8 @@ and python_trim_source_paths = !python_trim_source_paths
 
 and python_skip_db = !python_skip_db
 
+and python_exe = !python_exe
+
 and qualified_cpp_name_block_list = RevList.to_list !qualified_cpp_name_block_list
 
 and quiet = !quiet
@@ -5012,6 +5020,6 @@ let is_originator =
 let toplevel_results_dir =
   if is_originator then (
     (* let subprocesses know where the toplevel process' results dir is *)
-    Unix.putenv ~key:CLOpt.infer_top_results_dir_env_var ~data:results_dir ;
+    IUnix.putenv ~key:CLOpt.infer_top_results_dir_env_var ~data:results_dir ;
     results_dir )
   else Sys.getenv CLOpt.infer_top_results_dir_env_var |> Option.value ~default:results_dir

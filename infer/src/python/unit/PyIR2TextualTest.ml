@@ -193,11 +193,15 @@ class C:
           n2 = globals
           n1 = locals
           n0 = $builtins.py_make_none()
-          _ = $builtins.py_gen_start_coroutine()
           n3 = $builtins.py_load_global("sleep", n2)
           n4 = $builtins.py_call(n3, n0, $builtins.py_make_int(1))
           n5 = $builtins.py_get_awaitable(n4)
-          n6 = $builtins.py_yield_from(n5, n0)
+          jmp b1
+
+      #b1:
+          jmp b3
+
+      #b3:
           ret n0
 
     }
@@ -328,11 +332,15 @@ class C:
           n2 = [&globals:*PyGlobals<dummy>]
           n1 = [&locals:*PyLocals]
           n0 = $builtins.py_make_none()
-          _ = $builtins.py_gen_start_coroutine()
           n3 = $builtins.py_load_global("sleep", n2)
           n4 = $builtins.py_call(n3, n0, $builtins.py_make_int(1))
           n5 = $builtins.py_get_awaitable(n4)
-          n6 = $builtins.py_yield_from(n5, n0)
+          jmp b1
+
+      #b1:
+          jmp b3
+
+      #b3:
           ret n0
 
     }
@@ -575,15 +583,19 @@ class C:
 
     define .async dummy.g(globals: *PyGlobals<dummy>, locals: *PyLocals) : *PyObject {
       #b0:
-          n7:*PyGlobals<dummy> = load &globals
-          n8:*PyLocals = load &locals
+          n6:*PyGlobals<dummy> = load &globals
+          n7:*PyLocals = load &locals
           n0 = $builtins.py_make_none()
-          n9 = $builtins.py_gen_start_coroutine()
-          n3 = $builtins.py_load_global("sleep", n7)
-          n10 = $builtins.py_make_int(1)
-          n4 = $builtins.py_call(n3, n0, n10)
+          n3 = $builtins.py_load_global("sleep", n6)
+          n8 = $builtins.py_make_int(1)
+          n4 = $builtins.py_call(n3, n0, n8)
           n5 = $builtins.py_get_awaitable(n4)
-          n6 = $builtins.py_yield_from(n5, n0)
+          jmp b1
+
+      #b1:
+          jmp b3
+
+      #b3:
           ret n0
 
     } |}]

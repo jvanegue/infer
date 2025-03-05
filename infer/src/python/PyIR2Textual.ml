@@ -169,6 +169,18 @@ let rec of_exp exp : Textual.Exp.t =
       call_builtin "py_load_deref" [exp_of_ident_str name] (* TODO: more arg needed *)
   | LoadClassDeref {name; slot= _} ->
       call_builtin "py_load_class_deref" [exp_of_ident_str name] (* TODO: more arg needed *)
+  | LoadFastCheck {name} ->
+      call_builtin "py_load_fast_check" [exp_of_ident_str name; exp_locals]
+  | LoadFastAndClear {name} ->
+      call_builtin "py_load_fast_and_clear" [exp_of_ident_str name; exp_locals]
+  | LoadLocals ->
+      call_builtin "py_load_locals" [exp_locals]
+  | LoadFromDictOrDeref {slot; mapping} ->
+      let slot = Textual.(Exp.Const (Const.Int (Z.of_int slot))) in
+      call_builtin "py_load_from_dict_or_deref" [slot; of_exp mapping]
+  | LoadSuperAttr {attr; super; class_; self} ->
+      call_builtin "py_load_super_attr"
+        [exp_of_ident_str attr; of_exp super; of_exp class_; of_exp self]
   | ImportName {name; fromlist; level} ->
       let str = typename_of_ident name |> F.asprintf "%a" Textual.TypeName.pp in
       call_builtin str_py_import_name
@@ -328,12 +340,12 @@ let builtin_name builtin =
       "py_format_fn_repr"
   | FormatFn Ascii ->
       "py_format_fn_ascii"
-  | CallFunctionEx ->
-      "py_call_function_ex"
   | Inplace op ->
       F.asprintf "py_inplace_%s" (binary_op_name op)
   | Binary op ->
       F.asprintf "py_binary_%s" (binary_op_name op)
+  | BinarySlice ->
+      "py_binary_slice"
   | Unary op ->
       F.asprintf "py_unary_%s" (unary_op_name op)
   | Compare op ->
@@ -376,6 +388,36 @@ let builtin_name builtin =
       "py_unpack_ex"
   | GetPreviousException ->
       "py_get_previous_exception"
+  | UnaryIntrinsic PrintExpr ->
+      "py_print_expr"
+  | UnaryIntrinsic ImportStar ->
+      "py_import_star"
+  | UnaryIntrinsic StopiterationError ->
+      "stopiteration_error"
+  | UnaryIntrinsic AsyncGenValueWrapperNew ->
+      "py_async_gen_value_wrapper_new"
+  | UnaryIntrinsic UnaryPos ->
+      "py_unary_pos"
+  | UnaryIntrinsic ListToTuple ->
+      "py_list_to_tuple"
+  | UnaryIntrinsic MakeTypevar ->
+      "make_typevar"
+  | UnaryIntrinsic MakeParamspec ->
+      "py_make_paramspec"
+  | UnaryIntrinsic MakeTypevartuple ->
+      "py_make_typevartuple"
+  | UnaryIntrinsic SubscriptGeneric ->
+      "py_subscript_generic"
+  | UnaryIntrinsic MakeTypealias ->
+      "py_make_typealias"
+  | BinaryIntrinsic PrepReraiseStar ->
+      "py_prep_reraise_star"
+  | BinaryIntrinsic TypevarWithBound ->
+      "py_typevar_with_bound"
+  | BinaryIntrinsic TypevarWithConstraints ->
+      "py_typevar_with_constraints"
+  | BinaryIntrinsic SetFunctionTypeParams ->
+      "py_set_function_type_params"
 
 
 let str_py_store_name = "py_store_name"
@@ -413,6 +455,12 @@ let of_stmt loc stmt : Textual.Instr.t =
         { id= None
         ; exp= call_builtin "py_store_deref" [exp_of_ident_str name; (* TODO: add arg *) of_exp rhs]
         ; loc }
+  | StoreSlice {container; start; end_; rhs} ->
+      Let
+        { id= None
+        ; exp=
+            call_builtin "py_store_slice" [of_exp container; of_exp start; of_exp end_; of_exp rhs]
+        ; loc }
   | StoreSubscript {lhs; index; rhs} ->
       Let
         { id= None
@@ -421,6 +469,9 @@ let of_stmt loc stmt : Textual.Instr.t =
   | Call {lhs; exp; args; arg_names} ->
       let args = of_exp exp :: of_exp arg_names :: List.map ~f:of_exp args in
       Let {id= Some (mk_ident lhs); exp= call_builtin str_py_call args; loc}
+  | CallEx {lhs; exp; kargs; arg_names} ->
+      let args = [of_exp exp; of_exp kargs; of_exp arg_names] in
+      Let {id= Some (mk_ident lhs); exp= call_builtin "py_call_function_ex" args; loc}
   | CallMethod {lhs; name; self_if_needed; args; arg_names} ->
       Let
         { id= Some (mk_ident lhs)
@@ -448,6 +499,12 @@ let of_stmt loc stmt : Textual.Instr.t =
         ; loc }
   | DeleteAttr {exp; attr} ->
       Let {id= None; exp= call_builtin "py_delete_attr" [of_exp exp; exp_of_ident_str attr]; loc}
+  | MakeCell i ->
+      let arg = Textual.(Exp.Const (Const.Int (Z.of_int i))) in
+      Let {id= None; exp= call_builtin "py_make_cell" [arg]; loc}
+  | CopyFreeVars i ->
+      let arg = Textual.(Exp.Const (Const.Int (Z.of_int i))) in
+      Let {id= None; exp= call_builtin "py_copy_free_vars" [arg]; loc}
   | SetupAnnotations ->
       Let {id= None; exp= call_builtin "py_setup_annotations" []; loc}
   | ImportStar exp ->

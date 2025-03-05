@@ -239,12 +239,12 @@ let with_intermediate_temp_file_out ?(retry = false) file ~f =
     Out_channel.close temp_oc ;
     (* Retry n times with exponential backoff when [retry] is true *)
     let rec rename n delay =
-      try Unix.rename ~src:temp_filename ~dst:file
+      try IUnix.rename ~src:temp_filename ~dst:file
       with e ->
         if Int.equal n 0 then raise e
         else
           let delay = delay ** 2.0 in
-          ignore (Unix.nanosleep delay) ;
+          ignore (IUnix.nanosleep delay) ;
           rename (n - 1) delay
     in
     if retry then rename 5 0.1 else rename 0 0.0
@@ -265,11 +265,11 @@ let consume_in chan_in = with_channel_in ~f:ignore chan_in
 let echo_in chan_in = with_channel_in ~f:print_endline chan_in
 
 let with_process_in command read =
-  let chan = Unix.open_process_in command in
+  let chan = IUnix.open_process_in command in
   let f () = read chan in
   let finally () =
     consume_in chan ;
-    Unix.close_process_in chan
+    IUnix.close_process_in chan
   in
   do_finally_swallow_timeout ~f ~finally
 
@@ -282,7 +282,7 @@ let create_dir dir =
     if not (is_dir_kind (Unix.stat dir).Unix.st_kind) then
       L.(die ExternalError) "file '%s' already exists and is not a directory" dir
   with Unix.Unix_error _ -> (
-    try Unix.mkdir_p dir ~perm:0o700
+    try IUnix.mkdir_p dir ~perm:0o700
     with Unix.Unix_error _ ->
       let created_concurrently =
         (* check if another process created it meanwhile *)
@@ -294,7 +294,7 @@ let create_dir dir =
 let out_channel_create_with_dir fname =
   try Out_channel.create fname
   with Sys_error _ ->
-    Unix.mkdir_p ~perm:0o700 (Filename.dirname fname) ;
+    IUnix.mkdir_p ~perm:0o700 (Filename.dirname fname) ;
     Out_channel.create fname
 
 
@@ -328,7 +328,7 @@ let suppress_stderr2 f2 x1 x2 =
 let iter_dir name ~f =
   let dir = Unix.opendir name in
   let rec iter dir =
-    match Unix.readdir_opt dir with
+    match IUnix.readdir_opt dir with
     | Some entry ->
         if
           not

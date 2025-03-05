@@ -19,7 +19,7 @@ print = 0
 builtin_print(print, None, "hello world", True, False)
 |}
   in
-  PyIR.test source ;
+  PyIR.test ~show:true source ;
   F.printf "Running interpreter:@\n" ;
   PyIR.test ~run:PyIRExec.run source ;
   [%expect
@@ -57,7 +57,7 @@ x = 'x'
 y = 'y'
 print("fst(x, y) =", fst(x, y))
 |} in
-  PyIR.test source ;
+  PyIR.test ~show:true source ;
   F.printf "Running interpreter:@\n" ;
   PyIR.test ~run:PyIRExec.run source ;
   [%expect
@@ -109,7 +109,7 @@ no_effect(-1)
 print('n =', n)
 |}
   in
-  PyIR.test source ;
+  PyIR.test ~show:true source ;
   F.printf "Running interpreter:@\n" ;
   PyIR.test ~run:PyIRExec.run source ;
   [%expect
@@ -171,7 +171,7 @@ def fact(n):
 print('fact(5) =', fact(5))
 |}
   in
-  PyIR.test source ;
+  PyIR.test ~show:true source ;
   F.printf "Running interpreter:@\n" ;
   PyIR.test ~run:PyIRExec.run source ;
   [%expect
@@ -278,7 +278,7 @@ print('x is', C.get_C_x())
 print('saved x is', C.saved_x)
 |}
   in
-  PyIR.test source ;
+  PyIR.test ~show:true source ;
   F.printf "Running interpreter:@\n" ;
   PyIR.test ~run:PyIRExec.run source ;
   [%expect
@@ -294,23 +294,26 @@ print('saved x is', C.saved_x)
           TOPLEVEL[C] <- n4
           n5 <- TOPLEVEL[print]
           n6 <- TOPLEVEL[C]
-          n7 <- $CallMethod[get_x](n6, n0)
-          n8 <- $Call(n5, "x is", n7, n0)
+          n7 <- n6.get_x
+          n8 <- $Call(n7, n0)
+          n9 <- $Call(n5, "x is", n8, n0)
           TOPLEVEL[x] <- "assigned by module body"
-          n9 <- TOPLEVEL[print]
-          n10 <- TOPLEVEL[C]
-          n11 <- $CallMethod[get_x](n10, n0)
-          n12 <- $Call(n9, "x is", n11, n0)
-          n13 <- TOPLEVEL[C]
-          n13.x <- "assigned as a class attribute"
-          n14 <- TOPLEVEL[print]
+          n10 <- TOPLEVEL[print]
+          n11 <- TOPLEVEL[C]
+          n12 <- n11.get_x
+          n13 <- $Call(n12, n0)
+          n14 <- $Call(n10, "x is", n13, n0)
           n15 <- TOPLEVEL[C]
-          n16 <- $CallMethod[get_C_x](n15, n0)
-          n17 <- $Call(n14, "x is", n16, n0)
-          n18 <- TOPLEVEL[print]
-          n19 <- TOPLEVEL[C]
-          n20 <- n19.saved_x
-          n21 <- $Call(n18, "saved x is", n20, n0)
+          n15.x <- "assigned as a class attribute"
+          n16 <- TOPLEVEL[print]
+          n17 <- TOPLEVEL[C]
+          n18 <- n17.get_C_x
+          n19 <- $Call(n18, n0)
+          n20 <- $Call(n16, "x is", n19, n0)
+          n21 <- TOPLEVEL[print]
+          n22 <- TOPLEVEL[C]
+          n23 <- n22.saved_x
+          n24 <- $Call(n21, "saved x is", n23, n0)
           return n0
 
 
@@ -372,7 +375,7 @@ d['z'] = True
 print(d)
 |}
   in
-  PyIR.test source ;
+  PyIR.test ~show:true source ;
   F.printf "Running interpreter:@\n" ;
   PyIR.test ~run:PyIRExec.run source ;
   [%expect

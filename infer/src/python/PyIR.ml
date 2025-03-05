@@ -293,14 +293,39 @@ module FormatFunction = struct
 end
 
 module BuiltinCaller = struct
+  type unary_intrinsics =
+    | PrintExpr
+    | ImportStar
+    | StopiterationError
+    | AsyncGenValueWrapperNew
+    | UnaryPos
+    | ListToTuple
+    | MakeTypevar
+    | MakeParamspec
+    | MakeTypevartuple
+    | SubscriptGeneric
+    | MakeTypealias
+  [@@deriving equal, show, enumerate]
+
+  let unary_intrinsics = Array.of_list all_of_unary_intrinsics
+
+  type binary_intrinsics =
+    | PrepReraiseStar
+    | TypevarWithBound
+    | TypevarWithConstraints
+    | SetFunctionTypeParams
+  [@@deriving equal, show, enumerate]
+
+  let binary_intrinsics = Array.of_list all_of_binary_intrinsics
+
   type t =
     | BuildClass  (** [LOAD_BUILD_CLASS] *)
     | BuildConstKeyMap  (** [BUILD_CONST_KEY_MAP] *)
     | Format
     | FormatFn of FormatFunction.t
-    | CallFunctionEx  (** [CALL_FUNCTION_EX] *)
     | Inplace of BinaryOp.t
     | Binary of BinaryOp.t
+    | BinarySlice
     | Unary of UnaryOp.t
     | Compare of CompareOp.t
     | GetAIter  (** [GET_AITER] *)
@@ -322,6 +347,8 @@ module BuiltinCaller = struct
     | GetAwaitable  (** [GET_AWAITABLE] *)
     | UnpackEx  (** [UNPACK_EX] *)
     | GetPreviousException  (** [RAISE_VARARGS] *)
+    | UnaryIntrinsic of unary_intrinsics
+    | BinaryIntrinsic of binary_intrinsics
   [@@deriving equal]
 
   let show = function
@@ -333,11 +360,11 @@ module BuiltinCaller = struct
         "$Format"
     | FormatFn fn ->
         sprintf "$FormatFn.%s" (FormatFunction.to_string fn)
-    | CallFunctionEx ->
-        "$CallFunctionEx"
     | Binary op ->
         let op = BinaryOp.to_string op in
         sprintf "$Binary.%s" op
+    | BinarySlice ->
+        "$BinarySlice"
     | Inplace op ->
         let op = BinaryOp.to_string op in
         sprintf "$Inplace.%s" op
@@ -384,6 +411,10 @@ module BuiltinCaller = struct
         "$UnpackEx"
     | GetPreviousException ->
         "GetPreviousException"
+    | UnaryIntrinsic unop ->
+        show_unary_intrinsics unop
+    | BinaryIntrinsic binop ->
+        show_binary_intrinsics binop
 end
 
 module Const = struct
@@ -452,6 +483,11 @@ module Exp = struct
     | LoadClassDeref of {name: Ident.t; slot: int}  (** [LOAD_CLASSDEREF] *)
     | LoadClosure of {name: Ident.t; slot: int}  (** [LOAD_CLOSURE] *)
     | LoadDeref of {name: Ident.t; slot: int}  (** [LOAD_DEREF] *)
+    | LoadFastCheck of {name: Ident.t}  (** [LOAD_FAST_CHECK] *)
+    | LoadFastAndClear of {name: Ident.t}  (** [LOAD_FAST_AND_CLEAR] *)
+    | LoadLocals  (** [LOAD_LOCALS] *)
+    | LoadFromDictOrDeref of {slot: int; mapping: t}  (** [LOAD_FROM_DICT_OR_DEREF] *)
+    | LoadSuperAttr of {attr: Ident.t; super: t; class_: t; self: t}  (** [LOAD_SUPER_ATTR] *)
     | MatchClass of {subject: t; type_: t; count: int; names: t}
     | BoolOfMatchClass of t
     | AttributesOfMatchClass of t
@@ -464,7 +500,9 @@ module Exp = struct
 
   type opstack_symbol =
     | Exp of t
+    | Null
     | Code of FFI.Code.t
+    | Keywords of t
     | LoadMethod of (t * Ident.t)  (** [LOAD_METHOD] *)
     | BuiltinCaller of BuiltinCaller.t
     | CallFinallyReturn of {offset: int}
@@ -516,8 +554,18 @@ module Exp = struct
         F.fprintf fmt "$LoadClosure(%d,\"%a\")" slot Ident.pp name
     | LoadDeref {name; slot} ->
         F.fprintf fmt "$LoadDeref(%d,\"%a\")" slot Ident.pp name
+    | LoadLocals ->
+        F.pp_print_string fmt "$Loadlocals()"
+    | LoadFromDictOrDeref {slot; mapping} ->
+        F.fprintf fmt "$LoadFromDictOrDeref(%d, %a)" slot pp mapping
+    | LoadSuperAttr {attr; self; class_; super} ->
+        F.fprintf fmt "$LoadSuperAttr(\"%a\", %a, %a, %a)" Ident.pp attr pp self pp class_ pp super
     | LoadClassDeref {name; slot} ->
         F.fprintf fmt "$LoadClassDeref(%d,\"%a\")" slot Ident.pp name
+    | LoadFastCheck {name} ->
+        F.fprintf fmt "$LoadFastCheck(\"%a\")" Ident.pp name
+    | LoadFastAndClear {name} ->
+        F.fprintf fmt "$LoadFastAndClear(\"%a\")" Ident.pp name
     | Function {qual_name; default_values; default_values_kw; annotations; cells_for_closure} ->
         F.fprintf fmt "$MakeFunction[\"%a\", %a, %a, %a, %a]" QualName.pp qual_name pp
           default_values pp default_values_kw pp annotations pp cells_for_closure
@@ -526,8 +574,12 @@ module Exp = struct
   let pp_opstack_symbol fmt = function
     | Exp exp ->
         pp fmt exp
+    | Null ->
+        F.pp_print_string fmt "NULL"
     | Code {FFI.Code.co_name} ->
         F.fprintf fmt "<%s>" co_name
+    | Keywords tuple ->
+        F.fprintf fmt "KW %a" pp tuple
     | LoadMethod (self, meth) ->
         F.fprintf fmt "$LoadMethod(%a, %a)" pp self Ident.pp meth
     | BuiltinCaller bc ->
@@ -558,6 +610,8 @@ end
 module Error = struct
   type kind =
     | EmptyStack of string
+    | IndexOutOfBound of string
+    | ArgValStringExpected of FFI.Constant.t
     | UnsupportedOpcode of string
     | MakeFunction of string * Exp.opstack_symbol
     | LoadMethodExpected of Exp.opstack_symbol
@@ -578,6 +632,10 @@ module Error = struct
   let pp_kind fmt = function
     | EmptyStack op ->
         F.fprintf fmt "Cannot %s, stack is empty" op
+    | IndexOutOfBound opname ->
+        F.fprintf fmt "opcode %s raised in IndexOutOfBound error" opname
+    | ArgValStringExpected cst ->
+        F.fprintf fmt "argval %a should be a string" FFI.Constant.pp cst
     | UnsupportedOpcode s ->
         F.fprintf fmt "Unsupported opcode: %s" s
     | MakeFunction (kind, exp) ->
@@ -626,8 +684,10 @@ module Stmt = struct
     | Let of {lhs: SSA.t; rhs: Exp.t}
     | SetAttr of {lhs: Exp.t; attr: Ident.t; rhs: Exp.t}
     | Store of {lhs: ScopedIdent.t; rhs: Exp.t}
+    | StoreSlice of {container: Exp.t; start: Exp.t; end_: Exp.t; rhs: Exp.t}
     | StoreSubscript of {lhs: Exp.t; index: Exp.t; rhs: Exp.t}
     | Call of {lhs: SSA.t; exp: Exp.t; args: Exp.t list; arg_names: Exp.t}
+    | CallEx of {lhs: SSA.t; exp: Exp.t; kargs: Exp.t; arg_names: Exp.t}
     | CallMethod of
         {lhs: SSA.t; name: Ident.t; self_if_needed: Exp.t; args: Exp.t list; arg_names: Exp.t}
     | BuiltinCall of {lhs: SSA.t; call: BuiltinCaller.t; args: Exp.t list; arg_names: Exp.t}
@@ -635,6 +695,8 @@ module Stmt = struct
     | Delete of ScopedIdent.t  (** [DELETE_FAST] & cie *)
     | DeleteDeref of {name: Ident.t; slot: int}  (** [DELETE_DEREF] *)
     | DeleteAttr of {exp: Exp.t; attr: Ident.t}
+    | MakeCell of int  (** [MAKE_CELL] *)
+    | CopyFreeVars of int  (** [COPY_FREE_VARS] *)
     | ImportStar of Exp.t
     | GenStart of {kind: gen_kind}
     | SetupAnnotations
@@ -647,11 +709,16 @@ module Stmt = struct
         F.fprintf fmt "%a.%a <- %a" Exp.pp lhs Ident.pp attr Exp.pp rhs
     | Store {lhs; rhs} ->
         F.fprintf fmt "%a <- %a" ScopedIdent.pp lhs Exp.pp rhs
+    | StoreSlice {container; start; end_; rhs} ->
+        F.fprintf fmt "%a[%a:%a] <- %a" Exp.pp container Exp.pp start Exp.pp end_ Exp.pp rhs
     | StoreSubscript {lhs; index; rhs} ->
         F.fprintf fmt "%a[%a] <- %a" Exp.pp lhs Exp.pp index Exp.pp rhs
     | Call {lhs; exp; args; arg_names} ->
         F.fprintf fmt "%a <- $Call(@[%a@])" SSA.pp lhs (Pp.seq ~sep:", " pp_call_arg)
           ((exp :: args) @ [arg_names])
+    | CallEx {lhs; exp; kargs; arg_names} ->
+        F.fprintf fmt "%a <- $Call(@[%a@])" SSA.pp lhs (Pp.seq ~sep:", " pp_call_arg)
+          [exp; kargs; arg_names]
     | CallMethod {lhs; name; self_if_needed; args; arg_names} ->
         F.fprintf fmt "%a <- $CallMethod[%a](@[%a@])" SSA.pp lhs Ident.pp name
           (Pp.seq ~sep:", " Exp.pp)
@@ -680,6 +747,10 @@ module Stmt = struct
               "AsyncGenerator"
         in
         F.fprintf fmt "$GenStart%s()" kind
+    | MakeCell i ->
+        F.fprintf fmt "$MakeCell(%d)" i
+    | CopyFreeVars i ->
+        F.fprintf fmt "$CopyFreeVars(%d)" i
     | SetupAnnotations ->
         F.pp_print_string fmt "$SETUP_ANNOTATIONS"
     | Yield {lhs; rhs} ->
@@ -868,7 +939,13 @@ module CodeInfo = struct
     ; is_async: bool
     ; is_generator: bool }
 
-  let is_async = function {FFI.Instruction.opname= "GEN_START"; arg= 1} :: _ -> true | _ -> false
+  let is_async = function
+    | {FFI.Instruction.opname= "GEN_START"; arg= 1} :: _
+    | {FFI.Instruction.opname= "RETURN_GENERATOR"} :: _ ->
+        true
+    | _ ->
+        false
+
 
   let of_code
       { FFI.Code.co_name
@@ -935,6 +1012,7 @@ module State = struct
   (** Internal state of the Bytecode -> IR compiler *)
   type t =
     { debug: bool
+    ; version: FFI.version
     ; code_qual_name: FFI.Code.t -> QualName.t option
     ; get_node_name: Offset.t -> NodeName.t pyresult
     ; loc: Location.t
@@ -963,9 +1041,10 @@ module State = struct
     (cfg, get_node_name)
 
 
-  let empty ~debug ~code_qual_name ~loc ~cfg_skeleton =
+  let empty ~debug ~code_qual_name ~loc ~cfg_skeleton version =
     let cfg, get_node_name = build_get_node_name loc cfg_skeleton in
     { debug
+    ; version
     ; code_qual_name
     ; get_node_name
     ; loc
@@ -986,8 +1065,8 @@ module State = struct
   (** Each time a new object is discovered (they can be heavily nested), we need to clear the state
       of temporary data like the SSA counter, but keep other parts of it, like global and local
       names *)
-  let enter ~debug:d ~code_qual_name ~loc ~cfg_skeleton qual_name =
-    let st = empty ~debug:d ~code_qual_name ~loc ~cfg_skeleton in
+  let enter ~debug:d ~code_qual_name ~loc ~cfg_skeleton version qual_name =
+    let st = empty ~debug:d ~code_qual_name ~loc ~cfg_skeleton version in
     Option.iter qual_name ~f:(debug st "Translating %a...@\n" QualName.pp) ;
     st
 
@@ -1204,12 +1283,37 @@ let read_code_qual_name st c =
       internal_error st (Error.CodeWithoutQualifiedName c)
 
 
-let call_function st ?arg_names arg =
+type calling_mode = Kargs | Args of int
+
+let call_function st version mode =
   let open IResult.Let_syntax in
+  let* tos = State.peek st in
+  let* arg_names, st =
+    match tos with
+    | Exp.Keywords exp ->
+        let* _, st = State.pop st in
+        Ok (exp, st)
+    | _ ->
+        Ok (Exp.none, st)
+  in
+  let arg = match mode with Kargs -> 1 | Args arg -> arg in
   let* args, st = State.pop_n_and_cast st arg in
-  let* fun_exp, st = State.pop st in
+  let* fun_exp, args, st =
+    match (version : FFI.version) with
+    | Python_3_10 ->
+        let+ fun_exp, st = State.pop st in
+        (fun_exp, args, st)
+    | Python_3_12 -> (
+        let* tos1, st = State.pop st in
+        let* tos2, st = State.pop st in
+        match tos2 with
+        | Exp.Null ->
+            Ok (tos1, args, st)
+        | _ ->
+            let+ self = State.cast_exp st tos1 in
+            (tos2, self :: args, st) )
+  in
   let lhs, st = State.fresh_id st in
-  let arg_names = Option.value arg_names ~default:Exp.none in
   let* stmt =
     match fun_exp with
     | Exp.BuiltinCaller call ->
@@ -1217,9 +1321,15 @@ let call_function st ?arg_names arg =
     | Exp.ContextManagerExit self_if_needed ->
         let name = Ident.Special.exit in
         Ok (Stmt.CallMethod {lhs; name; self_if_needed; args= []; arg_names})
-    | exp ->
+    | exp -> (
         let+ exp = State.cast_exp st exp in
-        Stmt.Call {lhs; exp; args; arg_names}
+        match (mode, args) with
+        | Args _, _ ->
+            Stmt.Call {lhs; exp; args; arg_names}
+        | Kargs, [kargs] ->
+            Stmt.CallEx {lhs; exp; kargs; arg_names}
+        | Kargs, _ ->
+            L.die InternalError "unexpected number of arguments" )
   in
   let st = State.push_stmt st stmt in
   let st = State.push st (Exp.Temp lhs) in
@@ -1251,9 +1361,16 @@ let parse_op st call n =
   Ok (st, None)
 
 
-let make_function st flags =
+let make_function st version flags =
   let open IResult.Let_syntax in
-  let* _qual_name, st = State.pop st in
+  let* st =
+    match (version : FFI.version) with
+    | Python_3_10 ->
+        let+ _qual_name, st = State.pop st in
+        st
+    | Python_3_12 ->
+        Ok st
+  in
   (* we use our own notion of qualified name *)
   let* codeobj, st = State.pop st in
   let* code =
@@ -1286,25 +1403,24 @@ let make_function st flags =
   Ok (st, None)
 
 
-let call_function_kw st argc =
+let call_function_kw st version argc =
   let open IResult.Let_syntax in
-  let* arg_names, st = State.pop_and_cast st in
-  call_function st ~arg_names argc
+  let* kw_exp, st = State.pop_and_cast st in
+  let st = State.push_symbol st (Keywords kw_exp) in
+  call_function st version (Args argc)
 
 
-let call_function_ex st flags =
+let call_function_ex st version flags =
   let open IResult.Let_syntax in
   let with_keyword_args = flags land 1 <> 0 in
-  let call = BuiltinCaller.CallFunctionEx in
-  let* keyword_args, st = if with_keyword_args then State.pop_and_cast st else Ok (Exp.none, st) in
-  let* tuple, st = State.pop_and_cast st in
-  let* callee, st = State.pop_and_cast st in
-  let args = [callee; tuple; keyword_args] in
-  let lhs, st = State.fresh_id st in
-  let stmt = Stmt.BuiltinCall {lhs; call; args; arg_names= Exp.none} in
-  let st = State.push_stmt st stmt in
-  let st = State.push st (Exp.Temp lhs) in
-  Ok (st, None)
+  let* st =
+    if with_keyword_args then
+      let* kw_exp, st = State.pop_and_cast st in
+      let st = State.push_symbol st (Keywords kw_exp) in
+      Ok st
+    else Ok st
+  in
+  call_function st version Kargs
 
 
 let unpack_sequence st count =
@@ -1363,14 +1479,17 @@ let mk_if b exp then_ else_ =
   else TerminatorBuilder.If {exp; then_= else_; else_= then_}
 
 
-let pop_jump_if ~next_is st target next_offset_opt =
+let pop_jump_if ~next_is st arg next_offset_opt =
   let open IResult.Let_syntax in
   let {State.loc} = st in
   let* condition, st = State.pop_and_cast st in
   (* Turn the stack into SSA parameters *)
   let* next_offset = Offset.get ~loc next_offset_opt in
   let* next_label = State.get_node_name st next_offset in
-  let* other_label = State.get_node_name st target in
+  let other_target =
+    match st.State.version with Python_3_10 -> 2 * arg | Python_3_12 -> next_offset + (2 * arg)
+  in
+  let* other_label = State.get_node_name st other_target in
   let mk_if = mk_if next_is condition in
   let {State.stack} = st in
   Ok
@@ -1407,7 +1526,15 @@ let jump_if_or_pop st ~jump_if target next_offset_opt =
 let for_iter st delta next_offset_opt =
   let open IResult.Let_syntax in
   let {State.loc} = st in
-  let* iter, st = State.pop_and_cast st in
+  let* iter, st =
+    match st.State.version with
+    | Python_3_10 ->
+        State.pop_and_cast st
+    | Python_3_12 ->
+        let* iter = State.peek st in
+        let+ iter = State.cast_exp st iter in
+        (iter, st)
+  in
   let {State.stack= other_stack} = st in
   let* id, st = call_builtin_function st NextIter [iter] in
   let* has_item, st = call_builtin_function st HasNextIter [iter] in
@@ -1415,11 +1542,23 @@ let for_iter st delta next_offset_opt =
   (* In the next branch, we know the iterator has an item available. Let's fetch it and
      push it on the stack. *)
   let* next_offset = Offset.get ~loc next_offset_opt in
-  (* The iterator object stays on the stack while in the for loop, let's push it back *)
-  let st = State.push st iter in
+  let st =
+    match st.State.version with
+    | Python_3_10 ->
+        (* The iterator object stays on the stack while in the for loop, let's push it back *)
+        State.push st iter
+    | Python_3_12 ->
+        st
+  in
   let st = State.push st (Exp.Temp id) in
   let* next_label = State.get_node_name st next_offset in
-  let {State.stack= next_stack} = st in
+  let next_stack, other_stack =
+    match st.State.version with
+    | Python_3_10 ->
+        (st.State.stack, other_stack)
+    | Python_3_12 ->
+        (st.State.stack, st.State.stack)
+  in
   let other_offset = delta + next_offset in
   let* other_label = State.get_node_name st other_offset in
   Ok
@@ -1456,9 +1595,18 @@ let raise_varargs st argc =
       external_error st (Error.RaiseExceptionInvalid argc)
 
 
-let get_cell_name {FFI.Code.co_cellvars; co_freevars} arg =
-  let sz = Array.length co_cellvars in
-  if arg < sz then co_cellvars.(arg) else co_freevars.(arg - sz)
+let get_cell_name {FFI.Code.co_cellvars; co_freevars; version} st arg argval =
+  match (version : FFI.version) with
+  | Python_3_10 ->
+      let sz = Array.length co_cellvars in
+      let name = if arg < sz then co_cellvars.(arg) else co_freevars.(arg - sz) in
+      Ok (Ident.mk name)
+  | Python_3_12 -> (
+    match argval with
+    | FFI.Constant.PYCString str ->
+        Ok (Ident.mk str)
+    | _ ->
+        external_error st (Error.ArgValStringExpected argval) )
 
 
 let build_collection st count ~f =
@@ -1562,576 +1710,811 @@ and map_convert_ffi_const st values =
       exp :: values )
 
 
-let parse_bytecode st ({FFI.Code.co_consts; co_names; co_varnames} as code)
-    ({FFI.Instruction.opname; starts_line; arg} as instr) next_offset_opt =
+let only_supported_in_python_3_10 opname version =
+  match version with
+  | FFI.Python_3_10 ->
+      ()
+  | FFI.Python_3_12 ->
+      L.die UserError "opcode %s should not appear with Python3.12" opname
+
+
+let only_supported_from_python_3_12 opname version =
+  match version with
+  | FFI.Python_3_12 ->
+      ()
+  | FFI.Python_3_10 ->
+      L.die UserError "opcode %s should not appear with Python3.10" opname
+
+
+let binary_ops : BinaryOp.t array =
+  [| Add
+   ; And
+   ; FloorDivide
+   ; LShift
+   ; MatrixMultiply
+   ; Multiply
+   ; Modulo (* named Remainder in Python 3.12 *)
+   ; Or
+   ; Power
+   ; RShift
+   ; Subtract
+   ; TrueDivide
+   ; Xor |]
+
+
+let nb_binary_ops = Array.length binary_ops
+
+let jump_absolute st arg next_offset =
+  let open IResult.Let_syntax in
+  let offset = next_offset + (2 * arg) in
+  let* label = State.get_node_name st offset in
+  let {State.stack} = st in
+  let jump = TerminatorBuilder.mk_jump label stack in
+  Ok (st, Some jump)
+
+
+let parse_bytecode st ({FFI.Code.co_consts; co_names; co_varnames; version} as code)
+    ({FFI.Instruction.opname; starts_line; arg; argval} as instr) next_offset_opt =
   let open IResult.Let_syntax in
   let st = if Option.is_some starts_line then {st with State.loc= starts_line} else st in
   State.debug st "%a@\n" (FFI.Instruction.pp ~code) instr ;
-  match opname with
-  | "LOAD_ASSERTION_ERROR" ->
-      Ok (State.push st Exp.AssertionError, None)
-  | "LOAD_CONST" ->
-      let* exp = convert_ffi_const st co_consts.(arg) in
-      let st = State.push_symbol st exp in
-      Ok (st, None)
-  | "LOAD_NAME" ->
-      load st Name co_names.(arg)
-  | "LOAD_GLOBAL" ->
-      load st Global co_names.(arg)
-  | "LOAD_FAST" ->
-      load st Fast co_varnames.(arg)
-  | "LOAD_ATTR" ->
-      let attr = co_names.(arg) |> Ident.mk in
-      let* exp, st = State.pop_and_cast st in
-      let exp = Exp.GetAttr {exp; attr} in
-      assign_to_temp_and_push st exp
-  | "LOAD_DEREF" ->
-      let name = get_cell_name code arg |> Ident.mk in
-      let rhs = Exp.LoadDeref {slot= arg; name} in
-      let lhs, st = State.fresh_id st in
-      let stmt = Stmt.Let {lhs; rhs} in
-      let st = State.push_stmt st stmt in
-      let st = State.push st (Exp.Temp lhs) in
-      Ok (st, None)
-  | "LOAD_CLASSDEREF" ->
-      let name = get_cell_name code arg |> Ident.mk in
-      let rhs = Exp.LoadClassDeref {slot= arg; name} in
-      let lhs, st = State.fresh_id st in
-      let stmt = Stmt.Let {lhs; rhs} in
-      let st = State.push_stmt st stmt in
-      let st = State.push st (Exp.Temp lhs) in
-      Ok (st, None)
-  | "STORE_NAME" ->
-      store st Name co_names.(arg)
-  | "STORE_GLOBAL" ->
-      store st Global co_names.(arg)
-  | "STORE_FAST" ->
-      store st Fast co_varnames.(arg)
-  | "STORE_ATTR" ->
-      let attr = co_names.(arg) |> Ident.mk in
-      let* lhs, st = State.pop_and_cast st in
-      let* rhs, st = State.pop_and_cast st in
-      let stmt = Stmt.SetAttr {lhs; attr; rhs} in
-      let st = State.push_stmt st stmt in
-      Ok (st, None)
-  | "STORE_SUBSCR" ->
-      (* Implements TOS1[TOS] = TOS2.  *)
-      let* index, st = State.pop_and_cast st in
-      let* lhs, st = State.pop_and_cast st in
-      let* rhs, st = State.pop_and_cast st in
-      let stmt = Stmt.StoreSubscript {lhs; index; rhs} in
-      let st = State.push_stmt st stmt in
-      Ok (st, None)
-  | "STORE_DEREF" ->
-      let name = get_cell_name code arg |> Ident.mk in
-      let* rhs, st = State.pop_and_cast st in
-      let stmt = Stmt.StoreDeref {name; slot= arg; rhs} in
-      let st = State.push_stmt st stmt in
-      Ok (st, None)
-  | "RETURN_VALUE" ->
-      let* ret, st = State.pop_and_cast st in
-      Ok (st, Some (TerminatorBuilder.Return ret))
-  | "CALL_FUNCTION" ->
-      call_function st arg
-  | "CALL_FUNCTION_KW" ->
-      call_function_kw st arg
-  | "CALL_FUNCTION_EX" ->
-      call_function_ex st arg
-  | "POP_TOP" ->
-      let* _, st = State.pop st in
-      Ok (st, None)
-  | "BINARY_ADD" ->
-      parse_op st (Binary Add) 2
-  | "BINARY_SUBTRACT" ->
-      parse_op st (Binary Subtract) 2
-  | "BINARY_AND" ->
-      parse_op st (Binary And) 2
-  | "BINARY_FLOOR_DIVIDE" ->
-      parse_op st (Binary FloorDivide) 2
-  | "BINARY_LSHIFT" ->
-      parse_op st (Binary LShift) 2
-  | "BINARY_MATRIX_MULTIPLY" ->
-      parse_op st (Binary MatrixMultiply) 2
-  | "BINARY_MODULO" ->
-      parse_op st (Binary Modulo) 2
-  | "BINARY_MULTIPLY" ->
-      parse_op st (Binary Multiply) 2
-  | "BINARY_OR" ->
-      parse_op st (Binary Or) 2
-  | "BINARY_POWER" ->
-      parse_op st (Binary Power) 2
-  | "BINARY_RSHIFT" ->
-      parse_op st (Binary RShift) 2
-  | "BINARY_TRUE_DIVIDE" ->
-      parse_op st (Binary TrueDivide) 2
-  | "BINARY_XOR" ->
-      parse_op st (Binary Xor) 2
-  | "INPLACE_ADD" ->
-      parse_op st (Inplace Add) 2
-  | "INPLACE_SUBTRACT" ->
-      parse_op st (Inplace Subtract) 2
-  | "INPLACE_AND" ->
-      parse_op st (Inplace And) 2
-  | "INPLACE_FLOOR_DIVIDE" ->
-      parse_op st (Inplace FloorDivide) 2
-  | "INPLACE_LSHIFT" ->
-      parse_op st (Inplace LShift) 2
-  | "INPLACE_MATRIX_MULTIPLY" ->
-      parse_op st (Inplace MatrixMultiply) 2
-  | "INPLACE_MODULO" ->
-      parse_op st (Inplace Modulo) 2
-  | "INPLACE_MULTIPLY" ->
-      parse_op st (Inplace Multiply) 2
-  | "INPLACE_OR" ->
-      parse_op st (Inplace Or) 2
-  | "INPLACE_POWER" ->
-      parse_op st (Inplace Power) 2
-  | "INPLACE_RSHIFT" ->
-      parse_op st (Inplace RShift) 2
-  | "INPLACE_TRUE_DIVIDE" ->
-      parse_op st (Inplace TrueDivide) 2
-  | "INPLACE_XOR" ->
-      parse_op st (Inplace Xor) 2
-  | "UNARY_POSITIVE" ->
-      parse_op st (Unary Positive) 1
-  | "UNARY_NEGATIVE" ->
-      parse_op st (Unary Negative) 1
-  | "UNARY_NOT" ->
-      parse_op st (Unary Not) 1
-  | "UNARY_INVERT" ->
-      parse_op st (Unary Invert) 1
-  | "MAKE_FUNCTION" ->
-      make_function st arg
-  | "BUILD_CONST_KEY_MAP" ->
-      let* keys, st = State.pop_and_cast st in
-      let* tys, st = State.pop_n_and_cast st arg in
-      let* id, st = call_builtin_function st BuildConstKeyMap (keys :: tys) in
-      let st = State.push st (Exp.Temp id) in
-      Ok (st, None)
-  | "BUILD_LIST" ->
-      build_collection st arg ~f:(fun values -> Exp.Collection {kind= List; values; unpack= false})
-  | "BUILD_SET" ->
-      build_collection st arg ~f:(fun values -> Exp.Collection {kind= Set; values; unpack= false})
-  | "BUILD_TUPLE" ->
-      build_collection st arg ~f:(fun values ->
-          Exp.Collection {kind= Tuple; values; unpack= false} )
-  | "BUILD_SLICE" ->
-      build_collection st arg ~f:(fun values -> Exp.BuildSlice values)
-  | "BUILD_STRING" ->
-      build_collection st arg ~f:(fun values -> Exp.BuildString values)
-  | "BUILD_MAP" ->
-      build_collection st (2 * arg) ~f:(fun values ->
-          Exp.Collection {kind= Map; values; unpack= false} )
-  | "BINARY_SUBSCR" ->
-      let* index, st = State.pop_and_cast st in
-      let* exp, st = State.pop_and_cast st in
-      let exp = Exp.Subscript {exp; index} in
-      assign_to_temp_and_push st exp
-  | "LOAD_BUILD_CLASS" ->
-      let st = State.push_symbol st (BuiltinCaller BuildClass) in
-      Ok (st, None)
-  | "LOAD_METHOD" ->
-      let name = co_names.(arg) |> Ident.mk in
-      let* tos, st = State.pop_and_cast st in
-      let exp = Exp.LoadMethod (tos, name) in
-      let st = State.push_symbol st exp in
-      Ok (st, None)
-  | "CALL_METHOD" ->
-      let* args, st = State.pop_n_and_cast st arg in
-      let* call, st = State.pop st in
-      let* self_if_needed, name =
-        match call with
-        | Exp.LoadMethod (self_if_needed, name) ->
-            Ok (self_if_needed, name)
-        | _ ->
-            internal_error st (Error.LoadMethodExpected call)
-      in
-      let id, st = call_method st name self_if_needed args in
-      let st = State.push st (Exp.Temp id) in
-      Ok (st, None)
-  | "SETUP_ANNOTATIONS" ->
-      let st = State.push_stmt st SetupAnnotations in
-      Ok (st, None)
-  | "GEN_START" ->
-      (* Note: the spec says we need to pop the stack, but in practice there is nothing to pop.
-         I think there is implicit initialization of the operand stack going on for coroutines.
-         We will investigate later when coroutines will be managed more seriously *)
-      let kind : Stmt.gen_kind =
-        match arg with
-        | 0 ->
-            Generator
-        | 1 ->
-            Coroutine
-        | 2 ->
-            AsyncGenerator
-        | _ ->
-            (* should never happen according to
-               https://github.com/python/cpython/blob/v3.10.9/Python/ceval.c#L2653 *)
-            L.die InternalError "GEN_START wrong arg"
-      in
-      let stmt = Stmt.GenStart {kind} in
-      let st = State.push_stmt st stmt in
-      Ok (st, None)
-  | "IMPORT_NAME" ->
-      let name = co_names.(arg) |> Ident.mk in
-      let* fromlist, st = State.pop_and_cast st in
-      let* level, st = State.pop_and_cast st in
-      let lhs, st = State.fresh_id st in
-      let rhs = Exp.ImportName {name; fromlist; level} in
-      let stmt = Stmt.Let {lhs; rhs} in
-      let st = State.push_stmt st stmt in
-      let st = State.push st (Exp.Temp lhs) in
-      Ok (st, None)
-  | "IMPORT_STAR" ->
-      let* module_object, st = State.pop_and_cast st in
-      let st = State.push_stmt st (ImportStar module_object) in
-      Ok (st, None)
-  | "IMPORT_FROM" ->
-      let name = co_names.(arg) |> Ident.mk in
-      let* exp = State.peek st in
-      let* exp = State.cast_exp st exp in
-      let lhs, st = State.fresh_id st in
-      let rhs = Exp.ImportFrom {name; exp} in
-      let stmt = Stmt.Let {lhs; rhs} in
-      let st = State.push_stmt st stmt in
-      let st = State.push st (Exp.Temp lhs) in
-      Ok (st, None)
-  | "COMPARE_OP" ->
-      let* cmp_op =
-        match List.nth CompareOp.all arg with
-        | Some op ->
-            Ok op
-        | None ->
-            external_error st (Error.CompareOp arg)
-      in
-      let* rhs, st = State.pop_and_cast st in
-      let* lhs, st = State.pop_and_cast st in
-      let* id, st = call_builtin_function st (Compare cmp_op) [lhs; rhs] in
-      let st = State.push st (Exp.Temp id) in
-      Ok (st, None)
-  | "LOAD_CLOSURE" ->
-      let name = get_cell_name code arg |> Ident.mk in
-      let rhs = Exp.LoadClosure {slot= arg; name} in
-      let lhs, st = State.fresh_id st in
-      let stmt = Stmt.Let {lhs; rhs} in
-      let st = State.push_stmt st stmt in
-      let st = State.push st (Exp.Temp lhs) in
-      Ok (st, None)
-  | "NOP" ->
-      Ok (st, None)
-  | "IS_OP" ->
-      let* rhs, st = State.pop_and_cast st in
-      let* lhs, st = State.pop_and_cast st in
-      let cmp = if Int.equal arg 1 then CompareOp.IsNot else CompareOp.Is in
-      let* id, st = call_builtin_function st (Compare cmp) [lhs; rhs] in
-      let st = State.push st (Exp.Temp id) in
-      Ok (st, None)
-  | "CONTAINS_OP" ->
-      let* rhs, st = State.pop_and_cast st in
-      let* lhs, st = State.pop_and_cast st in
-      let cmp = if Int.equal arg 1 then CompareOp.NotIn else CompareOp.In in
-      let* id, st = call_builtin_function st (Compare cmp) [lhs; rhs] in
-      let st = State.push st (Exp.Temp id) in
-      Ok (st, None)
-  | "DUP_TOP" ->
-      let* tos = State.peek st in
-      let st = State.push_symbol st tos in
-      Ok (st, None)
-  | "UNPACK_SEQUENCE" ->
-      unpack_sequence st arg
-  | "FORMAT_VALUE" ->
-      format_value st arg
-  | "POP_JUMP_IF_TRUE" ->
-      pop_jump_if ~next_is:false st (2 * arg) next_offset_opt
-  | "POP_JUMP_IF_FALSE" ->
-      pop_jump_if ~next_is:true st (2 * arg) next_offset_opt
-  | "JUMP_FORWARD" ->
-      let {State.loc} = st in
-      (* This instruction gives us a relative delta w.r.t the next offset, so we turn it into an
-         absolute offset right away *)
-      let* next_offset = Offset.get ~loc next_offset_opt in
-      let offset = next_offset + (2 * arg) in
-      let* label = State.get_node_name st offset in
-      let {State.stack} = st in
-      let jump = TerminatorBuilder.mk_jump label stack in
-      Ok (st, Some jump)
-  | "JUMP_ABSOLUTE" ->
-      let* label = State.get_node_name st (2 * arg) in
-      let {State.stack} = st in
-      let jump = TerminatorBuilder.mk_jump label stack in
-      Ok (st, Some jump)
-  | "GET_ITER" ->
-      let* tos, st = State.pop_and_cast st in
-      let* id, st = call_builtin_function st GetIter [tos] in
-      let exp = Exp.Temp id in
-      let st = State.push st exp in
-      Ok (st, None)
-  | "GET_AITER" ->
-      let* tos, st = State.pop_and_cast st in
-      let id, st = call_method st Ident.Special.aiter tos [] in
-      let st = State.push st (Exp.Temp id) in
-      Ok (st, None)
-  | "FOR_ITER" ->
-      for_iter st (2 * arg) next_offset_opt
-  | "JUMP_IF_TRUE_OR_POP" ->
-      jump_if_or_pop ~jump_if:true st (2 * arg) next_offset_opt
-  | "JUMP_IF_FALSE_OR_POP" ->
-      jump_if_or_pop ~jump_if:false st (2 * arg) next_offset_opt
-  | "DUP_TOP_TWO" ->
-      let* tos0, st = State.pop st in
-      let* tos1, st = State.pop st in
-      let st = State.push_symbol st tos1 in
-      let st = State.push_symbol st tos0 in
-      let st = State.push_symbol st tos1 in
-      let st = State.push_symbol st tos0 in
-      Ok (st, None)
-  | "EXTENDED_ARG" ->
-      (* The FFI.Instruction framework already did the magic and this opcode can be ignored. *)
-      Ok (st, None)
-  | "POP_BLOCK" ->
-      Ok (st, None)
-  | "ROT_TWO" ->
-      let* st = State.rot_n st 2 in
-      Ok (st, None)
-  | "ROT_THREE" ->
-      let* st = State.rot_n st 3 in
-      Ok (st, None)
-  | "ROT_FOUR" ->
-      let* st = State.rot_n st 4 in
-      Ok (st, None)
-  | "ROT_N" ->
-      let* st = State.rot_n st arg in
-      Ok (st, None)
-  | "SETUP_WITH" ->
-      let* context_manager, st = State.pop_and_cast st in
-      let st = State.push_symbol st (ContextManagerExit context_manager) in
-      let id, st = call_method st Ident.Special.enter context_manager [] in
-      let st = State.push st (Exp.Temp id) in
-      Ok (st, None)
-  | "BEGIN_FINALLY" ->
-      let {State.loc} = st in
-      let* next_offset = Offset.get ~loc next_offset_opt in
-      let* label = State.get_node_name st next_offset in
-      let st = State.push st Exp.none in
-      let {State.stack} = st in
-      let jump = TerminatorBuilder.mk_jump label stack in
-      Ok (st, Some jump)
-  | "SETUP_FINALLY" ->
-      Ok (st, None)
-  | "END_FINALLY" ->
-      let {State.loc} = st in
-      let* next_offset = Offset.get ~loc next_offset_opt in
-      let* ret, st = State.pop st in
-      let {State.stack} = st in
-      let label_offset =
-        match ret with Exp.CallFinallyReturn {offset} -> offset | _ -> next_offset
-      in
-      let* label = State.get_node_name st label_offset in
-      let jump = TerminatorBuilder.mk_jump label stack in
-      Ok (st, Some jump)
-  | "CALL_FINALLY" ->
-      let {State.loc} = st in
-      let* next_offset = Offset.get ~loc next_offset_opt in
-      let jump_offset = next_offset + arg in
-      let st = State.push_symbol st (Exp.CallFinallyReturn {offset= next_offset}) in
-      let* label = State.get_node_name st jump_offset in
-      let {State.stack} = st in
-      Ok (st, Some (TerminatorBuilder.mk_jump label stack))
-  | "POP_FINALLY" ->
-      (* see https://github.com/python/cpython/blob/3.8/Python/ceval.c#L2129 *)
-      let* st =
-        if arg <> 0 then
-          let* ret, st = State.pop st in
-          let* _, st = State.pop st in
-          let st = State.push_symbol st ret in
-          Ok st
-        else
-          let* _, st = State.pop st in
-          Ok st
-      in
-      Ok (st, None)
-  | "RAISE_VARARGS" ->
-      raise_varargs st arg
-  | "POP_EXCEPT" ->
-      internal_error st (Error.UnsupportedOpcode opname)
-  | "BUILD_TUPLE_UNPACK_WITH_CALL"
-    (* No real difference between the two but in case of an error, which shouldn't happen since
-       the code is known to compile *)
-  | "BUILD_TUPLE_UNPACK" ->
-      build_collection st arg ~f:(fun values -> Exp.Collection {kind= Tuple; values; unpack= true})
-  | "BUILD_LIST_UNPACK" ->
-      build_collection st arg ~f:(fun values -> Exp.Collection {kind= List; values; unpack= true})
-  | "BUILD_SET_UNPACK" ->
-      build_collection st arg ~f:(fun values -> Exp.Collection {kind= Set; values; unpack= true})
-  | "BUILD_MAP_UNPACK_WITH_CALL" | "BUILD_MAP_UNPACK" ->
+  try
+    match opname with
+    | "LOAD_ASSERTION_ERROR" ->
+        Ok (State.push st Exp.AssertionError, None)
+    | "LOAD_CONST" ->
+        let* exp = convert_ffi_const st co_consts.(arg) in
+        let st = State.push_symbol st exp in
+        Ok (st, None)
+    | "LOAD_NAME" ->
+        load st Name co_names.(arg)
+    | "LOAD_GLOBAL" ->
+        let idx = match version with Python_3_10 -> arg | Python_3_12 -> arg lsr 1 in
+        let st =
+          match version with
+          | Python_3_12 when arg land 1 <> 0 ->
+              State.push_symbol st Null
+          | _ ->
+              st
+        in
+        load st Global co_names.(idx)
+    | "LOAD_FAST" ->
+        load st Fast co_varnames.(arg)
+    | "LOAD_ATTR" ->
+        let idx = match version with Python_3_10 -> arg | Python_3_12 -> arg lsr 1 in
+        let attr = co_names.(idx) |> Ident.mk in
+        let* exp, st = State.pop_and_cast st in
+        let exp = Exp.GetAttr {exp; attr} in
+        let st =
+          match version with
+          | Python_3_12 when arg land 1 <> 0 ->
+              State.push_symbol st Null
+          | _ ->
+              st
+        in
+        assign_to_temp_and_push st exp
+    | "LOAD_DEREF" ->
+        let* name = get_cell_name code st arg argval in
+        let rhs = Exp.LoadDeref {slot= arg; name} in
+        let lhs, st = State.fresh_id st in
+        let stmt = Stmt.Let {lhs; rhs} in
+        let st = State.push_stmt st stmt in
+        let st = State.push st (Exp.Temp lhs) in
+        Ok (st, None)
+    | "LOAD_CLASSDEREF" ->
+        let* name = get_cell_name code st arg argval in
+        let rhs = Exp.LoadClassDeref {slot= arg; name} in
+        let lhs, st = State.fresh_id st in
+        let stmt = Stmt.Let {lhs; rhs} in
+        let st = State.push_stmt st stmt in
+        let st = State.push st (Exp.Temp lhs) in
+        Ok (st, None)
+    | "LOAD_FAST_CHECK" ->
+        only_supported_from_python_3_12 opname version ;
+        let name = co_varnames.(arg) |> Ident.mk in
+        let rhs = Exp.LoadFastCheck {name} in
+        let lhs, st = State.fresh_id st in
+        let stmt = Stmt.Let {lhs; rhs} in
+        let st = State.push_stmt st stmt in
+        let st = State.push st (Exp.Temp lhs) in
+        Ok (st, None)
+    | "LOAD_FAST_AND_CLEAR" ->
+        only_supported_from_python_3_12 opname version ;
+        let name = co_varnames.(arg) |> Ident.mk in
+        let rhs = Exp.LoadFastAndClear {name} in
+        let lhs, st = State.fresh_id st in
+        let stmt = Stmt.Let {lhs; rhs} in
+        let st = State.push_stmt st stmt in
+        let st = State.push st (Exp.Temp lhs) in
+        Ok (st, None)
+    | "STORE_NAME" ->
+        store st Name co_names.(arg)
+    | "STORE_GLOBAL" ->
+        store st Global co_names.(arg)
+    | "STORE_FAST" ->
+        store st Fast co_varnames.(arg)
+    | "STORE_ATTR" ->
+        let attr = co_names.(arg) |> Ident.mk in
+        let* lhs, st = State.pop_and_cast st in
+        let* rhs, st = State.pop_and_cast st in
+        let stmt = Stmt.SetAttr {lhs; attr; rhs} in
+        let st = State.push_stmt st stmt in
+        Ok (st, None)
+    | "STORE_SUBSCR" ->
+        (* Implements TOS1[TOS] = TOS2.  *)
+        let* index, st = State.pop_and_cast st in
+        let* lhs, st = State.pop_and_cast st in
+        let* rhs, st = State.pop_and_cast st in
+        let stmt = Stmt.StoreSubscript {lhs; index; rhs} in
+        let st = State.push_stmt st stmt in
+        Ok (st, None)
+    | "STORE_DEREF" ->
+        let* name = get_cell_name code st arg argval in
+        let* rhs, st = State.pop_and_cast st in
+        let stmt = Stmt.StoreDeref {name; slot= arg; rhs} in
+        let st = State.push_stmt st stmt in
+        Ok (st, None)
+    | "STORE_SLICE" ->
+        only_supported_from_python_3_12 opname version ;
+        let* end_, st = State.pop_and_cast st in
+        let* start, st = State.pop_and_cast st in
+        let* container, st = State.pop_and_cast st in
+        let* rhs, st = State.pop_and_cast st in
+        let st = State.push_stmt st (StoreSlice {container; start; end_; rhs}) in
+        Ok (st, None)
+    | "COPY_FREE_VARS" ->
+        only_supported_from_python_3_12 opname version ;
+        let st = State.push_stmt st (CopyFreeVars arg) in
+        Ok (st, None)
+    | "MAKE_CELL" ->
+        only_supported_from_python_3_12 opname version ;
+        let st = State.push_stmt st (MakeCell arg) in
+        Ok (st, None)
+    | "CHECK_EXC_MATCH" ->
+        only_supported_from_python_3_12 opname version ;
+        let* _, st = State.pop st in
+        let* _, st = State.pop st in
+        let st = State.push_symbol st Exp.Null in
+        Ok (st, None)
+    | "CLEANUP_THROW" ->
+        only_supported_from_python_3_12 opname version ;
+        Ok (st, None)
+    | "PUSH_EXC_INFO" ->
+        only_supported_from_python_3_12 opname version ;
+        let* tos, st = State.pop st in
+        let st = State.push_symbol st Null in
+        let st = State.push_symbol st tos in
+        Ok (st, None)
+    | "RETURN_GENERATOR" ->
+        let st = State.push_symbol st Exp.Null in
+        (* NOTE: unclear what we should do with generated value *)
+        Ok (st, None)
+    | "RETURN_VALUE" ->
+        let* ret, st = State.pop_and_cast st in
+        Ok (st, Some (TerminatorBuilder.Return ret))
+    | "KW_NAMES" ->
+        only_supported_from_python_3_12 opname version ;
+        let* exp = convert_ffi_const st co_consts.(arg) in
+        let* names_tuple = State.cast_exp st exp in
+        let st = State.push_symbol st (Keywords names_tuple) in
+        Ok (st, None)
+    | "CALL" ->
+        only_supported_from_python_3_12 opname version ;
+        call_function st version (Args arg)
+    | "CALL_FUNCTION" ->
+        only_supported_in_python_3_10 opname version ;
+        call_function st version (Args arg)
+    | "CALL_FUNCTION_KW" ->
+        only_supported_in_python_3_10 opname version ;
+        call_function_kw st version arg
+    | "CALL_FUNCTION_EX" ->
+        call_function_ex st version arg
+    | "CALL_INTRINSIC_1" ->
+        let* tos, st = State.pop_and_cast st in
+        let* id, st =
+          call_builtin_function st (UnaryIntrinsic BuiltinCaller.unary_intrinsics.(arg - 1)) [tos]
+        in
+        let st = State.push st (Exp.Temp id) in
+        Ok (st, None)
+    | "CALL_INTRINSIC_2" ->
+        let* arg2, st = State.pop_and_cast st in
+        let* arg1, st = State.pop_and_cast st in
+        let* id, st =
+          call_builtin_function st
+            (BinaryIntrinsic BuiltinCaller.binary_intrinsics.(arg - 1))
+            [arg1; arg2]
+        in
+        let st = State.push st (Exp.Temp id) in
+        Ok (st, None)
+    | "POP_TOP" ->
+        let* _, st = State.pop st in
+        Ok (st, None)
+    | "BINARY_OP" ->
+        only_supported_from_python_3_12 opname version ;
+        let op : BuiltinCaller.t =
+          if arg < nb_binary_ops then Binary binary_ops.(arg)
+          else if arg < 2 * nb_binary_ops then Inplace binary_ops.(arg - nb_binary_ops)
+          else assert false
+        in
+        parse_op st op 2
+    | "BINARY_ADD" ->
+        parse_op st (Binary Add) 2
+    | "BINARY_SUBTRACT" ->
+        parse_op st (Binary Subtract) 2
+    | "BINARY_AND" ->
+        parse_op st (Binary And) 2
+    | "BINARY_FLOOR_DIVIDE" ->
+        parse_op st (Binary FloorDivide) 2
+    | "BINARY_LSHIFT" ->
+        parse_op st (Binary LShift) 2
+    | "BINARY_MATRIX_MULTIPLY" ->
+        parse_op st (Binary MatrixMultiply) 2
+    | "BINARY_MODULO" ->
+        parse_op st (Binary Modulo) 2
+    | "BINARY_MULTIPLY" ->
+        parse_op st (Binary Multiply) 2
+    | "BINARY_OR" ->
+        parse_op st (Binary Or) 2
+    | "BINARY_POWER" ->
+        parse_op st (Binary Power) 2
+    | "BINARY_RSHIFT" ->
+        parse_op st (Binary RShift) 2
+    | "BINARY_SLICE" ->
+        only_supported_from_python_3_12 opname version ;
+        let* end_, st = State.pop_and_cast st in
+        let* start, st = State.pop_and_cast st in
+        let* container, st = State.pop_and_cast st in
+        let* id, st = call_builtin_function st BinarySlice [container; start; end_] in
+        let st = State.push st (Exp.Temp id) in
+        Ok (st, None)
+    | "BINARY_TRUE_DIVIDE" ->
+        parse_op st (Binary TrueDivide) 2
+    | "BINARY_XOR" ->
+        parse_op st (Binary Xor) 2
+    | "INPLACE_ADD" ->
+        parse_op st (Inplace Add) 2
+    | "INPLACE_SUBTRACT" ->
+        parse_op st (Inplace Subtract) 2
+    | "INPLACE_AND" ->
+        parse_op st (Inplace And) 2
+    | "INPLACE_FLOOR_DIVIDE" ->
+        parse_op st (Inplace FloorDivide) 2
+    | "INPLACE_LSHIFT" ->
+        parse_op st (Inplace LShift) 2
+    | "INPLACE_MATRIX_MULTIPLY" ->
+        parse_op st (Inplace MatrixMultiply) 2
+    | "INPLACE_MODULO" ->
+        parse_op st (Inplace Modulo) 2
+    | "INPLACE_MULTIPLY" ->
+        parse_op st (Inplace Multiply) 2
+    | "INPLACE_OR" ->
+        parse_op st (Inplace Or) 2
+    | "INPLACE_POWER" ->
+        parse_op st (Inplace Power) 2
+    | "INPLACE_RSHIFT" ->
+        parse_op st (Inplace RShift) 2
+    | "INPLACE_TRUE_DIVIDE" ->
+        parse_op st (Inplace TrueDivide) 2
+    | "INPLACE_XOR" ->
+        parse_op st (Inplace Xor) 2
+    | "UNARY_POSITIVE" ->
+        parse_op st (Unary Positive) 1
+    | "UNARY_NEGATIVE" ->
+        parse_op st (Unary Negative) 1
+    | "UNARY_NOT" ->
+        parse_op st (Unary Not) 1
+    | "UNARY_INVERT" ->
+        parse_op st (Unary Invert) 1
+    | "MAKE_FUNCTION" ->
+        make_function st version arg
+    | "BUILD_CONST_KEY_MAP" ->
+        let* keys, st = State.pop_and_cast st in
+        let* tys, st = State.pop_n_and_cast st arg in
+        let* id, st = call_builtin_function st BuildConstKeyMap (keys :: tys) in
+        let st = State.push st (Exp.Temp id) in
+        Ok (st, None)
+    | "BUILD_LIST" ->
+        build_collection st arg ~f:(fun values ->
+            Exp.Collection {kind= List; values; unpack= false} )
+    | "BUILD_SET" ->
+        build_collection st arg ~f:(fun values -> Exp.Collection {kind= Set; values; unpack= false})
+    | "BUILD_TUPLE" ->
+        build_collection st arg ~f:(fun values ->
+            Exp.Collection {kind= Tuple; values; unpack= false} )
+    | "BUILD_SLICE" ->
+        build_collection st arg ~f:(fun values -> Exp.BuildSlice values)
+    | "BUILD_STRING" ->
+        build_collection st arg ~f:(fun values -> Exp.BuildString values)
+    | "BUILD_MAP" ->
+        build_collection st (2 * arg) ~f:(fun values ->
+            Exp.Collection {kind= Map; values; unpack= false} )
+    | "BINARY_SUBSCR" ->
+        let* index, st = State.pop_and_cast st in
+        let* exp, st = State.pop_and_cast st in
+        let exp = Exp.Subscript {exp; index} in
+        assign_to_temp_and_push st exp
+    | "LOAD_BUILD_CLASS" ->
+        let st = State.push_symbol st (BuiltinCaller BuildClass) in
+        Ok (st, None)
+    | "LOAD_METHOD" ->
+        let name = co_names.(arg) |> Ident.mk in
+        let* tos, st = State.pop_and_cast st in
+        let exp = Exp.LoadMethod (tos, name) in
+        let st = State.push_symbol st exp in
+        Ok (st, None)
+    | "CALL_METHOD" ->
+        let* args, st = State.pop_n_and_cast st arg in
+        let* call, st = State.pop st in
+        let* self_if_needed, name =
+          match call with
+          | Exp.LoadMethod (self_if_needed, name) ->
+              Ok (self_if_needed, name)
+          | _ ->
+              internal_error st (Error.LoadMethodExpected call)
+        in
+        let id, st = call_method st name self_if_needed args in
+        let st = State.push st (Exp.Temp id) in
+        Ok (st, None)
+    | "SETUP_ANNOTATIONS" ->
+        let st = State.push_stmt st SetupAnnotations in
+        Ok (st, None)
+    | "GEN_START" ->
+        (* Note: the spec says we need to pop the stack, but in practice there is nothing to pop.
+           I think there is implicit initialization of the operand stack going on for coroutines.
+           We will investigate later when coroutines will be managed more seriously *)
+        let kind : Stmt.gen_kind =
+          match arg with
+          | 0 ->
+              Generator
+          | 1 ->
+              Coroutine
+          | 2 ->
+              AsyncGenerator
+          | _ ->
+              (* should never happen according to
+                 https://github.com/python/cpython/blob/v3.10.9/Python/ceval.c#L2653 *)
+              L.die InternalError "GEN_START wrong arg"
+        in
+        let stmt = Stmt.GenStart {kind} in
+        let st = State.push_stmt st stmt in
+        Ok (st, None)
+    | "IMPORT_NAME" | "EAGER_IMPORT_NAME" (* note: I did not find spec for this opcode *) ->
+        let name = co_names.(arg) |> Ident.mk in
+        let* fromlist, st = State.pop_and_cast st in
+        let* level, st = State.pop_and_cast st in
+        let lhs, st = State.fresh_id st in
+        let rhs = Exp.ImportName {name; fromlist; level} in
+        let stmt = Stmt.Let {lhs; rhs} in
+        let st = State.push_stmt st stmt in
+        let st = State.push st (Exp.Temp lhs) in
+        Ok (st, None)
+    | "IMPORT_STAR" ->
+        let* module_object, st = State.pop_and_cast st in
+        let st = State.push_stmt st (ImportStar module_object) in
+        Ok (st, None)
+    | "IMPORT_FROM" ->
+        let name = co_names.(arg) |> Ident.mk in
+        let* exp = State.peek st in
+        let* exp = State.cast_exp st exp in
+        let lhs, st = State.fresh_id st in
+        let rhs = Exp.ImportFrom {name; exp} in
+        let stmt = Stmt.Let {lhs; rhs} in
+        let st = State.push_stmt st stmt in
+        let st = State.push st (Exp.Temp lhs) in
+        Ok (st, None)
+    | "COMPARE_OP" ->
+        let idx = match version with Python_3_10 -> arg | Python_3_12 -> arg lsr 4 in
+        let* cmp_op =
+          match List.nth CompareOp.all idx with
+          | Some op ->
+              Ok op
+          | None ->
+              external_error st (Error.CompareOp idx)
+        in
+        let* rhs, st = State.pop_and_cast st in
+        let* lhs, st = State.pop_and_cast st in
+        let* id, st = call_builtin_function st (Compare cmp_op) [lhs; rhs] in
+        let st = State.push st (Exp.Temp id) in
+        Ok (st, None)
+    | "LOAD_LOCALS" ->
+        let st = State.push st LoadLocals in
+        Ok (st, None)
+    | "LOAD_FROM_DICT_OR_DEREF" ->
+        let* mapping, st = State.pop_and_cast st in
+        let st = State.push st (LoadFromDictOrDeref {slot= arg; mapping}) in
+        Ok (st, None)
+    | "LOAD_SUPER_ATTR" ->
+        let* self, st = State.pop_and_cast st in
+        let* class_, st = State.pop_and_cast st in
+        let* super, st = State.pop_and_cast st in
+        let attr = co_names.(arg lsr 2) |> Ident.mk in
+        let lhs, st = State.fresh_id st in
+        let rhs = Exp.LoadSuperAttr {attr; self; class_; super} in
+        let st = State.push_stmt st (Let {lhs; rhs}) in
+        (* TODO: use [arg land 2] *)
+        let st = if arg land 1 <> 0 then State.push_symbol st Null else st in
+        let st = State.push st (Exp.Temp lhs) in
+        Ok (st, None)
+    | "LOAD_CLOSURE" ->
+        let* name = get_cell_name code st arg argval in
+        let rhs = Exp.LoadClosure {slot= arg; name} in
+        let lhs, st = State.fresh_id st in
+        let stmt = Stmt.Let {lhs; rhs} in
+        let st = State.push_stmt st stmt in
+        let st = State.push st (Exp.Temp lhs) in
+        Ok (st, None)
+    | "RESUME" ->
+        only_supported_from_python_3_12 opname version ;
+        Ok (st, None)
+    | "NOP" ->
+        Ok (st, None)
+    | "IS_OP" ->
+        let* rhs, st = State.pop_and_cast st in
+        let* lhs, st = State.pop_and_cast st in
+        let cmp = if Int.equal arg 1 then CompareOp.IsNot else CompareOp.Is in
+        let* id, st = call_builtin_function st (Compare cmp) [lhs; rhs] in
+        let st = State.push st (Exp.Temp id) in
+        Ok (st, None)
+    | "CONTAINS_OP" ->
+        let* rhs, st = State.pop_and_cast st in
+        let* lhs, st = State.pop_and_cast st in
+        let cmp = if Int.equal arg 1 then CompareOp.NotIn else CompareOp.In in
+        let* id, st = call_builtin_function st (Compare cmp) [lhs; rhs] in
+        let st = State.push st (Exp.Temp id) in
+        Ok (st, None)
+    | "COPY" ->
+        only_supported_from_python_3_12 opname version ;
+        let* elt = State.peek ~depth:(arg - 1) st in
+        let st = State.push_symbol st elt in
+        Ok (st, None)
+    | "DUP_TOP" ->
+        let* tos = State.peek st in
+        let st = State.push_symbol st tos in
+        Ok (st, None)
+    | "SWAP" ->
+        only_supported_from_python_3_12 opname version ;
+        let* tos1, st = State.pop st in
+        let* tos2, st = State.pop st in
+        let st = State.push_symbol st tos1 in
+        let st = State.push_symbol st tos2 in
+        Ok (st, None)
+    | "PUSH_NULL" ->
+        only_supported_from_python_3_12 opname version ;
+        let st = State.push_symbol st Null in
+        Ok (st, None)
+    | "RETURN_CONST" ->
+        only_supported_from_python_3_12 opname version ;
+        let* exp = convert_ffi_const st co_consts.(arg) in
+        let* ret = State.cast_exp st exp in
+        Ok (st, Some (TerminatorBuilder.Return ret))
+    | "UNPACK_SEQUENCE" ->
+        unpack_sequence st arg
+    | "FORMAT_VALUE" ->
+        format_value st arg
+    | "POP_JUMP_IF_TRUE" ->
+        pop_jump_if ~next_is:false st arg next_offset_opt
+    | "POP_JUMP_IF_FALSE" ->
+        pop_jump_if ~next_is:true st arg next_offset_opt
+    | "POP_JUMP_IF_NONE" ->
+        only_supported_from_python_3_12 opname version ;
+        pop_jump_if ~next_is:true st arg next_offset_opt
+    | "POP_JUMP_IF_NOT_NONE" ->
+        only_supported_from_python_3_12 opname version ;
+        pop_jump_if ~next_is:false st arg next_offset_opt
+    | "JUMP_FORWARD" ->
+        let {State.loc} = st in
+        let* next_offset = Offset.get ~loc next_offset_opt in
+        jump_absolute st arg next_offset
+    | "JUMP_BACKWARD" | "JUMP_BACKWARD_NO_INTERRUPT" ->
+        only_supported_from_python_3_12 opname version ;
+        let next_offset = instr.FFI.Instruction.offset + 2 in
+        jump_absolute st (-arg) next_offset
+    | "JUMP_ABSOLUTE" ->
+        let* label = State.get_node_name st (2 * arg) in
+        let {State.stack} = st in
+        let jump = TerminatorBuilder.mk_jump label stack in
+        Ok (st, Some jump)
+    | "GET_ITER" ->
+        let* tos, st = State.pop_and_cast st in
+        let* id, st = call_builtin_function st GetIter [tos] in
+        let exp = Exp.Temp id in
+        let st = State.push st exp in
+        Ok (st, None)
+    | "GET_AITER" ->
+        let* tos, st = State.pop_and_cast st in
+        let id, st = call_method st Ident.Special.aiter tos [] in
+        let st = State.push st (Exp.Temp id) in
+        Ok (st, None)
+    | "FOR_ITER" ->
+        for_iter st (2 * arg) next_offset_opt
+    | "END_FOR" ->
+        let* _, st = State.pop st in
+        let* _, st = State.pop st in
+        Ok (st, None)
+    | "JUMP_IF_TRUE_OR_POP" ->
+        jump_if_or_pop ~jump_if:true st (2 * arg) next_offset_opt
+    | "JUMP_IF_FALSE_OR_POP" ->
+        jump_if_or_pop ~jump_if:false st (2 * arg) next_offset_opt
+    | "DUP_TOP_TWO" ->
+        let* tos0, st = State.pop st in
+        let* tos1, st = State.pop st in
+        let st = State.push_symbol st tos1 in
+        let st = State.push_symbol st tos0 in
+        let st = State.push_symbol st tos1 in
+        let st = State.push_symbol st tos0 in
+        Ok (st, None)
+    | "EXTENDED_ARG" ->
+        (* The FFI.Instruction framework already did the magic and this opcode can be ignored. *)
+        Ok (st, None)
+    | "POP_BLOCK" ->
+        Ok (st, None)
+    | "ROT_TWO" ->
+        let* st = State.rot_n st 2 in
+        Ok (st, None)
+    | "ROT_THREE" ->
+        let* st = State.rot_n st 3 in
+        Ok (st, None)
+    | "ROT_FOUR" ->
+        let* st = State.rot_n st 4 in
+        Ok (st, None)
+    | "ROT_N" ->
+        let* st = State.rot_n st arg in
+        Ok (st, None)
+    | "SETUP_WITH" | "BEFORE_WITH" ->
+        (* SETUP_WITH is used in Python3.10 while BEFORE_WITH is used in Python3.12 *)
+        let* context_manager, st = State.pop_and_cast st in
+        let st = State.push_symbol st (ContextManagerExit context_manager) in
+        let id, st = call_method st Ident.Special.enter context_manager [] in
+        let st = State.push st (Exp.Temp id) in
+        Ok (st, None)
+    | "BEGIN_FINALLY" ->
+        let {State.loc} = st in
+        let* next_offset = Offset.get ~loc next_offset_opt in
+        let* label = State.get_node_name st next_offset in
+        let st = State.push st Exp.none in
+        let {State.stack} = st in
+        let jump = TerminatorBuilder.mk_jump label stack in
+        Ok (st, Some jump)
+    | "SETUP_FINALLY" ->
+        Ok (st, None)
+    | "END_FINALLY" ->
+        let {State.loc} = st in
+        let* next_offset = Offset.get ~loc next_offset_opt in
+        let* ret, st = State.pop st in
+        let {State.stack} = st in
+        let label_offset =
+          match ret with Exp.CallFinallyReturn {offset} -> offset | _ -> next_offset
+        in
+        let* label = State.get_node_name st label_offset in
+        let jump = TerminatorBuilder.mk_jump label stack in
+        Ok (st, Some jump)
+    | "CALL_FINALLY" ->
+        let {State.loc} = st in
+        let* next_offset = Offset.get ~loc next_offset_opt in
+        let jump_offset = next_offset + arg in
+        let st = State.push_symbol st (Exp.CallFinallyReturn {offset= next_offset}) in
+        let* label = State.get_node_name st jump_offset in
+        let {State.stack} = st in
+        Ok (st, Some (TerminatorBuilder.mk_jump label stack))
+    | "POP_FINALLY" ->
+        (* see https://github.com/python/cpython/blob/3.8/Python/ceval.c#L2129 *)
+        let* st =
+          if arg <> 0 then
+            let* ret, st = State.pop st in
+            let* _, st = State.pop st in
+            let st = State.push_symbol st ret in
+            Ok st
+          else
+            let* _, st = State.pop st in
+            Ok st
+        in
+        Ok (st, None)
+    | "RAISE_VARARGS" ->
+        raise_varargs st arg
+    | "POP_EXCEPT" ->
+        internal_error st (Error.UnsupportedOpcode opname)
+    | "BUILD_TUPLE_UNPACK_WITH_CALL"
       (* No real difference between the two but in case of an error, which shouldn't happen since
          the code is known to compile *)
-      build_collection st arg ~f:(fun values -> Exp.Collection {kind= Map; values; unpack= true})
-  | "YIELD_VALUE" ->
-      let lhs, st = State.fresh_id st in
-      let* rhs, st = State.pop_and_cast st in
-      let st = State.push_stmt st (Yield {lhs; rhs}) in
-      let st = State.push st (Temp lhs) in
-      Ok (st, None)
-  | "YIELD_FROM" ->
-      (* TODO: it is quite uncertain how we'll deal with these in textual.
-         At the moment this seems to correctly model the stack life-cycle, so
-         I'm happy. We might change/improve things in the future *)
-      let* exp, st = State.pop_and_cast st in
-      (* TODO: learn more about this construct. My understanding is that the
-               receiver stays on the stack if there's a value to yield.
-               we probably should do some encoding like GET_ITER/FOR_ITER.
+    | "BUILD_TUPLE_UNPACK" ->
+        build_collection st arg ~f:(fun values ->
+            Exp.Collection {kind= Tuple; values; unpack= true} )
+    | "BUILD_LIST_UNPACK" ->
+        build_collection st arg ~f:(fun values -> Exp.Collection {kind= List; values; unpack= true})
+    | "BUILD_SET_UNPACK" ->
+        build_collection st arg ~f:(fun values -> Exp.Collection {kind= Set; values; unpack= true})
+    | "BUILD_MAP_UNPACK_WITH_CALL" | "BUILD_MAP_UNPACK" ->
+        (* No real difference between the two but in case of an error, which shouldn't happen since
+           the code is known to compile *)
+        build_collection st arg ~f:(fun values -> Exp.Collection {kind= Map; values; unpack= true})
+    | "YIELD_VALUE" ->
+        let lhs, st = State.fresh_id st in
+        let* rhs, st = State.pop_and_cast st in
+        let st = State.push_stmt st (Yield {lhs; rhs}) in
+        let st = State.push st (Temp lhs) in
+        Ok (st, None)
+    | "YIELD_FROM" ->
+        (* TODO: it is quite uncertain how we'll deal with these in textual.
+           At the moment this seems to correctly model the stack life-cycle, so
+           I'm happy. We might change/improve things in the future *)
+        let* exp, st = State.pop_and_cast st in
+        (* TODO: learn more about this construct. My understanding is that the
+                 receiver stays on the stack if there's a value to yield.
+                 we probably should do some encoding like GET_ITER/FOR_ITER.
 
-               For now, we leave it as is until it becomes a problem :D *)
-      let* receiver = State.peek st in
-      let* receiver = State.cast_exp st receiver in
-      (* TODO: it seems that sometimes the TOS is changed from receiver to exp
-         at this point. Check C code and try to understand it better *)
-      let* _, st = call_builtin_function st YieldFrom [receiver; exp] in
-      Ok (st, None)
-  | "GET_YIELD_FROM_ITER" ->
-      (* TODO: it is quite uncertain how we'll deal with these in textual.
-         At the moment this seems to correctly model the stack life-cycle, so
-         I'm happy. We might change/improve things in the future *)
-      let* tos, st = State.pop_and_cast st in
-      let* id, st = call_builtin_function st GetYieldFromIter [tos] in
-      let st = State.push st (Exp.Temp id) in
-      Ok (st, None)
-  | "LIST_APPEND" ->
-      collection_add st opname arg ListAppend
-  | "LIST_EXTEND" ->
-      collection_add st opname arg ListExtend
-  | "LIST_TO_TUPLE" ->
-      let* tos, st = State.pop_and_cast st in
-      let* id, st = call_builtin_function st ListToTuple [tos] in
-      let st = State.push st (Exp.Temp id) in
-      Ok (st, None)
-  | "SET_ADD" ->
-      collection_add st opname arg SetAdd
-  | "SET_UPDATE" ->
-      collection_add st opname arg SetUpdate
-  | "MAP_ADD" ->
-      collection_add st opname arg ~map:true DictSetItem
-  | "DICT_UPDATE" ->
-      collection_add st opname arg DictUpdate
-  | "DICT_MERGE" ->
-      collection_add st opname arg DictMerge
-  | "DELETE_NAME" ->
-      let ident = Ident.mk co_names.(arg) in
-      let stmt = Stmt.Delete {scope= Name; ident} in
-      let st = State.push_stmt st stmt in
-      Ok (st, None)
-  | "DELETE_GLOBAL" ->
-      let ident = Ident.mk co_names.(arg) in
-      let stmt = Stmt.Delete {scope= Global; ident} in
-      let st = State.push_stmt st stmt in
-      Ok (st, None)
-  | "DELETE_FAST" ->
-      let ident = Ident.mk co_varnames.(arg) in
-      let stmt = Stmt.Delete {scope= Fast; ident} in
-      let st = State.push_stmt st stmt in
-      Ok (st, None)
-  | "DELETE_ATTR" ->
-      let attr = co_names.(arg) |> Ident.mk in
-      let* exp, st = State.pop_and_cast st in
-      let stmt = Stmt.DeleteAttr {exp; attr} in
-      let st = State.push_stmt st stmt in
-      Ok (st, None)
-  | "DELETE_DEREF" ->
-      let name = get_cell_name code arg |> Ident.mk in
-      let stmt = Stmt.DeleteDeref {name; slot= arg} in
-      let st = State.push_stmt st stmt in
-      Ok (st, None)
-  | "DELETE_SUBSCR" ->
-      let* index, st = State.pop_and_cast st in
-      let* exp, st = State.pop_and_cast st in
-      let* _id, st = call_builtin_function st DeleteSubscr [exp; index] in
-      Ok (st, None)
-  | "GET_AWAITABLE" ->
-      let* tos, st = State.pop_and_cast st in
-      let* id, st = call_builtin_function st GetAwaitable [tos] in
-      let st = State.push st (Exp.Temp id) in
-      Ok (st, None)
-  | "GET_ANEXT" ->
-      let* tos = State.peek st in
-      let* tos = State.cast_exp st tos in
-      let id, st = call_method st Ident.Special.anext tos [] in
-      let* id, st = call_builtin_function st GetAwaitable [Exp.Temp id] in
-      let st = State.push st (Exp.Temp id) in
-      Ok (st, None)
-  | "BEFORE_ASYNC_WITH" ->
-      (* See https://github.com/python/cpython/blob/3.8/Python/ceval.c#L3237 *)
-      let* tos, st = State.pop_and_cast st in
-      let st = State.push_symbol st (ContextManagerExit tos) in
-      let id, st = call_method st Ident.Special.enter tos [] in
-      let st = State.push st (Exp.Temp id) in
-      Ok (st, None)
-  | "SETUP_ASYNC_WITH" ->
-      (* See https://github.com/python/cpython/blob/3.8/Python/ceval.c#L3261 *)
-      (* This is nope operation until we translate exceptino throwing *)
-      Ok (st, None)
-  | "END_ASYNC_FOR" ->
-      (* This instructions designates the end of an async for loop. Such a loop
-         always ends with an exception.
-         https://quentin.pradet.me/blog/using-asynchronous-for-loops-in-python.html
-         https://superfastpython.com/asyncio-async-for/
-         We model it like a throwing exception for now. This offset will not be reached
-         by our DFS anyway since we don't model exceptional edges yet.
-      *)
-      Ok (st, Some (TerminatorBuilder.Throw Exp.none))
-  | "RERAISE" | "WITH_EXCEPT_START" ->
-      Ok (st, None)
-  | "UNPACK_EX" ->
-      (* The low byte of counts is the number of values before the list value, the high byte of
-         counts the number of values after it. *)
-      let to_int i = Exp.of_int i in
-      let nr_before = arg land 0xff in
-      let nr_after = (arg lsr 8) land 0xff in
-      let* tos, st = State.pop_and_cast st in
-      (* [UnpackEx m n exp] should unpack the [exp] collection into
-         - [m] single values which are the first items in [exp]
-         - [n] single values which are the latest items in [exp]
-         - the rest stays into an iterable collection.
-         We'll consider it returns a tuple of the right size that we can index
-         to populate the stack *)
-      let* res_id, st =
-        call_builtin_function st UnpackEx [to_int nr_before; to_int nr_after; tos]
-      in
-      let res = Exp.Temp res_id in
-      let rec push st nr =
-        if nr > 0 then
-          let exp = Exp.Subscript {exp= res; index= to_int (nr - 1)} in
-          let st = State.push st exp in
-          push st (nr - 1)
-        else st
-      in
-      let st = push st (nr_before + nr_after + 1) in
-      Ok (st, None)
-  | "MATCH_CLASS" ->
-      let* names, st = State.pop_and_cast st in
-      let* type_, st = State.pop_and_cast st in
-      let* subject, st = State.pop_and_cast st in
-      let lhs, st = State.fresh_id st in
-      let stmt = Stmt.Let {lhs; rhs= MatchClass {subject; type_; count= arg; names}} in
-      let st = State.push_stmt st stmt in
-      let st = State.push st (AttributesOfMatchClass (Temp lhs)) in
-      let st = State.push st (BoolOfMatchClass (Temp lhs)) in
-      Ok (st, None)
-  | "MATCH_SEQUENCE" ->
-      let* tos = State.peek st in
-      let* exp = State.cast_exp st tos in
-      let st = State.push st (MatchSequence exp) in
-      Ok (st, None)
-  | "GET_LEN" ->
-      let* tos = State.peek st in
-      let* exp = State.cast_exp st tos in
-      let st = State.push st (GetLen exp) in
-      Ok (st, None)
-  | _ ->
-      internal_error st (Error.UnsupportedOpcode opname)
+                 For now, we leave it as is until it becomes a problem :D *)
+        let* receiver = State.peek st in
+        let* receiver = State.cast_exp st receiver in
+        (* TODO: it seems that sometimes the TOS is changed from receiver to exp
+           at this point. Check C code and try to understand it better *)
+        let* _, st = call_builtin_function st YieldFrom [receiver; exp] in
+        Ok (st, None)
+    | "GET_YIELD_FROM_ITER" ->
+        (* TODO: it is quite uncertain how we'll deal with these in textual.
+           At the moment this seems to correctly model the stack life-cycle, so
+           I'm happy. We might change/improve things in the future *)
+        let* tos, st = State.pop_and_cast st in
+        let* id, st = call_builtin_function st GetYieldFromIter [tos] in
+        let st = State.push st (Exp.Temp id) in
+        Ok (st, None)
+    | "LIST_APPEND" ->
+        collection_add st opname arg ListAppend
+    | "LIST_EXTEND" ->
+        collection_add st opname arg ListExtend
+    | "LIST_TO_TUPLE" ->
+        let* tos, st = State.pop_and_cast st in
+        let* id, st = call_builtin_function st ListToTuple [tos] in
+        let st = State.push st (Exp.Temp id) in
+        Ok (st, None)
+    | "SET_ADD" ->
+        collection_add st opname arg SetAdd
+    | "SET_UPDATE" ->
+        collection_add st opname arg SetUpdate
+    | "MAP_ADD" ->
+        collection_add st opname arg ~map:true DictSetItem
+    | "DICT_UPDATE" ->
+        collection_add st opname arg DictUpdate
+    | "DICT_MERGE" ->
+        collection_add st opname arg DictMerge
+    | "DELETE_NAME" ->
+        let ident = Ident.mk co_names.(arg) in
+        let stmt = Stmt.Delete {scope= Name; ident} in
+        let st = State.push_stmt st stmt in
+        Ok (st, None)
+    | "DELETE_GLOBAL" ->
+        let ident = Ident.mk co_names.(arg) in
+        let stmt = Stmt.Delete {scope= Global; ident} in
+        let st = State.push_stmt st stmt in
+        Ok (st, None)
+    | "DELETE_FAST" ->
+        let ident = Ident.mk co_varnames.(arg) in
+        let stmt = Stmt.Delete {scope= Fast; ident} in
+        let st = State.push_stmt st stmt in
+        Ok (st, None)
+    | "DELETE_ATTR" ->
+        let attr = co_names.(arg) |> Ident.mk in
+        let* exp, st = State.pop_and_cast st in
+        let stmt = Stmt.DeleteAttr {exp; attr} in
+        let st = State.push_stmt st stmt in
+        Ok (st, None)
+    | "DELETE_DEREF" ->
+        let* name = get_cell_name code st arg argval in
+        let stmt = Stmt.DeleteDeref {name; slot= arg} in
+        let st = State.push_stmt st stmt in
+        Ok (st, None)
+    | "DELETE_SUBSCR" ->
+        let* index, st = State.pop_and_cast st in
+        let* exp, st = State.pop_and_cast st in
+        let* _id, st = call_builtin_function st DeleteSubscr [exp; index] in
+        Ok (st, None)
+    | "GET_AWAITABLE" ->
+        let* tos, st = State.pop_and_cast st in
+        let* id, st = call_builtin_function st GetAwaitable [tos] in
+        let st = State.push st (Exp.Temp id) in
+        Ok (st, None)
+    | "GET_ANEXT" ->
+        let* tos = State.peek st in
+        let* tos = State.cast_exp st tos in
+        let id, st = call_method st Ident.Special.anext tos [] in
+        let* id, st = call_builtin_function st GetAwaitable [Exp.Temp id] in
+        let st = State.push st (Exp.Temp id) in
+        Ok (st, None)
+    | "BEFORE_ASYNC_WITH" ->
+        (* See https://github.com/python/cpython/blob/3.8/Python/ceval.c#L3237 *)
+        let* tos, st = State.pop_and_cast st in
+        let st = State.push_symbol st (ContextManagerExit tos) in
+        let id, st = call_method st Ident.Special.enter tos [] in
+        let st = State.push st (Exp.Temp id) in
+        Ok (st, None)
+    | "SETUP_ASYNC_WITH" ->
+        (* See https://github.com/python/cpython/blob/3.8/Python/ceval.c#L3261 *)
+        (* This is nope operation until we translate exceptino throwing *)
+        Ok (st, None)
+    | "END_ASYNC_FOR" ->
+        (* This instructions designates the end of an async for loop. Such a loop
+           always ends with an exception.
+           https://quentin.pradet.me/blog/using-asynchronous-for-loops-in-python.html
+           https://superfastpython.com/asyncio-async-for/
+           We model it like a throwing exception for now. This offset will not be reached
+           by our DFS anyway since we don't model exceptional edges yet.
+        *)
+        Ok (st, Some (TerminatorBuilder.Throw Exp.none))
+    | "RERAISE" | "WITH_EXCEPT_START" ->
+        Ok (st, None)
+    | "UNPACK_EX" ->
+        (* The low byte of counts is the number of values before the list value, the high byte of
+           counts the number of values after it. *)
+        let to_int i = Exp.of_int i in
+        let nr_before = arg land 0xff in
+        let nr_after = (arg lsr 8) land 0xff in
+        let* tos, st = State.pop_and_cast st in
+        (* [UnpackEx m n exp] should unpack the [exp] collection into
+           - [m] single values which are the first items in [exp]
+           - [n] single values which are the latest items in [exp]
+           - the rest stays into an iterable collection.
+           We'll consider it returns a tuple of the right size that we can index
+           to populate the stack *)
+        let* res_id, st =
+          call_builtin_function st UnpackEx [to_int nr_before; to_int nr_after; tos]
+        in
+        let res = Exp.Temp res_id in
+        let rec push st nr =
+          if nr > 0 then
+            let exp = Exp.Subscript {exp= res; index= to_int (nr - 1)} in
+            let st = State.push st exp in
+            push st (nr - 1)
+          else st
+        in
+        let st = push st (nr_before + nr_after + 1) in
+        Ok (st, None)
+    | "MATCH_CLASS" ->
+        let* names, st = State.pop_and_cast st in
+        let* type_, st = State.pop_and_cast st in
+        let* subject, st = State.pop_and_cast st in
+        let lhs, st = State.fresh_id st in
+        let stmt = Stmt.Let {lhs; rhs= MatchClass {subject; type_; count= arg; names}} in
+        let st = State.push_stmt st stmt in
+        let st = State.push st (AttributesOfMatchClass (Temp lhs)) in
+        let st =
+          match version with
+          | Python_3_10 ->
+              State.push st (BoolOfMatchClass (Temp lhs))
+          | Python_3_12 ->
+              st
+        in
+        Ok (st, None)
+    | "MATCH_SEQUENCE" ->
+        let* tos = State.peek st in
+        let* exp = State.cast_exp st tos in
+        let st = State.push st (MatchSequence exp) in
+        Ok (st, None)
+    | "GET_LEN" ->
+        let* tos = State.peek st in
+        let* exp = State.cast_exp st tos in
+        let st = State.push st (GetLen exp) in
+        Ok (st, None)
+    | "END_SEND" ->
+        only_supported_from_python_3_12 opname version ;
+        let* tos1, st = State.pop st in
+        let* _, st = State.pop st in
+        let st = State.push_symbol st tos1 in
+        Ok (st, None)
+    | "SEND" ->
+        (* this instruction has 2 successors but the next instr (1st successor) is the entry of a loop
+           we chose to not translate sincie it is just a a waiting loop "while not computation is not done" *)
+        only_supported_from_python_3_12 opname version ;
+        let {State.loc} = st in
+        let* next_offset = Offset.get ~loc next_offset_opt in
+        let* label = State.get_node_name st (next_offset + (2 * arg)) in
+        let {State.stack} = st in
+        let jump = TerminatorBuilder.mk_jump label stack in
+        Ok (st, Some jump)
+    | _ ->
+        internal_error st (Error.UnsupportedOpcode opname)
+  with Invalid_argument _ -> internal_error st (Error.IndexOutOfBound opname)
 
 
-let get_successors_offset {FFI.Instruction.opname; arg} =
+let get_successors_offset (version : FFI.version) {FFI.Instruction.opname; arg} =
   match opname with
   | "LOAD_ASSERTION_ERROR"
   | "LOAD_CONST"
@@ -2141,16 +2524,31 @@ let get_successors_offset {FFI.Instruction.opname; arg} =
   | "LOAD_ATTR"
   | "LOAD_CLASSDEREF"
   | "LOAD_DEREF"
+  | "LOAD_FAST_CHECK"
+  | "LOAD_FAST_AND_CLEAR"
   | "STORE_NAME"
   | "STORE_GLOBAL"
   | "STORE_FAST"
   | "STORE_ATTR"
   | "STORE_SUBSCR"
   | "STORE_DEREF"
+  | "STORE_SLICE"
+  | "CHECK_EXC_MATCH"
+  | "CLEANUP_THROW"
+  | "PUSH_EXC_INFO"
+  | "RETURN_GENERATOR"
+  | "KW_NAMES"
+  | "CALL"
   | "CALL_FUNCTION"
   | "CALL_FUNCTION_KW"
   | "CALL_FUNCTION_EX"
+  | "CALL_INTRINSIC_1"
+  | "CALL_INTRINSIC_2"
   | "POP_TOP"
+  | "COPY"
+  | "SWAP"
+  | "PUSH_NULL"
+  | "BINARY_OP"
   | "BINARY_ADD"
   | "BINARY_SUBTRACT"
   | "BINARY_AND"
@@ -2162,6 +2560,7 @@ let get_successors_offset {FFI.Instruction.opname; arg} =
   | "BINARY_OR"
   | "BINARY_POWER"
   | "BINARY_RSHIFT"
+  | "BINARY_SLICE"
   | "BINARY_TRUE_DIVIDE"
   | "BINARY_XOR"
   | "INPLACE_ADD"
@@ -2196,10 +2595,15 @@ let get_successors_offset {FFI.Instruction.opname; arg} =
   | "GEN_START"
   | "SETUP_ANNOTATIONS"
   | "IMPORT_NAME"
+  | "EAGER_IMPORT_NAME"
   | "IMPORT_FROM"
   | "IMPORT_STAR"
   | "COMPARE_OP"
+  | "LOAD_LOCALS"
+  | "LOAD_FROM_DICT_OR_DEREF"
+  | "LOAD_SUPER_ATTR"
   | "LOAD_CLOSURE"
+  | "RESUME"
   | "NOP"
   | "IS_OP"
   | "CONTAINS_OP"
@@ -2217,6 +2621,7 @@ let get_successors_offset {FFI.Instruction.opname; arg} =
   | "ROT_FOUR"
   | "ROT_N"
   | "SETUP_WITH"
+  | "BEFORE_WITH"
   | "SETUP_FINALLY"
   | "POP_FINALLY"
   | "POP_EXCEPT"
@@ -2243,6 +2648,7 @@ let get_successors_offset {FFI.Instruction.opname; arg} =
   | "DELETE_ATTR"
   | "DELETE_DEREF"
   | "DELETE_SUBSCR"
+  | "END_FOR"
   | "GET_AWAITABLE"
   | "BEFORE_ASYNC_WITH"
   | "SETUP_ASYNC_WITH"
@@ -2251,18 +2657,35 @@ let get_successors_offset {FFI.Instruction.opname; arg} =
   | "UNPACK_EX"
   | "MATCH_CLASS"
   | "MATCH_SEQUENCE"
-  | "GET_LEN" ->
+  | "GET_LEN"
+  | "MAKE_CELL"
+  | "COPY_FREE_VARS"
+  | "END_SEND" ->
       `NextInstrOnly
-  | "RETURN_VALUE" ->
+  | "RETURN_CONST" | "RETURN_VALUE" ->
       `Return
-  | "POP_JUMP_IF_TRUE" | "POP_JUMP_IF_FALSE" | "JUMP_IF_NOT_EXC_MATCH" ->
-      `NextInstrOrAbsolute (2 * arg)
+  | "POP_JUMP_IF_TRUE"
+  | "POP_JUMP_IF_FALSE"
+  | "JUMP_IF_NOT_EXC_MATCH"
+  | "POP_JUMP_IF_NONE"
+  | "POP_JUMP_IF_NOT_NONE" -> (
+    match version with
+    | Python_3_10 ->
+        `NextInstrOrAbsolute (2 * arg)
+    | Python_3_12 ->
+        `NextInstrOrRelative (2 * arg) )
   | "JUMP_IF_TRUE_OR_POP" | "JUMP_IF_FALSE_OR_POP" ->
       `NextInstrWithPopOrAbsolute (2 * arg)
-  | "FOR_ITER" ->
-      `NextInstrOrRelativeWith2Pop (2 * arg)
-  | "JUMP_FORWARD" ->
+  | "FOR_ITER" -> (
+    match version with
+    | Python_3_10 ->
+        `NextInstrOrRelativeWith2Pop (2 * arg)
+    | Python_3_12 ->
+        `NextInstrOrRelative (2 * arg) )
+  | "JUMP_FORWARD" | "SEND" ->
       `Relative (2 * arg)
+  | "JUMP_BACKWARD" | "JUMP_BACKWARD_NO_INTERRUPT" ->
+      `Relative (-2 * arg)
   | "CALL_FINALLY" ->
       `CallFinallyRelative arg
   | "BEGIN_FINALLY" ->
@@ -2327,7 +2750,7 @@ type cfg_info =
 
 let dummy_cfg_info = {successors= []; predecessors= []; instructions= []}
 
-let build_cfg_skeleton_without_predecessors {FFI.Code.instructions} :
+let build_cfg_skeleton_without_predecessors {FFI.Code.instructions; version} :
     (cfg_info IMap.t, Error.t) result =
   let open IResult.Let_syntax in
   let process_instr map action next_offset_opt next_is_jump_target
@@ -2353,7 +2776,7 @@ let build_cfg_skeleton_without_predecessors {FFI.Code.instructions} :
             map
         , `StartNewOne )
     in
-    match get_successors_offset instr with
+    match get_successors_offset version instr with
     | `NextInstrOnly when not next_is_jump_target ->
         Ok (map, action)
     | `NextInstrOnly ->
@@ -2367,11 +2790,14 @@ let build_cfg_skeleton_without_predecessors {FFI.Code.instructions} :
     | `NextInstrOrAbsolute other_offset ->
         let* next_offset = get_next_offset () in
         register_current_node [(next_offset, 0, Nop); (other_offset, 0, Nop)]
+    | `NextInstrOrRelative delta ->
+        let* next_offset = get_next_offset () in
+        register_current_node [(next_offset, 0, Nop); (next_offset + delta, 0, Nop)]
     | `NextInstrOrRelativeWith2Pop delta ->
         let* next_offset = get_next_offset () in
         register_current_node [(next_offset, 0, Nop); (next_offset + delta, -2, Nop)]
     | `Relative delta ->
-        let* next_offset = get_next_offset () in
+        let* next_offset = if delta > 0 then get_next_offset () else Ok (offset + 2) in
         register_current_node [(next_offset + delta, 0, Nop)]
     | `BeginFinally ->
         let* next_offset = get_next_offset () in
@@ -2593,7 +3019,8 @@ let build_cfg ~debug ~code_qual_name code =
     Ok (st, arity_map)
   in
   let qual_name = code_qual_name code in
-  let st = State.enter ~debug ~code_qual_name ~loc ~cfg_skeleton qual_name in
+  let {FFI.Code.version} = code in
+  let st = State.enter ~debug ~code_qual_name ~loc ~cfg_skeleton version qual_name in
   let* st, _ = List.fold_result topological_order ~init:(st, IMap.add 0 0 IMap.empty) ~f:visit in
   let* cfg = CFG.of_builder st.State.cfg code in
   Ok cfg
@@ -2661,7 +3088,7 @@ let fold_all_inner_codes_and_build_map ~code_qual_name ~(f : FFI.Code.t -> 'a py
   fold_codes QualName.Map.empty code.FFI.Code.co_consts
 
 
-let test_cfg_skeleton ~code_qual_name code =
+let test_cfg_skeleton ~show ~code_qual_name code =
   let test =
     let open IResult.Let_syntax in
     let* map = build_cfg_skeleton_without_predecessors code in
@@ -2670,7 +3097,7 @@ let test_cfg_skeleton ~code_qual_name code =
   match test with
   | Error (_, _, err) ->
       L.internal_error "IR error: %a@\n" Error.pp_kind err
-  | Ok (topological_order, map) ->
+  | Ok (topological_order, map) when show ->
       let qual_name = code_qual_name code |> Option.value_exn in
       F.printf "%a@\n" QualName.pp qual_name ;
       List.iter code.FFI.Code.instructions ~f:(F.printf "%a@\n" (FFI.Instruction.pp ~code)) ;
@@ -2688,6 +3115,8 @@ let test_cfg_skeleton ~code_qual_name code =
           F.printf "%4d: %a@\n" offset (Pp.seq ~sep:" " F.pp_print_int) predecessors )
         map ;
       F.printf "topological order: %a@\n@\n" (Pp.seq ~sep:" " F.pp_print_int) topological_order
+  | Ok _ ->
+      ()
 
 
 let module_name ~path_prefixes {FFI.Code.co_filename} =
@@ -2718,8 +3147,15 @@ let mk ~debug ~path_prefix code =
   Ok {Module.name; toplevel; functions}
 
 
+let initialize ?(next_version = false) () =
+  if not (Py.is_initialized ()) then
+    let interpreter = if next_version then Version.python_next_exe else Version.python_exe in
+    Py.initialize ~interpreter ()
+
+
 let test_generator ~filename ~f source =
-  if not (Py.is_initialized ()) then Py.initialize ~interpreter:Version.python_exe () ;
+  initialize ~next_version:true () ;
+  (* pass argument ~next_version:true if you want to activate unit tests on Python 3.12 *)
   let code =
     match FFI.from_string ~source ~filename with
     | Error (kind, err) ->
@@ -2743,11 +3179,13 @@ let test_generator ~filename ~f source =
       L.die ExternalError "Pyml exception: %s@\n" (Exn.to_string e)
 
 
-let test ?(filename = "dummy.py") ?(debug = false) ?run source =
+let test ?(filename = "dummy.py") ?(debug = false) ?run ?(show = false) source =
   let open IResult.Let_syntax in
   let f code =
     let+ module_ = mk ~debug ~path_prefix:None code in
-    let run = Option.value run ~default:(F.printf "%a" Module.pp) in
+    let run =
+      Option.value run ~default:(fun module_ -> if show then F.printf "%a" Module.pp module_)
+    in
     run module_
   in
   test_generator ~filename ~f source
@@ -2765,12 +3203,12 @@ let test_files ?(debug = false) ?run list =
   run (List.rev !units)
 
 
-let test_cfg_skeleton ?(filename = "dummy.py") source =
+let test_cfg_skeleton ?(filename = "dummy.py") ?(show = false) source =
   let open IResult.Let_syntax in
   let f code =
     let file_path = module_name code ~path_prefixes:[] in
     let code_qual_name = build_code_object_unique_name file_path code in
-    test_cfg_skeleton ~code_qual_name code ;
+    test_cfg_skeleton ~show ~code_qual_name code ;
     let f code = Ok (test_cfg_skeleton ~code_qual_name code) in
     let* _ = fold_all_inner_codes_and_build_map code ~code_qual_name ~f in
     Ok ()

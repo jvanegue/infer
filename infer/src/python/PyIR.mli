@@ -102,14 +102,33 @@ module FormatFunction : sig
 end
 
 module BuiltinCaller : sig
+  type unary_intrinsics =
+    | PrintExpr
+    | ImportStar
+    | StopiterationError
+    | AsyncGenValueWrapperNew
+    | UnaryPos
+    | ListToTuple
+    | MakeTypevar
+    | MakeParamspec
+    | MakeTypevartuple
+    | SubscriptGeneric
+    | MakeTypealias
+
+  type binary_intrinsics =
+    | PrepReraiseStar
+    | TypevarWithBound
+    | TypevarWithConstraints
+    | SetFunctionTypeParams
+
   type t =
     | BuildClass
     | BuildConstKeyMap
     | Format
     | FormatFn of FormatFunction.t
-    | CallFunctionEx  (** [CALL_FUNCTION_EX] *)
     | Inplace of BinaryOp.t
     | Binary of BinaryOp.t
+    | BinarySlice
     | Unary of UnaryOp.t
     | Compare of CompareOp.t
     | GetAIter
@@ -131,6 +150,8 @@ module BuiltinCaller : sig
     | GetAwaitable
     | UnpackEx
     | GetPreviousException
+    | UnaryIntrinsic of unary_intrinsics
+    | BinaryIntrinsic of binary_intrinsics
 end
 
 module Const : sig
@@ -167,6 +188,11 @@ module Exp : sig
     | LoadClassDeref of {name: Ident.t; slot: int}  (** [LOAD_CLASSDEREF] *)
     | LoadClosure of {name: Ident.t; slot: int}  (** [LOAD_CLOSURE] *)
     | LoadDeref of {name: Ident.t; slot: int}  (** [LOAD_DEREF] *)
+    | LoadFastCheck of {name: Ident.t}  (** [LOAD_FAST_CHECK] *)
+    | LoadFastAndClear of {name: Ident.t}  (** [LOAD_FAST_AND_CLEAR] *)
+    | LoadLocals  (** [LOAD_LOCALS] *)
+    | LoadFromDictOrDeref of {slot: int; mapping: t}  (** [LOAD_FROM_DICT_OR_DEREF] *)
+    | LoadSuperAttr of {attr: Ident.t; super: t; class_: t; self: t}  (** [LOAD_SUPER_ATTR] *)
     | MatchClass of {subject: t; type_: t; count: int; names: t}
     | BoolOfMatchClass of t
     | AttributesOfMatchClass of t
@@ -186,8 +212,10 @@ module Stmt : sig
     | Let of {lhs: SSA.t; rhs: Exp.t}
     | SetAttr of {lhs: Exp.t; attr: Ident.t; rhs: Exp.t}
     | Store of {lhs: ScopedIdent.t; rhs: Exp.t}
+    | StoreSlice of {container: Exp.t; start: Exp.t; end_: Exp.t; rhs: Exp.t}
     | StoreSubscript of {lhs: Exp.t; index: Exp.t; rhs: Exp.t}
     | Call of {lhs: SSA.t; exp: Exp.t; args: Exp.t list; arg_names: Exp.t}
+    | CallEx of {lhs: SSA.t; exp: Exp.t; kargs: Exp.t; arg_names: Exp.t}
     | CallMethod of
         {lhs: SSA.t; name: Ident.t; self_if_needed: Exp.t; args: Exp.t list; arg_names: Exp.t}
     | BuiltinCall of {lhs: SSA.t; call: BuiltinCaller.t; args: Exp.t list; arg_names: Exp.t}
@@ -195,6 +223,8 @@ module Stmt : sig
     | Delete of ScopedIdent.t
     | DeleteDeref of {name: Ident.t; slot: int}  (** [DELETE_DEREF] *)
     | DeleteAttr of {exp: Exp.t; attr: Ident.t}
+    | MakeCell of int  (** [MAKE_CELL] *)
+    | CopyFreeVars of int  (** [COPY_FREE_VARS] *)
     | ImportStar of Exp.t
     | GenStart of {kind: gen_kind}
     | SetupAnnotations
@@ -249,12 +279,15 @@ end
 
 val mk : debug:bool -> path_prefix:string option -> FFI.Code.t -> (Module.t, Error.t) result
 
-val test : ?filename:string -> ?debug:bool -> ?run:(Module.t -> unit) -> string -> unit
+val test :
+  ?filename:string -> ?debug:bool -> ?run:(Module.t -> unit) -> ?show:bool -> string -> unit
 [@@warning "-unused-value-declaration"]
-(* takes a Python source program as string argument, convert it into PyIR and print the result (or executes [run] on the result) *)
+(* takes a Python source program as string argument, convert it into PyIR and executes [run] on the result
+   (or print the result if [run] is not given and [show] is true) *)
 
 val test_files : ?debug:bool -> ?run:(Module.t list -> unit) -> (string * string) list -> unit
 [@@warning "-unused-value-declaration"]
 (* same as [test] but on a collection of module string representation. The input is a list of (filename, source) pairs *)
 
-val test_cfg_skeleton : ?filename:string -> string -> unit [@@warning "-unused-value-declaration"]
+val test_cfg_skeleton : ?filename:string -> ?show:bool -> string -> unit
+[@@warning "-unused-value-declaration"]

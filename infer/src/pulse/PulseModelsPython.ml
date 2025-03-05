@@ -590,6 +590,22 @@ let try_catch_lib_model type_name args =
       ret None
 
 
+let try_catch_lib_model_using_static_type ~default closure args =
+  let open DSL.Syntax in
+  let* opt_static_type = get_static_type closure in
+  match opt_static_type with
+  | Some (Typ.PythonClass (ModuleAttribute {module_name; attr_name= name}) as type_name) -> (
+      let* opt_special_call = modelled_python_call (PyLib {module_name; name}) args in
+      match opt_special_call with
+      | None ->
+          default ()
+      | Some res ->
+          L.d_printfln "catching reserved lib call using static type %a" Typ.Name.pp type_name ;
+          ret res )
+  | _ ->
+      default ()
+
+
 let call closure arg_names args : model =
   (* TODO: take into account named args *)
   let open DSL.Syntax in
@@ -617,7 +633,8 @@ let call closure arg_names args : model =
         | None ->
             call_dsl ~closure ~arg_names ~args )
     | _ ->
-        call_dsl ~closure ~arg_names ~args
+        let default () = call_dsl ~closure ~arg_names ~args in
+        try_catch_lib_model_using_static_type ~default closure args
   in
   assign_ret res
 
@@ -631,19 +648,8 @@ let call_function_ex closure tuple dict : model =
   let args = [tuple; dict] in
   let* res =
     match opt_dynamic_type_data with
-    | None -> (
-        let* opt_static_type = get_static_type closure in
-        match opt_static_type with
-        | Some (Typ.PythonClass (ModuleAttribute {module_name; attr_name= name}) as type_name) -> (
-            let* opt_special_call = modelled_python_call (PyLib {module_name; name}) args in
-            match opt_special_call with
-            | None ->
-                fresh ()
-            | Some res ->
-                L.d_printfln "catching reserved lib call using static type %a" Typ.Name.pp type_name ;
-                ret res )
-        | _ ->
-            fresh () )
+    | None ->
+        try_catch_lib_model_using_static_type ~default:fresh closure args
     | Some {Formula.typ= {Typ.desc= Tstruct type_name}} -> (
         let* opt_catched_lib_model_res = try_catch_lib_model type_name args in
         match opt_catched_lib_model_res with
@@ -1144,7 +1150,8 @@ let compare_eq arg1 arg2 : model =
 let matchers : matcher list =
   let open ProcnameDispatcher.Call in
   let arg = capt_arg_payload in
-  [ -"$builtins" &:: "py_attributes_of_match_class" &::.*+++> unknown ~deep_release:false
+  [ -"$builtins" &:: "py_async_gen_value_wrapper_new" &::.*+++> unknown ~deep_release:false
+  ; -"$builtins" &:: "py_attributes_of_match_class" &::.*+++> unknown ~deep_release:false
   ; -"$builtins" &:: "py_binary_add" <>$ arg $+ arg $--> binary_add
   ; -"$builtins" &:: "py_binary_and" &::.*+++> unknown ~deep_release:false
   ; -"$builtins" &:: "py_binary_floor_divide" &::.*+++> unknown ~deep_release:false
@@ -1155,6 +1162,7 @@ let matchers : matcher list =
   ; -"$builtins" &:: "py_binary_or" &::.*+++> unknown ~deep_release:false
   ; -"$builtins" &:: "py_binary_power" &::.*+++> unknown ~deep_release:false
   ; -"$builtins" &:: "py_binary_rshift" &::.*+++> unknown ~deep_release:false
+  ; -"$builtins" &:: "py_binary_slice" &::.*+++> unknown ~deep_release:false
   ; -"$builtins" &:: "py_binary_substract" &::.*+++> unknown ~deep_release:false
   ; -"$builtins" &:: "py_binary_true_divide" &::.*+++> unknown ~deep_release:false
   ; -"$builtins" &:: "py_binary_xor" &::.*+++> unknown ~deep_release:false
@@ -1190,6 +1198,7 @@ let matchers : matcher list =
   ; -"$builtins" &:: "py_compare_lt" &::.*+++> unknown ~deep_release:false
   ; -"$builtins" &:: "py_compare_neq" &::.*+++> unknown ~deep_release:false
   ; -"$builtins" &:: "py_compare_not_in" &::.*+++> unknown ~deep_release:false
+  ; -"$builtins" &:: "py_copy_free_vars" &::.*+++> unknown ~deep_release:false
   ; -"$builtins" &:: "py_delete_attr" &::.*+++> unknown ~deep_release:true
   ; -"$builtins" &:: "py_delete_deref" &::.*+++> unknown ~deep_release:true
   ; -"$builtins" &:: "py_delete_fast" &::.*+++> unknown ~deep_release:true
@@ -1240,10 +1249,16 @@ let matchers : matcher list =
   ; -"$builtins" &:: "py_load_closure" &::.*+++> unknown ~deep_release:false
   ; -"$builtins" &:: "py_load_deref" &::.*+++> unknown ~deep_release:false
   ; -"$builtins" &:: "py_load_fast" <>$ arg $+ arg $--> load_fast
+  ; -"$builtins" &:: "py_load_fast_and_clear" <>$ arg $+ arg $--> load_fast
+  ; -"$builtins" &:: "py_load_fast_check" &::.*+++> unknown ~deep_release:false
+  ; -"$builtins" &:: "py_load_from_dict_or_deref" &::.*+++> unknown ~deep_release:false
   ; -"$builtins" &:: "py_load_global" <>$ arg $+ arg $--> load_global
   ; -"$builtins" &:: "py_load_name" <>$ arg $+ arg $+ arg $--> load_name
+  ; -"$builtins" &:: "py_load_locals" &::.*+++> unknown ~deep_release:false
+  ; -"$builtins" &:: "py_load_super_attr" &::.*+++> unknown ~deep_release:false
   ; -"$builtins" &:: "py_make_bytes" &::.*+++> unknown ~deep_release:false
   ; -"$builtins" &:: "py_make_complex" &::.*+++> unknown ~deep_release:false
+  ; -"$builtins" &:: "py_make_cell" &::.*+++> unknown ~deep_release:false
   ; -"$builtins" &:: "py_make_float" &::.*+++> unknown ~deep_release:false
   ; -"$builtins" &:: "py_make_function" <>$ arg $+ arg $+ arg $+ arg $+ arg $--> make_function
   ; -"$builtins" &:: "py_make_int" <>$ arg $--> make_int
@@ -1253,6 +1268,7 @@ let matchers : matcher list =
   ; -"$builtins" &:: "py_match_sequence" &::.*+++> unknown ~deep_release:false
   ; -"$builtins" &:: "py_next_iter" &::.*+++> unknown ~deep_release:false
   ; -"$builtins" &:: "py_nullify_locals" <>$ arg $+++$--> nullify_locals
+  ; -"$builtins" &:: "py_prep_reraise_star" &::.*+++> unknown ~deep_release:false
   ; -"$builtins" &:: "py_set_add" &::.*+++> unknown ~deep_release:true
   ; -"$builtins" &:: "py_set_attr" &::.*+++> unknown ~deep_release:true
   ; -"$builtins" &:: "py_set_update" &::.*+++> unknown ~deep_release:true
@@ -1261,11 +1277,16 @@ let matchers : matcher list =
   ; -"$builtins" &:: "py_store_fast" <>$ arg $+ arg $+ arg $--> store_fast
   ; -"$builtins" &:: "py_store_global" <>$ arg $+ arg $+ arg $--> store_global
   ; -"$builtins" &:: "py_store_name" <>$ arg $+ arg $+ arg $+ arg $--> store_name
+  ; -"$builtins" &:: "py_store_slice" &::.*+++> unknown ~deep_release:true
   ; -"$builtins" &:: "py_store_subscript" <>$ arg $+ arg $+ arg $--> store_subscript
   ; -"$builtins" &:: "py_subscript" <>$ arg $+ arg $--> subscript
+  ; -"$builtins" &:: "py_set_function_type_params" &::.*+++> unknown ~deep_release:false
+  ; -"$builtins" &:: "py_typevar_with_bound" &::.*+++> unknown ~deep_release:false
+  ; -"$builtins" &:: "py_typevar_with_constraints" &::.*+++> unknown ~deep_release:false
   ; -"$builtins" &:: "py_unary_invert" &::.*+++> unknown ~deep_release:false
   ; -"$builtins" &:: "py_unary_negative" &::.*+++> unknown ~deep_release:false
   ; -"$builtins" &:: "py_unary_not" &::.*+++> unknown ~deep_release:false
+  ; -"$builtins" &:: "py_unary_pos" &::.*+++> unknown ~deep_release:false
   ; -"$builtins" &:: "py_unary_positive" &::.*+++> unknown ~deep_release:false
   ; -"$builtins" &:: "py_unpack_ex" &::.*+++> unknown ~deep_release:false
   ; -"$builtins" &:: "py_yield" <>$ arg $--> yield

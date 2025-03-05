@@ -345,7 +345,12 @@ let run_files modules =
         | Collection _
         | LoadClosure _
         | LoadDeref _
-        | LoadClassDeref _ ->
+        | LoadClassDeref _
+        | LoadFastCheck _
+        | LoadFastAndClear _
+        | LoadLocals
+        | LoadFromDictOrDeref _
+        | LoadSuperAttr _ ->
             todo "eval_exp"
       in
       let exec_stmt stmt =
@@ -425,13 +430,17 @@ let run_files modules =
             let key = eval_exp index |> expect_string ~who ~how:"as 2nd argument" |> Ident.mk in
             set key (eval_exp rhs)
         | BuiltinCall _
+        | CallEx _
         | Delete _
         | DeleteDeref _
         | DeleteAttr _
         | StoreDeref _
+        | StoreSlice _
         | SetupAnnotations
         | ImportStar _
         | GenStart _
+        | MakeCell _
+        | CopyFreeVars _
         | Yield _ ->
             todo "exec_stmt"
       in
