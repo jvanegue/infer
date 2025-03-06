@@ -51,7 +51,7 @@ rm -fr infer-out/ infinite.o infer-run.log
 # All tests in one file (Debug mode)
 #$HOME/infer/bin/infer run --debug-level=2 --pulse-widen-threshold=20 --pulse-only --print-logs -g -- clang++ -c infinite.cpp 2> infer-run.log
 # All tests in one file (No Debug mode)
-time $HOME/infer/bin/infer run --pulse-only --pulse-widen-threshold=20 -- clang++ -c infinite.cpp 2> infer-run.log
+time $HOME/infer/bin/infer run --pulse-only --pulse-widen-threshold=20 -- clang -c infinite.c 2> infer-run.log
 
 # Pretty printing for the bug report
 python3 -m json.tool infer-out/report.json > pulseinf-report.json
