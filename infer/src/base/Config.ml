@@ -66,6 +66,7 @@ type pulse_taint_config =
 type pulse_hack_builder_pattern =
   { class_name: string [@yojson.key "class"]
   ; finalizers: string list
+  ; receiver_finalizers: string list option [@yojson.option]
   ; immediately_non_discardable_class: string option [@yojson.option] }
 [@@deriving of_yojson]
 
@@ -331,8 +332,8 @@ let version_string = F.asprintf "%a" pp_version ()
 
 (** System call configuration values *)
 
-(** Initial time of the analysis, i.e. when this module is loaded, gotten from Caml_unix.time *)
-let initial_analysis_time = Caml_unix.time ()
+(** Initial time of the analysis, i.e. when this module is loaded, gotten from Unix.time *)
+let initial_analysis_time = Unix.time ()
 
 let clang_exe_aliases =
   [ (* this must be kept in sync with the clang-like symlinks in [wrappers_dir] (see below) *)
@@ -345,7 +346,7 @@ let clang_exe_aliases =
 
 
 let exe_basename =
-  (* Sys.executable_name tries to do clever things which we must avoid, use argv[0] instead *)
+  (* Stdlib.Sys.executable_name tries to do clever things which we must avoid, use argv[0] instead *)
   Filename.basename (Sys.get_argv ()).(0)
 
 
@@ -357,7 +358,7 @@ let initial_command =
 
 let infer_binary =
   (* Resolve symlinks to get to the real executable, which is located in [bin_dir]. *)
-  Utils.realpath Sys.executable_name
+  Utils.realpath Stdlib.Sys.executable_name
 
 
 let bin_dir = Filename.dirname infer_binary
@@ -411,7 +412,7 @@ let locate_sdk_root () =
       try
         let path, _ = Utils.with_process_in cmd In_channel.input_line in
         path
-      with Caml_unix.Unix_error _ -> None )
+      with Unix.Unix_error _ -> None )
   | _ ->
       None
 
@@ -3748,7 +3749,7 @@ let inferconfig_dir =
       let is_root = String.equal dir parent in
       if is_root then None else find parent
   in
-  find (Sys.getcwd ())
+  find (Stdlib.Sys.getcwd ())
 
 
 let parse_inferconfig_path_arg () =
@@ -4520,7 +4521,7 @@ and progress_bar =
   let style =
     if !progress_bar && not !quiet then
       match !progress_bar_style with
-      | `Auto when Caml_unix.(isatty stdin && isatty stderr) && not (Utils.is_term_dumb ()) ->
+      | `Auto when Unix.(isatty stdin && isatty stderr) && not (Utils.is_term_dumb ()) ->
           `MultiLine
       | `Auto ->
           `Plain
@@ -4715,7 +4716,7 @@ and pulse_taint_config =
   in
   List.fold (pulse_default_taint_config :: RevList.to_list !pulse_taint_config)
     ~init:base_taint_config ~f:(fun taint_config path ->
-      match (Caml_unix.stat path).st_kind with
+      match (Unix.stat path).st_kind with
       | S_DIR ->
           Utils.fold_files ~init:taint_config
             ~f:(fun taint_config filepath ->
@@ -4726,7 +4727,7 @@ and pulse_taint_config =
           explore_file taint_config path
       | _ ->
           taint_config
-      | exception Caml_unix.Unix_error (ENOENT, _, _) ->
+      | exception Unix.Unix_error (ENOENT, _, _) ->
           taint_config )
 
 

@@ -18,7 +18,7 @@ let compile prog args =
   in
   (* Pass non-special args via a file to avoid exceeding the command line size limit. *)
   let args_file =
-    let file = Filename.temp_file ~in_dir:(ResultsDir.get_path Temporary) "kotlinc_args" "" in
+    let file = IFilename.temp_file ~in_dir:(ResultsDir.get_path Temporary) "kotlinc_args" "" in
     let quoted_file_args =
       List.map file_args ~f:(fun arg ->
           if String.contains arg '\'' then arg else F.sprintf "'%s'" arg )
@@ -27,7 +27,7 @@ let compile prog args =
     file
   in
   let args = cli_args @ ["@" ^ args_file] in
-  L.debug Capture Quiet "Current working directory: '%s'@." (Sys.getcwd ()) ;
+  L.debug Capture Quiet "Current working directory: '%s'@." (Stdlib.Sys.getcwd ()) ;
   let run cmd =
     let shell_cmd = List.map ~f:Escape.escape_shell cmd |> String.concat ~sep:" " in
     L.debug Capture Quiet "Trying to execute: %s@." shell_cmd ;

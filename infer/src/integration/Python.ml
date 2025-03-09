@@ -81,7 +81,7 @@ let dump_textual_file ~version pyc module_ =
   let suffix = Format.asprintf ".v%d.sil" version in
   let filename =
     let textual_filename = TextualSil.to_filename pyc in
-    Filename.temp_file ~in_dir:(ResultsDir.get_path Temporary) textual_filename suffix
+    IFilename.temp_file ~in_dir:(ResultsDir.get_path Temporary) textual_filename suffix
   in
   TextualSil.dump_module ~filename module_
 
@@ -192,7 +192,7 @@ let capture_files ~is_binary files =
             acc )
   in
   if not Config.python_skip_db then MergeCapture.merge_global_tenv ~normalize:true child_tenv_paths ;
-  List.iter child_tenv_paths ~f:(fun filename -> DB.filename_to_string filename |> Caml_unix.unlink)
+  List.iter child_tenv_paths ~f:(fun filename -> DB.filename_to_string filename |> Unix.unlink)
 
 
 let capture input =

@@ -6,20 +6,9 @@
  *)
 
 include Core
+module Unix = UnixLabels
 
 [@@@warning "-unused-value-declaration"]
-
-(* we don't care about the _unix distinction *)
-module Filename = struct
-  include Filename
-  include Filename_unix
-end
-
-(* we don't care about the _unix distinction *)
-module Sys = struct
-  include Sys
-  include Sys_unix
-end
 
 (* easy access to sub-module *)
 module DLS = struct
@@ -54,19 +43,15 @@ module ANSITerminal : module type of ANSITerminal = struct
 
   (* more careful about when the channel is connected to a tty *)
 
-  let print_string =
-    if Caml_unix.(isatty stdout) then print_string else fun _ -> Stdlib.print_string
+  let print_string = if Unix.(isatty stdout) then print_string else fun _ -> Stdlib.print_string
 
-
-  let prerr_string =
-    if Caml_unix.(isatty stderr) then prerr_string else fun _ -> Stdlib.prerr_string
-
+  let prerr_string = if Unix.(isatty stderr) then prerr_string else fun _ -> Stdlib.prerr_string
 
   let printf styles fmt = Format.ksprintf (fun s -> print_string styles s) fmt
 
   let eprintf styles fmt = Format.ksprintf (fun s -> prerr_string styles s) fmt
 
-  let sprintf = if Caml_unix.(isatty stderr) then sprintf else fun _ -> Printf.sprintf
+  let sprintf = if Unix.(isatty stderr) then sprintf else fun _ -> Printf.sprintf
 end
 
 (* HACK to make the deadcode script record dependencies on [HashNormalizer]: the "normalize" ppx in

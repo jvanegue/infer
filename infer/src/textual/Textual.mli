@@ -10,11 +10,11 @@ module F = Format
 module Hashtbl = Stdlib.Hashtbl
 
 module Lang : sig
-  type t = Java | Hack | Python [@@deriving equal]
+  type t = C | Hack | Java | Python [@@deriving equal]
 
   val of_string : string -> t option [@@warning "-unused-value-declaration"]
 
-  val to_string : t -> string [@@warning "-unused-value-declaration"]
+  val to_string : t -> string
 end
 
 module Location : sig
@@ -278,13 +278,13 @@ module ProcDecl : sig
 
   val is_allocate_object_builtin : QualifiedProcName.t -> bool
 
-  val malloc_name : QualifiedProcName.t [@@warning "-unused-value-declaration"]
+  val malloc_name : QualifiedProcName.t
 
   val is_malloc_builtin : QualifiedProcName.t -> bool
 
-  val free_name : QualifiedProcName.t [@@warning "-unused-value-declaration"]
+  val free_name : QualifiedProcName.t
 
-  val cast_name : QualifiedProcName.t [@@warning "-unused-value-declaration"]
+  val cast_name : QualifiedProcName.t
 
   val is_free_builtin : QualifiedProcName.t -> bool
 

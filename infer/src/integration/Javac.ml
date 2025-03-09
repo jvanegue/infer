@@ -30,7 +30,7 @@ let compile compiler build_prog build_args =
   in
   (* Pass non-special args via a file to avoid exceeding the command line size limit. *)
   let args_file =
-    let file = Filename.temp_file ~in_dir:(ResultsDir.get_path Temporary) "javac_args" "" in
+    let file = IFilename.temp_file ~in_dir:(ResultsDir.get_path Temporary) "javac_args" "" in
     let quoted_file_args =
       List.map file_args ~f:(fun arg ->
           if String.contains arg '\'' then arg else F.sprintf "'%s'" arg )
@@ -40,9 +40,9 @@ let compile compiler build_prog build_args =
   in
   let cli_file_args = cli_args @ ["@" ^ args_file] in
   let args = prog_args @ cli_file_args in
-  L.(debug Capture Quiet) "Current working directory: '%s'@." (Sys.getcwd ()) ;
+  L.(debug Capture Quiet) "Current working directory: '%s'@." (Stdlib.Sys.getcwd ()) ;
   let verbose_out_file =
-    Filename.temp_file ~in_dir:(ResultsDir.get_path Temporary) "javac" ".out"
+    IFilename.temp_file ~in_dir:(ResultsDir.get_path Temporary) "javac" ".out"
   in
   let try_run cmd error_k =
     let shell_cmd = List.map ~f:Escape.escape_shell cmd |> String.concat ~sep:" " in
@@ -117,4 +117,4 @@ let capture compiler ~prog ~args =
   if not (Config.buck_cache_mode && no_source_file args) then (
     let verbose_out_file = compile compiler prog args in
     if not (InferCommand.equal Config.command Compile) then JMain.from_verbose_out verbose_out_file ;
-    if not Config.debug_mode then Caml_unix.unlink verbose_out_file )
+    if not Config.debug_mode then Unix.unlink verbose_out_file )

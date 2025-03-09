@@ -28,7 +28,7 @@ let init_work_dir, is_originator =
   | Some dir ->
       (dir, false)
   | None ->
-      let real_cwd = Utils.realpath (Sys.getcwd ()) in
+      let real_cwd = Utils.realpath (Stdlib.Sys.getcwd ()) in
       IUnix.putenv ~key:infer_cwd_env_var ~data:real_cwd ;
       (real_cwd, true)
 
@@ -644,7 +644,7 @@ let normalize_path_in_args_being_parsed ?(f = Fn.id) ~is_anon_arg str =
        that [!arg_being_parsed] points at either [str] (if [is_anon_arg]) or at the option name
        position in [!args_to_parse], as is the case e.g. when calling
        [Arg.parse_argv_dynamic ~current:arg_being_parsed !args_to_parse ...]. *)
-    let root = Caml_unix.getcwd () in
+    let root = Unix.getcwd () in
     let abs_path = Utils.filename_to_absolute ~root str in
     !args_to_parse.(!arg_being_parsed + if is_anon_arg then 0 else 1) <- f abs_path ;
     abs_path )
@@ -1023,7 +1023,7 @@ let extra_env_args = ref []
 let extend_env_args args = extra_env_args := List.rev_append args !extra_env_args
 
 let parse_args ~usage initial_action ?initial_command args =
-  let exe_name = Sys.executable_name in
+  let exe_name = Stdlib.Sys.executable_name in
   args_to_parse := Array.of_list (exe_name :: args) ;
   arg_being_parsed := 0 ;
   let curr_usage = select_parse_mode ~usage initial_action in
@@ -1111,7 +1111,7 @@ let parse ?config_file ~usage action initial_command =
          too big, running any command will fail with a cryptic "exit code 127" error. Use an argfile
          to prevent this from happening *)
       let in_dir = Sys.getenv "TMPDIR" in
-      let file = Filename.temp_file ?in_dir "args" "" in
+      let file = IFilename.temp_file ?in_dir "args" "" in
       Out_channel.with_file file ~f:(fun oc -> Out_channel.output_lines oc argv_to_export) ;
       if not !keep_args_file then Utils.unlink_file_on_exit file ;
       "@" ^ file )

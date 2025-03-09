@@ -77,11 +77,11 @@ let parse_translate_store ?(base_dir = None) result_dir =
 
 
 let capture ~command ~args =
-  let base_dir = Utils.filename_to_relative (Caml_unix.getcwd ()) ~root:Config.project_root in
+  let base_dir = Utils.filename_to_relative (Unix.getcwd ()) ~root:Config.project_root in
   Option.iter ~f:(parse_translate_store ~base_dir) Config.erlang_ast_dir ;
   if not Config.erlang_skip_compile then (
     let in_dir = ResultsDir.get_path Temporary in
-    let result_dir = Filename.temp_dir ~in_dir command "infer" in
+    let result_dir = IFilename.temp_dir ~in_dir command "infer" in
     run_compile Config.erlang_with_otp_specs command result_dir args ;
     parse_translate_store ~base_dir result_dir ;
     if not Config.debug_mode then Utils.rmtree result_dir )
@@ -102,7 +102,7 @@ let add_or_get_build_report_path args =
     match from_option with
     | [] ->
         let build_report_path =
-          Filename.temp_file ~in_dir:(ResultsDir.get_path Temporary) "build-report" ".json"
+          IFilename.temp_file ~in_dir:(ResultsDir.get_path Temporary) "build-report" ".json"
         in
         (before_option @ ["--build-report"; build_report_path], build_report_path)
     | "--build-report" :: existing_path :: _ ->
@@ -134,7 +134,7 @@ let save_beams_from_report ~project_root ~report beam_list_path =
   in
   let get_beams beams dir =
     let ebin_dir = project_root ^/ dir ^/ "ebin" in
-    match Sys.is_directory ebin_dir with
+    match ISys.is_directory ebin_dir with
     | `Yes ->
         let new_beams = Utils.find_files ~path:ebin_dir ~extension:".beam" in
         Set.union beams (String.Set.of_list new_beams)
@@ -147,10 +147,10 @@ let save_beams_from_report ~project_root ~report beam_list_path =
 
 
 let run_in_dir ~dir ~prog ~args =
-  let here = Sys.getcwd () in
-  Sys.chdir dir ;
+  let here = Stdlib.Sys.getcwd () in
+  Stdlib.Sys.chdir dir ;
   let _ignore_err = Process.create_process_and_wait_with_output ~prog ~args ReadStderr in
-  Sys.chdir here
+  Stdlib.Sys.chdir here
 
 
 let process_beams ~project_root beam_list_path =
@@ -159,7 +159,7 @@ let process_beams ~project_root beam_list_path =
   if not Config.erlang_skip_compile then (
     let jsonast_dir =
       let in_dir = ResultsDir.get_path Temporary in
-      Filename.realpath (Filename.temp_dir ~in_dir "buck2-erlang" "infer")
+      Unix.realpath (IFilename.temp_dir ~in_dir "buck2-erlang" "infer")
     in
     let prog = Config.lib_dir ^/ "erlang" ^/ "extract.escript" in
     let args =
@@ -235,7 +235,7 @@ let simplify_targets targets =
 
 
 let run_buck ~command ~args =
-  let args_file = Filename.temp_file ~in_dir:(ResultsDir.get_path Temporary) "buck" ".args" in
+  let args_file = IFilename.temp_file ~in_dir:(ResultsDir.get_path Temporary) "buck" ".args" in
   Utils.with_file_out args_file ~f:(fun channel -> Out_channel.output_lines channel args) ;
   Buck.wrap_buck_call ~label:"erlang" V2 [command; "@" ^ args_file]
 
