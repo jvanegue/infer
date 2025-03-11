@@ -46,7 +46,7 @@ rm -fr infer-out/ infinite.o infer-run.log
 #$HOME/infer/bin/infer run --pulse-only --debug-level=3 --print-logs -g -- clang++ -c pulseinf/loop_terminate_macro.cpp 2> infer-run.log
 #$HOME/infer/bin/infer run --pulse-only --debug-level=3 --print-logs -g -- clang++ -c pulseinf/loop_string_terminate.cpp 2> infer-run.log
 
-
+#$HOME/infer/bin/infer run --pulse-only --debug-level=2 --print-logs -g -- clang -c pulseinf/allocate_all_in_array_shortloop.c 2> infer-run.log
 
 # All tests in one file (Debug mode)
 #$HOME/infer/bin/infer run --debug-level=2 --pulse-widen-threshold=20 --pulse-only --print-logs -g -- clang++ -c infinite.cpp 2> infer-run.log

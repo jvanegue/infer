@@ -338,30 +338,30 @@ struct
 
       (* This did not change anything on test cases on latest tree *)
       if list_phys_equal (fst prev) (fst next) then
-        (* L.debug Analysis Quiet "widen: phys_equal, stopping early @\n" ; *)
-          ( prev ) 
+        
+        ( (* L.debug Analysis Quiet "PULSEINF: phys_equal, stopping early @\n" ; *) prev ) 
       else 
       if num_iters > max_iter then (
-        (* L.debug Analysis Quiet "widen: Iteration %d is greater than max iter %d, stopping." num_iters max_iter ; *)
+        (* L.debug Analysis Quiet "PULSEINF: Iteration %d is greater than max iter %d, stopping." num_iters max_iter ; *)
         DisjunctiveMetadata.incr_interrupted_loops () ;
         prev )
       else (
-        (* L.debug Analysis Quiet "widen: widening iteration %i @\n" num_iters; *)
+        (* L.debug Analysis Quiet "PULSEINF: widening iteration %i @\n" num_iters; *)
 
         let back_edges (prev: T.DisjDomain.t list) (next: T.DisjDomain.t list) (num_iters:int) : T.DisjDomain.t list * int =
           (T.back_edge prev next num_iters) in
         
-        (* L.debug Analysis Quiet "JV AbsInt back_edge called @\n"; *)
+        (* L.debug Analysis Quiet "PULSEINF: AbsInt back_edge called @\n"; *)
 
         let fp = fst prev in
         let fn = fst next in
 
-        L.debug Analysis Quiet "widen: (before backedge) fst_prev = %u fst_next = %u @\n" (List.length fp) (List.length fn); 
+        (* L.debug Analysis Quiet "PULSEINF: (before backedge) fst_prev = %u fst_next = %u @\n" (List.length fp) (List.length fn); *)
         
         let dbe,_ = (back_edges fp fn num_iters) in
         let hasnew = not (phys_equal (fst prev) dbe) in
         
-        (* L.debug Analysis Quiet "widen: New DBE length = %u hasnew = %b @\n" (List.length dbe) hasnew; *)
+        (* L.debug Analysis Quiet "PULSEINF: New DBE length = %u hasnew = %b @\n" (List.length dbe) hasnew; *)
         
         let post_disj,_,dropped =
           (* L.debug Analysis Quiet "JV Widen Just Before LEQ PulseExecutionDomain \n"; *)

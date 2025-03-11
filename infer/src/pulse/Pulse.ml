@@ -185,8 +185,8 @@ module PulseTransferFunctions = struct
   (* Call on back_edge from widen in AbstractInterpreter.ml *)
   let back_edge (prev:DisjDomain.t list) (next:DisjDomain.t list) (num_iters:int)  : DisjDomain.t list * int =
     
-    (* let plen,nlen = List.length(prev), List.length(next) in *)
-    (* L.debug Analysis Quiet "JV PULSE:BACKEDGE NUMITER %d Number of Prev state = %d Number of Post states = %d \n" num_iters plen nlen; *)
+    (* let plen,nlen = List.length(prev), List.length(next) in 
+    L.debug Analysis Quiet "PULSEINF: BACKEDGE NUMITER %d Number of Prev state = %d Number of Post states = %d \n" num_iters plen nlen; *)
     
     let rec listpair_split (l:DisjDomain.t list) (o1:ExecDom.t list) (o2:PathContext.t list) =
       match l with

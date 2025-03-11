@@ -746,3 +746,10 @@ void loop_fcall_add_inductive_bad() {
   for (i = 0; i < 10; i += incr)
     incr = compute_increment(i);
 }
+
+/* FP on short loop! */
+void FP_allocate_all_in_array_ok(int* array[]) {
+  for (int i = 0; i < 2; i++) {
+    array[i] = malloc(sizeof(int));
+  }
+}
