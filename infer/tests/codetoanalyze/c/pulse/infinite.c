@@ -40,7 +40,7 @@ end:
 }
 
 /* pulse-inf: Able to flag bug */
-void conditional_goto_not_ok(int y) {
+void conditional_goto_bad(int y) {
 re:
   if (y == 100)
     goto re;
@@ -100,7 +100,6 @@ end:
 /* pulse-inf: works good */
 void loop_conditional_bad(int y) {
   int x = 0;
-  // y = 0;
   while (y < 100)
     if (y < 50)
       x++;
@@ -108,14 +107,12 @@ void loop_conditional_bad(int y) {
       y++;
 }
 
-/* pulse-inf: works good, find bug */
-/* pulse inf works */
-/* NEW FALSE NEG??? */
-void nested_loop_cond_bad(int y) {
+/* pulse inf used to detect this! NEW FN */
+void FN_nested_loop_cond_bad(int y) {
   int x = 42;
   while (y < 100) {
     while (x <= 100) {
-      if (x == 5)
+      if (x == 50)
         x = 1;
       else
         x++;
@@ -125,7 +122,6 @@ void nested_loop_cond_bad(int y) {
 }
 
 /* pulse inf works */
-/* NEW FALSE NEG??? */
 void simple_loop_bad(int x) {
   int y = 1;
   while (x != 3)
@@ -144,9 +140,8 @@ void loop_alternating_bad(int y, int x) {
   }
 }
 
-/* NEW FALSE NEG??? needs to augment widening threshold? */
-/* pulse-inf: works good */
-void nested_loop_bad(int y, int x) {
+/* pulse-inf used to work on this. Now FN */
+void FN_nested_loop_bad(int y, int x) {
 
   while (y < 100) {
     while (x <= 100) {
@@ -160,7 +155,7 @@ void nested_loop_bad(int y, int x) {
 }
 
 /* pulse-inf: works good! */
-void inner_loop_non_ok(int y, int x) {
+void inner_loop_bad(int y, int x) {
   while (y < 100) {
     while (x == 0)
       y++;
@@ -482,14 +477,16 @@ void FN_hensel_tacas22_bad(int x, int y) {
  */
 void foo(int* x) { (*x)--; }
 
-/* Pulse-inf: FP */
-void FP_interproc_terminating_harris10_ok(int x) {
+/* Derived from Harris'10 */
+/* Pulseinf: no bug */
+void interproc_terminating_harris10_ok(int x) {
   while (x > 0)
     foo(&x);
 }
 
-/* Derived from Harris'10 - Pulse-inf: FP! */
-void FP_interproc_terminating_harris10_cond_ok(int x) {
+/* Derived from Harris'10 */
+/* Pulseinf: no bug */
+void interproc_terminating_harris10_cond_ok(int x) {
   while (x > 0) {
     if (nondet())
       foo(&x);
@@ -519,7 +516,7 @@ void loop_non_terminating_harris10_bad(int x, int d, int z) {
  * eventually make it break */
 // #include <stdlib.h>
 // int	nondet() { return (rand()); }
-void nondet_nonterminate_chen14_ok(int k, int i) {
+void nondet_nonterminate_chen14_bad(int k, int i) {
   if (k >= 0)
     ;
   else
@@ -542,9 +539,8 @@ void nestedloop2_chen14_ok(int k, int j) {
   }
 }
 
-/* pulse-inf: works good! finds bug */
+/* pulse-inf used to find bug - Now FN */
 // TNT proves non-termination
-/* NEW FALSE NEG??? */
 void FN_nestedloop_chen14_bad(int i) {
   if (i == 10) {
     while (i > 0) {
@@ -576,8 +572,8 @@ void array2_iter_ok(int array1[], int array2[]) {
 }
 
 // Example with array and non-termination
-/* Pulse-inf: unable to find bug (with default widen threshold=3) */
-void FN_array_iter_bad(int array[], int len) {
+/* Pulse-inf: find bug! */
+void array_iter_bad(int array[], int len) {
   int i = 0;
   while (i < len) {
     array[i] = 42;
@@ -747,8 +743,9 @@ void loop_fcall_add_inductive_bad() {
     incr = compute_increment(i);
 }
 
-/* FP on short loop! */
-void FP_allocate_all_in_array_ok(int* array[]) {
+/* Used to be source of FP! not anymore */
+/* Pulseinf now works good: no bug */
+void allocate_all_in_array_ok(int* array[]) {
   for (int i = 0; i < 2; i++) {
     array[i] = malloc(sizeof(int));
   }
