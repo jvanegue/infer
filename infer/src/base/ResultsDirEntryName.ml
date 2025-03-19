@@ -7,8 +7,6 @@
 
 open! IStd
 
-let db_writer_socket_name = "sqlite_write_socket"
-
 let infer_deps_file_name = "infer-deps.txt"
 
 type id =
@@ -25,7 +23,7 @@ type id =
   | CaptureDBWal
   | CaptureDependencies
   | ChangedFunctions
-  | DBWriterSocket
+  | DBLock
   | Debug
   | Differential
   | DuplicateFunctions
@@ -45,6 +43,7 @@ type id =
   | ReportXML
   | RetainCycles
   | RunState
+  | SourceDebug
   | Stats
   | SyntacticDependencyGraphDot
   | Temporary
@@ -115,8 +114,8 @@ let of_id = function
       file infer_deps_file_name ~keep_before_incremental_analysis:()
   | ChangedFunctions ->
       file "changed_functions.json" ~keep_before_caching_capture:()
-  | DBWriterSocket ->
-      file db_writer_socket_name ~keep_before_incremental_analysis:()
+  | DBLock ->
+      file "db.lock"
   | Debug ->
       directory "captured" ~keep_before_incremental_analysis:()
   | Differential ->
@@ -157,6 +156,8 @@ let of_id = function
       file ".infer_runstate.json" ~keep_before_incremental_analysis:()
   | Stats ->
       directory "stats"
+  | SourceDebug ->
+      directory "source_debug"
   | SyntacticDependencyGraphDot ->
       file "syntactic_dependency_graph.dot" ~keep_before_incremental_analysis:()
   | Temporary ->

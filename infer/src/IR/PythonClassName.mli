@@ -11,7 +11,7 @@ module F = Format
 type builtin_type = PyBool | PyDict | PyInt | PyNone | PyObject | PyString | PyTuple
 [@@deriving compare, equal, yojson_of, sexp, hash, normalize]
 
-type builtin_closure = IntFun | StrFun | TypeFun
+type builtin_closure = DictFun | IntFun | StrFun | TypeFun
 [@@deriving compare, equal, yojson_of, sexp, hash, normalize]
 
 type t =
@@ -19,7 +19,8 @@ type t =
   | Globals of string
   | Closure of string
   | BuiltinClosure of builtin_closure
-  | ClassCompanion of {module_name: string; attr_name: string}
+  | ClassCompanion of {module_name: string; class_name: string}
+  | ClassInstance of {module_name: string; class_name: string}
   | ModuleAttribute of {module_name: string; attr_name: string}
   | Filename of string
   | Package of string

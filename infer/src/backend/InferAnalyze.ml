@@ -43,6 +43,7 @@ let analyze_target :
           run_and_interpret_result ~f:(fun () ->
               Ondemand.analyze_file AnalysisRequest.all source_file )
         in
+        if Config.source_debug then SourcePrinter.write_all () ;
         if Config.write_html then Printer.write_all_html_files source_file ;
         result )
   in
@@ -169,7 +170,6 @@ let analyze replay_call_graph source_files_to_analyze =
     let gc_stats =
       DomainPool.create ~jobs:Config.jobs ~f:analyze_target
         ~child_prologue:(fun _ ->
-          Config.set_gc_params () ;
           DLS.set gc_stats_pre_spawn (Some (GCStats.get ~since:ProgramStart)) )
         ~child_epilogue:(fun _ ->
           match DLS.get gc_stats_pre_spawn with

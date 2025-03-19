@@ -15,7 +15,7 @@ module F = Format
 type builtin_type = PyBool | PyDict | PyInt | PyNone | PyObject | PyString | PyTuple
 [@@deriving compare, equal, yojson_of, sexp, hash, normalize, show]
 
-type builtin_closure = IntFun | StrFun | TypeFun
+type builtin_closure = DictFun | IntFun | StrFun | TypeFun
 [@@deriving compare, equal, yojson_of, sexp, hash, normalize]
 
 type t =
@@ -23,7 +23,8 @@ type t =
   | Globals of string
   | Closure of string
   | BuiltinClosure of builtin_closure
-  | ClassCompanion of {module_name: string; attr_name: string}
+  | ClassCompanion of {module_name: string; class_name: string}
+  | ClassInstance of {module_name: string; class_name: string}
   | ModuleAttribute of {module_name: string; attr_name: string}
   | Filename of string
   | Package of string
@@ -32,7 +33,16 @@ type t =
 
 let builtin_type_to_string = show_builtin_type
 
-let builtin_closure_to_string = function IntFun -> "int" | StrFun -> "str" | TypeFun -> "type"
+let builtin_closure_to_string = function
+  | DictFun ->
+      "dict"
+  | IntFun ->
+      "int"
+  | StrFun ->
+      "str"
+  | TypeFun ->
+      "type"
+
 
 let pp fmt = function
   | Builtin builtin ->
@@ -43,8 +53,10 @@ let pp fmt = function
       F.fprintf fmt "Closure[%s]" name
   | BuiltinClosure builtin ->
       F.fprintf fmt "ClosureBuiltin[%s]" (builtin_closure_to_string builtin)
-  | ClassCompanion {module_name; attr_name} ->
-      F.fprintf fmt "ClassCompanion[%s,%s]" module_name attr_name
+  | ClassCompanion {module_name; class_name} ->
+      F.fprintf fmt "ClassCompanion[%s,%s]" module_name class_name
+  | ClassInstance {module_name; class_name} ->
+      F.fprintf fmt "ClassInstance[%s,%s]" module_name class_name
   | ModuleAttribute {module_name; attr_name} ->
       F.fprintf fmt "ModuleAttribute[%s,%s]" module_name attr_name
   | Filename name ->
@@ -94,8 +106,10 @@ let concatenate_package_name_and_file_name typename filename =
 
 
 let get_builtin_closure_from_builtin_type = function
-  | PyObject | PyDict | PyTuple | PyNone | PyBool ->
+  | PyObject | PyTuple | PyNone | PyBool ->
       None
+  | PyDict ->
+      Some DictFun
   | PyInt ->
       Some IntFun
   | PyString ->

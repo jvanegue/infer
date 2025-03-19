@@ -94,10 +94,10 @@ module TypeNameBridge = struct
         PythonClassName.Closure (to_string tname)
     | "PyGlobals", [tname] ->
         PythonClassName.Globals (to_string tname)
-    | "PyClassCompanion", [module_tname; attr_tname] ->
+    | "PyClassCompanion", [module_tname; class_tname] ->
         let module_name = to_string module_tname in
-        let attr_name = to_string attr_tname in
-        PythonClassName.ClassCompanion {module_name; attr_name}
+        let class_name = to_string class_tname in
+        PythonClassName.ClassCompanion {module_name; class_name}
     | "PyModuleAttr", [module_tname; attr_tname] ->
         let module_name = to_string module_tname in
         let attr_name = to_string attr_tname in
@@ -178,16 +178,21 @@ let mk_python_mixed_type_textual loc =
   Typ.Struct (TypeName.of_string ~loc PythonClassName.(classname (Builtin PyObject)))
 
 
+let mk_c_mixed_type_textual = Typ.Void
+
 let default_return_type (lang : Lang.t option) loc =
   match lang with
   | Some Hack ->
       Typ.Ptr (mk_hack_mixed_type_textual loc)
   | Some Python ->
       Typ.Ptr (mk_python_mixed_type_textual loc)
+  | Some C ->
+      Typ.Ptr mk_c_mixed_type_textual
   | Some other ->
-      L.die InternalError "Unexpected return type outside of Hack/Python: %s" (Lang.to_string other)
+      L.die InternalError "Unexpected return type outside of Hack/Python/C: %s"
+        (Lang.to_string other)
   | None ->
-      L.die InternalError "Unexpected return type outside of Hack/Python: None"
+      L.die InternalError "Unexpected return type outside of Hack/Python/C: None"
 
 
 let mangle_java_procname jpname =
@@ -312,6 +317,11 @@ module TypBridge = struct
   let python_mixed =
     let mixed_struct = SilTyp.mk_struct python_mixed_type_name in
     SilTyp.mk_ptr mixed_struct
+
+
+  let c_mixed =
+    let void = SilTyp.mk SilTyp.Tvoid in
+    SilTyp.mk_ptr void
 end
 
 module IdentBridge = struct
@@ -862,10 +872,12 @@ module InstrBridge = struct
               (variadic_flag, procdecl)
           | None
             when QualifiedProcName.contains_wildcard proc
-                 || QualifiedProcName.is_python_builtin proc ->
+                 || QualifiedProcName.is_python_builtin proc
+                 || QualifiedProcName.is_llvm_builtin proc
+                 || ProcDecl.is_builtin proc (Some lang) ->
               let textual_ret_typ =
-                (* Declarations with unknown formals are expected in Hack/Python. Assume that unknown
-                   return types are *HackMixed/*PyObject respectively. *)
+                (* Declarations with unknown formals are expected in Hack/Python/C. Assume that unknown
+                   return types are *HackMixed/*PyObject/*void respectively. *)
                 default_return_type (Some lang) loc
               in
               ( TextualDecls.NotVariadic
@@ -901,8 +913,12 @@ module InstrBridge = struct
                     (* Declarations with unknown formals are expected in Python. Assume that unknown
                        formal types are *PyObject. *)
                     TypBridge.python_mixed
+                | Lang.C ->
+                    (* Declarations with unknown formals are expected in C. Assume that unknown
+                       formal types are *void. *)
+                    TypBridge.c_mixed
                 | other ->
-                    L.die InternalError "Unexpected unknown formals outside of Hack/Python: %s"
+                    L.die InternalError "Unexpected unknown formals outside of Hack/Python/C: %s"
                       (Lang.to_string other)
               in
               List.map args ~f:(fun arg -> (arg, default_typ))

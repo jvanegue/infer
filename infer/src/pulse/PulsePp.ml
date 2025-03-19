@@ -391,21 +391,21 @@ module Printer = struct
             (decorator.f (value, Some hist) (PulseFormula.pp_term AbstractValue.pp))
             t
     in
+    let need_sep = ref false in
+    let new_elem () =
+      if !need_sep then F.fprintf fmt "@;* " ;
+      need_sep := true
+    in
     let rec empty_delayed fmt =
       let delayed_values_ = !delayed_values in
       if not (List.is_empty delayed_values_) then (
         delayed_values := [] ;
         List.iter delayed_values_ ~f:(fun (value, hist) ->
             if should_print_and_record value && has_edges pre_or_post value astate then (
-              F.fprintf fmt "@;* " ;
+              new_elem () ;
               pp_value_hist_opt fmt (value, hist) ;
               pp_value_accesses ~is_prev_deref:false fmt (value, hist) ) ;
             empty_delayed fmt ) )
-    in
-    let need_sep = ref false in
-    let new_elem () =
-      if !need_sep then F.fprintf fmt "@;* " ;
-      need_sep := true
     in
     Stack.fold ~pre_or_post
       (fun var vo () ->
@@ -413,11 +413,12 @@ module Printer = struct
         match AbstractValue.Map.find value explainer with
         | Aliases {print_as} ->
             if not (Option.exists print_as ~f:(Var.equal var)) then (
-              new_elem () ;
               add_delayed_value (value, Some hist) ;
-              F.fprintf fmt "@[<h>%a=%a@]"
-                (pp_var pp_kind ~with_ampersand:true)
-                var pp_value_origin vo )
+              if Var.is_pvar var then (
+                new_elem () ;
+                F.fprintf fmt "@[<h>%a=%a@]"
+                  (pp_var pp_kind ~with_ampersand:true)
+                  var pp_value_origin vo ) )
         | Unique _ -> (
             let pp, var_value_hist, with_ampersand =
               if Var.is_pvar var then
@@ -447,17 +448,20 @@ module Printer = struct
             match AbstractValue.Map.find (fst var_value_hist) explainer with
             | Aliases {print_as= Some var'} when Var.equal var var' ->
                 ()
-            | _ ->
+            | _ when Var.is_pvar var ->
                 new_elem () ;
-                F.fprintf fmt "@[<h>%a%a@]" (pp_var pp_kind ~with_ampersand) var pp var_value_hist )
+                F.fprintf fmt "@[<h>%a%a@]" (pp_var pp_kind ~with_ampersand) var pp var_value_hist
+            | _ ->
+                () )
         | Term (t, _) ->
-            new_elem () ;
             add_delayed_value (value, Some hist) ;
-            F.fprintf fmt "@[<h>%a=%a@]"
-              (pp_var pp_kind ~with_ampersand:true)
-              var
-              (decorator.f (value, Some hist) (PulseFormula.pp_term AbstractValue.pp))
-              t )
+            if Var.is_pvar var then (
+              new_elem () ;
+              F.fprintf fmt "@[<h>%a=%a@]"
+                (pp_var pp_kind ~with_ampersand:true)
+                var
+                (decorator.f (value, Some hist) (PulseFormula.pp_term AbstractValue.pp))
+                t ) )
       astate () ;
     empty_delayed fmt
 
@@ -536,30 +540,36 @@ module Printer = struct
       fmt astate
 end
 
-let pp (pp_kind : Pp.print_kind) path_opt fmt astate =
+let pp ?(simplified = false) (pp_kind : Pp.print_kind) path_opt fmt astate =
   let pp_ pre_post =
     let explainer = Explainer.make pre_post astate in
     let decorator = HTMLDecorator.make pp_kind pre_post astate in
     let pp_pure =
-      match pre_post with `Pre -> Printer.pp_conditions | `Post -> Printer.pp_formula
+      if simplified then fun _ _ _ _ -> ()
+      else match pre_post with `Pre -> Printer.pp_conditions | `Post -> Printer.pp_formula
     in
-    F.fprintf fmt "@\n@[<hv2>%s:@;%a%a@]"
-      (match pre_post with `Pre -> "Inferred pre" | `Post -> "Current post")
-      (Printer.pp_stack_and_heap decorator pp_kind pre_post explainer)
-      astate (pp_pure pp_kind explainer) astate.AbductiveDomain.path_condition ;
+    if simplified then
+      F.fprintf fmt "@\n@[<hv2>%a@]"
+        (Printer.pp_stack_and_heap decorator pp_kind pre_post explainer)
+        astate
+    else
+      F.fprintf fmt "@\n@[<hv2>%s:@;%a%a@]"
+        (match pre_post with `Pre -> "Inferred pre" | `Post -> "Current post")
+        (Printer.pp_stack_and_heap decorator pp_kind pre_post explainer)
+        astate (pp_pure pp_kind explainer) astate.AbductiveDomain.path_condition ;
     match pp_kind with
-    | TEXT ->
+    | TEXT when not simplified ->
         F.fprintf fmt "@;%a" (Printer.pp_attributes pp_kind pre_post explainer) astate
-    | HTML ->
+    | TEXT | HTML ->
         ()
   in
   pp_ `Post ;
-  pp_ `Pre ;
-  F.pp_print_newline fmt () ;
+  if not simplified then pp_ `Pre ;
+  if not simplified then F.pp_print_newline fmt () ;
   let pp_raw_state fmt () =
     let pp_path_opt fmt path_opt =
       Option.iter path_opt ~f:(fun path -> F.fprintf fmt "@\n%a" PulsePathContext.pp path)
     in
     F.fprintf fmt "%a%a" (Pp.escape_xml AbductiveDomain.pp pp_kind) astate pp_path_opt path_opt
   in
-  Pp.html_collapsible_block ~name:"Raw state" pp_kind pp_raw_state fmt ()
+  if not simplified then Pp.html_collapsible_block ~name:"Raw state" pp_kind pp_raw_state fmt ()

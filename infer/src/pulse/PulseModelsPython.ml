@@ -260,6 +260,12 @@ let as_constant_string_exn aval : string DSL.model_monad =
   ret str
 
 
+module ThreeValuedLogic = struct
+  type t = bool option
+
+  let is_true = function None -> false | Some b -> b
+end
+
 module Dict = struct
   let make keys args ~const_strings_only : DSL.aval DSL.model_monad =
     let open DSL.Syntax in
@@ -303,6 +309,23 @@ module Dict = struct
     in
     let* opt_static_type = get_static_type dict in
     option_iter opt_static_type ~f:(fun tname -> propagate_field_type Fieldname.Set.empty tname key)
+
+
+  let contains_str_key dict key : ThreeValuedLogic.t DSL.model_monad =
+    let open DSL.Syntax in
+    let* fields = get_known_fields dict in
+    let field_names =
+      List.fold fields ~init:[] ~f:(fun acc field ->
+          match (field : Access.t) with
+          | FieldAccess fieldname ->
+              Fieldname.to_string fieldname :: acc
+          | _ ->
+              acc )
+    in
+    if List.mem field_names key ~equal:String.( = ) then Some true |> ret
+    else
+      let* dict_contains_const_keys = is_dict_contain_const_keys dict in
+      if dict_contains_const_keys then Some false |> ret else None |> ret
 
 
   let get_str_key ?(dict_read_const_key = false) ?(propagate_static_type = false) dict key :
@@ -355,6 +378,23 @@ module Dict = struct
     let open DSL.Syntax in
     let* key = as_constant_string_exn key in
     set_str_key dict key value
+
+
+  let builtin args : DSL.aval DSL.model_monad =
+    let default_value ~const_strings_only = make [] [] ~const_strings_only in
+    let open DSL.Syntax in
+    match args with
+    | [] ->
+        default_value ~const_strings_only:true
+    | [arg] -> (
+        let* arg_dynamic_type_data = get_dynamic_type ~ask_specialization:true arg in
+        match arg_dynamic_type_data with
+        | Some {Formula.typ= {desc= Tstruct (PythonClass (Builtin PyDict))}} ->
+            ret arg
+        | _ ->
+            default_value ~const_strings_only:false )
+    | _ ->
+        default_value ~const_strings_only:false
 end
 
 module Integer = struct
@@ -453,7 +493,7 @@ let build_class closure _name _args : model =
   assign_ret class_
 
 
-let call_dsl ~closure ~arg_names:_ ~args : DSL.aval DSL.model_monad =
+let call_closure_dsl ~closure ~arg_names:_ ~args : DSL.aval DSL.model_monad =
   (* TODO: take into account named args *)
   let open DSL.Syntax in
   let gen_closure_args opt_proc_attrs =
@@ -474,6 +514,23 @@ let call_dsl ~closure ~arg_names:_ ~args : DSL.aval DSL.model_monad =
     ret [locals]
   in
   apply_python_closure closure gen_closure_args
+
+
+let call_dsl ~callable ~arg_names ~args =
+  let open DSL.Syntax in
+  let* opt_static_type = get_static_type callable in
+  match opt_static_type with
+  | Some (Typ.PythonClass (ClassCompanion {module_name; class_name})) ->
+      let instance_type = Typ.PythonClass (ClassInstance {module_name; class_name}) in
+      L.d_printfln ~color:Orange "calling a constructor for type %a" Typ.Name.pp instance_type ;
+      let* new_instance = constructor ~deref:false instance_type [] in
+      let* init_closure = Dict.get_str_key ~propagate_static_type:true callable "__init__" in
+      let args = new_instance :: args in
+      let* _ = call_closure_dsl ~closure:init_closure ~arg_names:[] ~args in
+      ret new_instance
+  | _ ->
+      L.d_printfln ~color:Orange "calling closure %a" AbstractValue.pp (fst callable) ;
+      call_closure_dsl ~closure:callable ~arg_names ~args
 
 
 let await_awaitable arg : unit DSL.model_monad =
@@ -566,6 +623,9 @@ let modelled_python_call model args : DSL.aval option DSL.model_monad =
       LibModel.deep_release args
   | PyLib {module_name= "asyncio"; name= "sleep"}, _ ->
       LibModel.gen_awaitable args
+  | PyBuiltin DictFun, args ->
+      let* dict = Dict.builtin args in
+      ret (Some dict)
   | PyBuiltin IntFun, [arg] ->
       let* res = Integer.make arg in
       ret (Some res)
@@ -606,12 +666,12 @@ let try_catch_lib_model_using_static_type ~default closure args =
       default ()
 
 
-let call closure arg_names args : model =
+let call callable arg_names args : model =
   (* TODO: take into account named args *)
   let open DSL.Syntax in
   start_model
   @@ fun () ->
-  let* opt_dynamic_type_data = get_dynamic_type ~ask_specialization:true closure in
+  let* opt_dynamic_type_data = get_dynamic_type ~ask_specialization:true callable in
   let* res =
     match opt_dynamic_type_data with
     | Some {Formula.typ= {Typ.desc= Tstruct (PythonClass (BuiltinClosure builtin))}} -> (
@@ -631,10 +691,10 @@ let call closure arg_names args : model =
             L.d_printfln "catching reserved lib call using dynamic type %a" Typ.Name.pp type_name ;
             ret res
         | None ->
-            call_dsl ~closure ~arg_names ~args )
+            call_dsl ~callable ~arg_names ~args )
     | _ ->
-        let default () = call_dsl ~closure ~arg_names ~args in
-        try_catch_lib_model_using_static_type ~default closure args
+        let default () = call_dsl ~callable ~arg_names ~args in
+        try_catch_lib_model_using_static_type ~default callable args
   in
   assign_ret res
 
@@ -664,6 +724,122 @@ let call_function_ex closure tuple dict : model =
   assign_ret res
 
 
+let gen_start_coroutine : model =
+  let open DSL.Syntax in
+  start_model @@ fun () -> ret ()
+
+
+let is_module_captured module_name =
+  let function_name = "__module_body__" in
+  let class_name = PythonClassName.Filename module_name in
+  let proc_name = Procname.make_python ~class_name:(Some class_name) ~function_name in
+  IRAttributes.load proc_name |> Option.map ~f:(fun _ -> proc_name)
+
+
+let lookup_module module_name =
+  let open DSL.Syntax in
+  match is_module_captured module_name with
+  | Some proc_name ->
+      let* module_ = PyModule.make module_name in
+      ret (module_, Some proc_name)
+  | None -> (
+      (* it is not a capture module name *)
+      let module_name_init = module_name ^ "::__init__" in
+      match is_module_captured module_name_init with
+      | None ->
+          (* neither it is a captured package name *)
+          if not (IString.Set.mem module_name stdlib_modules) then
+            StatsLogging.log_message ~label:"python_missing_module" ~message:module_name ;
+          let* module_ = PyModule.make module_name in
+          ret (module_, None)
+      | Some proc_name ->
+          (* it is a captured package name *)
+          let* module_ = PyModule.make module_name_init in
+          ret (module_, Some proc_name) )
+
+
+let initialize_class_companion ~module_name ~class_name class_companion_object =
+  let open DSL.Syntax in
+  let* module_, _ = lookup_module module_name in
+  let module_tname = PythonClassName.Filename module_name in
+  let class_initializer =
+    Procname.make_python ~class_name:(Some module_tname) ~function_name:class_name
+  in
+  python_call class_initializer [("globals", module_); ("locals", class_companion_object)] |> ignore
+
+
+let get_class_companion aval =
+  let open DSL.Syntax in
+  let* opt_static_type = get_static_type aval in
+  match opt_static_type with
+  | Some (Typ.PythonClass (ClassCompanion {module_name; class_name})) ->
+      ret (Some (module_name, class_name))
+  | _ ->
+      ret None
+
+
+let initialize_if_class_companion value : unit DSL.model_monad =
+  let open DSL.Syntax in
+  let* opt_class_companion = get_class_companion value in
+  option_iter opt_class_companion ~f:(fun (module_name, class_name) ->
+      L.d_printfln ~color:Orange "initializing companion class %s" class_name ;
+      initialize_class_companion ~module_name ~class_name value )
+
+
+let get_class_instance aval =
+  (* For now we just try to catch instances using static types. This is a bit limited in
+     case of interprocedural propagation *)
+  let open DSL.Syntax in
+  let* opt_static_type = get_dynamic_type ~ask_specialization:true aval in
+  match opt_static_type with
+  | Some {Formula.typ= {desc= Tstruct (Typ.PythonClass (ClassInstance {module_name; class_name}))}}
+    ->
+      ret (Some (module_name, class_name))
+  | _ ->
+      ret None
+
+
+let get_attr_dsl obj attr : DSL.aval DSL.model_monad =
+  let open DSL.Syntax in
+  let* attr = as_constant_string_exn attr in
+  (* TODO: look into companion class object if necessary *)
+  let* key_in = Dict.contains_str_key obj attr in
+  let* res =
+    if ThreeValuedLogic.is_true key_in then Dict.get_str_key ~propagate_static_type:true obj attr
+    else
+      let* opt_class_instance = get_class_instance obj in
+      match opt_class_instance with
+      | None ->
+          (* will return an unknown value and assume the key was there, but an other option would
+             be to mark this case as unreachable. We may come back later if specialization gives us
+             some dynamic type for [obj]. *)
+          Dict.get_str_key ~propagate_static_type:true obj attr
+      | Some (module_name, class_name) ->
+          let* class_companion_object = Dict.make ~const_strings_only:true [] [] in
+          let* () = initialize_class_companion ~module_name ~class_name class_companion_object in
+          L.d_printfln ~color:Orange
+            "checking if the attribute %s belongs to the companion class %s.%s (in value %a)...@;"
+            attr module_name class_name AbstractValue.pp (fst class_companion_object) ;
+          let* key_in_companion = Dict.contains_str_key class_companion_object attr in
+          if ThreeValuedLogic.is_true key_in_companion then
+            Dict.get_str_key ~propagate_static_type:true class_companion_object attr
+          else
+            (* for now, we assume in such a situation that the attribute is in the instance. It would
+               be great to 'record' such an assumption to make sure the caller context agrees *)
+            Dict.get_str_key ~propagate_static_type:true obj attr
+  in
+  let* () = initialize_if_class_companion res in
+  ret res
+
+
+let get_attr obj attr : model =
+  let open DSL.Syntax in
+  start_model
+  @@ fun () ->
+  let* res = get_attr_dsl obj attr in
+  assign_ret res
+
+
 let call_method name obj arg_names args : model =
   (* TODO: take into account named args *)
   let open DSL.Syntax in
@@ -679,31 +855,16 @@ let call_method name obj arg_names args : model =
         match opt_special_call with
         | None ->
             L.d_printfln "calling method %s on module object %s" str_name module_name ;
-            let* closure = Dict.get_exn obj name in
-            call_dsl ~closure ~arg_names ~args
+            let* callable = Dict.get_exn obj name in
+            call_dsl ~callable ~arg_names ~args
         | Some res ->
             L.d_printfln "catching special call %s on module object %s" str_name module_name ;
             ret res )
     | _ ->
-        let* closure = Dict.get_exn obj name in
+        let* callable = get_attr_dsl obj name in
         (* TODO: for OO method, gives self argument *)
-        call_dsl ~closure ~arg_names ~args
+        call_dsl ~callable ~arg_names ~args:(obj :: args)
   in
-  assign_ret res
-
-
-let gen_start_coroutine : model =
-  let open DSL.Syntax in
-  start_model @@ fun () -> ret ()
-
-
-let get_attr obj attr : model =
-  let open DSL.Syntax in
-  start_model
-  @@ fun () ->
-  let* attr = as_constant_string_exn attr in
-  (* TODO: look into companion class object if necessary *)
-  let* res = Dict.get_str_key ~propagate_static_type:true obj attr in
   assign_ret res
 
 
@@ -744,35 +905,6 @@ let is_global aval : bool DSL.model_monad =
         true
     | _ ->
         false )
-
-
-let is_module_captured module_name =
-  let function_name = "__module_body__" in
-  let class_name = PythonClassName.Filename module_name in
-  let proc_name = Procname.make_python ~class_name:(Some class_name) ~function_name in
-  IRAttributes.load proc_name |> Option.map ~f:(fun _ -> proc_name)
-
-
-let lookup_module module_name =
-  let open DSL.Syntax in
-  match is_module_captured module_name with
-  | Some proc_name ->
-      let* module_ = PyModule.make module_name in
-      ret (module_, Some proc_name)
-  | None -> (
-      (* it is not a capture module name *)
-      let module_name_init = module_name ^ "::__init__" in
-      match is_module_captured module_name_init with
-      | None ->
-          (* neither it is a captured package name *)
-          if not (IString.Set.mem module_name stdlib_modules) then
-            StatsLogging.log_message ~label:"python_missing_module" ~message:module_name ;
-          let* module_ = PyModule.make module_name in
-          ret (module_, None)
-      | Some proc_name ->
-          (* it is a captured package name *)
-          let* module_ = PyModule.make module_name_init in
-          ret (module_, Some proc_name) )
 
 
 let import_module module_name : DSL.aval DSL.model_monad =
@@ -900,6 +1032,8 @@ let tag_if_builtin name aval : unit DSL.model_monad =
         Some IntFun
     | "type" ->
         Some TypeFun
+    | "dict" ->
+        Some DictFun
     | _ ->
         None
   in
@@ -918,6 +1052,7 @@ let load_global name globals : model =
   let* name = as_constant_string_exn name in
   let* value = Dict.get_str_key ~propagate_static_type:true globals name in
   let* () = tag_if_builtin name value in
+  let* () = initialize_if_class_companion value in
   assign_ret value
 
 
@@ -1147,6 +1282,29 @@ let compare_eq arg1 arg2 : model =
   assign_ret res
 
 
+let compare_in arg1 arg2 : model =
+  let open DSL.Syntax in
+  start_model
+  @@ fun () ->
+  let* arg1_str = as_constant_string arg1 in
+  match arg1_str with
+  | Some s -> (
+      let* arg2_dynamic_type_data = get_dynamic_type ~ask_specialization:true arg2 in
+      match arg2_dynamic_type_data with
+      | Some {Formula.typ= {desc= Tstruct (PythonClass (Builtin PyDict))}} ->
+          let* dict_contains_key = Dict.contains_str_key arg2 s in
+          let* b_res =
+            match dict_contains_key with None -> Bool.make_random () | Some res -> Bool.make res
+          in
+          assign_ret b_res
+      | _ ->
+          let* res = Bool.make_random () in
+          assign_ret res )
+  | None ->
+      let* res = Bool.make_random () in
+      assign_ret res
+
+
 let matchers : matcher list =
   let open ProcnameDispatcher.Call in
   let arg = capt_arg_payload in
@@ -1191,7 +1349,7 @@ let matchers : matcher list =
   ; -"$builtins" &:: "py_compare_exception" &::.*+++> unknown ~deep_release:false
   ; -"$builtins" &:: "py_compare_ge" &::.*+++> unknown ~deep_release:false
   ; -"$builtins" &:: "py_compare_gt" &::.*+++> unknown ~deep_release:false
-  ; -"$builtins" &:: "py_compare_in" &::.*+++> unknown ~deep_release:false
+  ; -"$builtins" &:: "py_compare_in" <>$ arg $+ arg $--> compare_in
   ; -"$builtins" &:: "py_compare_is" <>$ arg $+ arg $--> compare_eq
   ; -"$builtins" &:: "py_compare_is_not" &::.*+++> unknown ~deep_release:false
   ; -"$builtins" &:: "py_compare_le" &::.*+++> unknown ~deep_release:false
@@ -1270,7 +1428,7 @@ let matchers : matcher list =
   ; -"$builtins" &:: "py_nullify_locals" <>$ arg $+++$--> nullify_locals
   ; -"$builtins" &:: "py_prep_reraise_star" &::.*+++> unknown ~deep_release:false
   ; -"$builtins" &:: "py_set_add" &::.*+++> unknown ~deep_release:true
-  ; -"$builtins" &:: "py_set_attr" &::.*+++> unknown ~deep_release:true
+  ; -"$builtins" &:: "py_set_attr" <>$ arg $+ arg $+ arg $--> store_subscript
   ; -"$builtins" &:: "py_set_update" &::.*+++> unknown ~deep_release:true
   ; -"$builtins" &:: "py_setup_annotations" &::.*+++> unknown ~deep_release:false
   ; -"$builtins" &:: "py_store_deref" &::.*+++> unknown ~deep_release:true
