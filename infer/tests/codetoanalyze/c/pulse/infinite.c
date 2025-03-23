@@ -48,8 +48,8 @@ re:
     return;
 }
 
-/* pulse-inf: works good */
-extern void fcall(int y);
+/* pulse-inf: works good, find bug */
+void fcall(int y) { y++; }
 
 void loop_call_bad(int y) {
   while (y == 100)
@@ -749,4 +749,19 @@ void allocate_all_in_array_ok(int* array[]) {
   for (int i = 0; i < 2; i++) {
     array[i] = malloc(sizeof(int));
   }
+}
+
+/* Goto in loop */
+/* Pulseinf: used to be detected! now FN */
+void goto_in_loop()
+{
+  int i = 0;
+
+  while (i < 100)
+    {
+    retry:
+      if (i == 50)
+	goto retry;
+      i++;
+    }
 }
