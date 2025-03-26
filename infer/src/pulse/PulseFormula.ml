@@ -4230,7 +4230,8 @@ module Intervals = struct
         in
         let (inv,op) = (atom_to_binop binop) in
         let invcond = inv in
-        
+
+        (* Handle cases with while (x == x) for non-termination for loops *)
         let opcond =
           match (Term.of_operand op1, Term.of_operand op2) with
           | Term.Var v1, Term.Var v2 -> (phys_equal v1 v2)
@@ -4368,7 +4369,6 @@ let and_equal_binop v (bop : Binop.t) x y formula =
 
 let and_equal_string_concat v x y formula =
   and_atom (Equal (Var v, StringConcat (Term.of_operand x, Term.of_operand y))) formula false
-
 
 
 let prune_atom ~depth atom (formula, new_eqs) ifk =
@@ -4649,6 +4649,7 @@ let and_conditions_fold_subst_variables phi0 ~up_to_f:phi_foreign ~init ~f:f_var
     IContainer.fold_of_pervasives_map_fold Atom.Map.fold conditions_foreign ~init
       ~f:(fun (acc_f, phi_new_eqs) (atom_foreign, depth) ->
         let acc_f, atom = Atom.fold_subst_variables atom_foreign ~init:acc_f ~f_subst in
+        
         (* L.debug Analysis Quiet "JV: Calling prune_atom from add_conditions \n"; *)
         let phi_new_eqs = prune_atom ~depth:(depth + 1) atom phi_new_eqs true |> sat_value_exn in
         (acc_f, phi_new_eqs) )

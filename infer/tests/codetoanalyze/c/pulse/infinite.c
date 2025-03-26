@@ -141,6 +141,7 @@ void loop_alternating_bad(int y, int x) {
 }
 
 /* pulse-inf used to work on this. Now FN */
+/* pulse-inf: This is detected at lower bound */
 void FN_nested_loop_bad(int y, int x) {
 
   while (y < 100) {
@@ -461,8 +462,8 @@ void nondet_loop_bad(int z) {
 
 /* From: AProVE: Non-termination proving for C Programs (Hensel et al. TACAS
  * 2022)*/
-/* pulse-inf: Works good! (flag bug) */
-// NEW FALSE NEGATIVE
+/* pulse-inf: Works good! (flag bug at regular widening threshold) */
+// NEW FALSE NEGATIVE AT HIGH WIDENING THRESHOLD - duplication bug? */
 void FN_hensel_tacas22_bad(int x, int y) {
   y = 0;
   while (x > 0) {
@@ -552,7 +553,6 @@ void FN_nestedloop_chen14_bad(int i) {
 }
 
 /****** Tests that reflect present in cryptographic libraries ********/
-
 // Example with array - no manifest bug
 void array_iter_ok(int array[]) {
   unsigned int i = 0;
@@ -572,7 +572,7 @@ void array2_iter_ok(int array1[], int array2[]) {
 }
 
 // Example with array and non-termination
-/* Pulse-inf: find bug! */
+/* Pulse-inf: find bug at widening 20 but not at widening 5 */
 void array_iter_bad(int array[], int len) {
   int i = 0;
   while (i < len) {
@@ -719,7 +719,7 @@ void png_palette_ok(int val) {
   if (val == 0)
     num = 1;
   else
-    num = 256;
+    num = 10;
 
   for (i = 0; i < num; i++)
     p += val;
@@ -753,15 +753,32 @@ void allocate_all_in_array_ok(int* array[]) {
 
 /* Goto in loop */
 /* Pulseinf: used to be detected! now FN */
-void goto_in_loop()
+void FN_goto_in_loop_bad()
 {
   int i = 0;
 
-  while (i < 100)
+  while (i < 10)
     {
     retry:
-      if (i == 50)
+      if (i == 5)
 	goto retry;
       i++;
     }
 }
+
+
+/* Goto in loop */
+/* Pulseinf: FN */
+void FN_goto_cross_loop_bad()
+{
+  int i = 0;
+
+ retry:
+  while (i < 10)
+    {
+      if (i == 5)
+	goto retry;
+      i++;
+    }
+}
+

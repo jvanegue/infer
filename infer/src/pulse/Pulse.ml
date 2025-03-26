@@ -182,6 +182,13 @@ module PulseTransferFunctions = struct
                  
   type analysis_data = PulseSummary.t InterproceduralAnalysis.t
 
+
+  (* check if state is an infiniteprogram state *)
+  (* let is_infinite hd : bool =
+    match hd with
+    | InfiniteProgram _ -> true
+    |_ -> false; *)
+                     
   (* Call on back_edge from widen in AbstractInterpreter.ml *)
   let back_edge (prev:DisjDomain.t list) (next:DisjDomain.t list) (num_iters:int)  : DisjDomain.t list * int =
     
@@ -204,7 +211,7 @@ module PulseTransferFunctions = struct
           match (l1,l2) with
           | hd::tl, hd2::tl2  -> let p = (hd,hd2) in listpair_combine_int tl tl2 (out @ [p])
           | [],[]             -> out
-          | _                 -> L.debug Analysis Quiet "JV PULSE:BACKEDGE MISMATCH in list size to recombine. Should never happen! \n"; out
+          | _                 -> L.debug Analysis Quiet "PULSEINF: BACKEDGE MISMATCH in list size to recombine. Should never happen! \n"; out
         in listpair_combine_int l1 l2 []
     in
     let plist,rplist = listpair_split prev [] [] in
@@ -217,12 +224,12 @@ module PulseTransferFunctions = struct
       match (pathctx) with
       | Some p -> 1, p
       | _ ->
-         (* L.debug Analysis Quiet "JV PATHCTX DEBUG: not finding back pathctx at provided index  - this should never happen \n"; *)
+         L.debug Analysis Quiet "PULSEINF: PATHCTX DEBUG: not finding back pathctx at provided index  - this should never happen \n"; 
          0, PathContext.initial (* pathctx is None *)
             
     in
     (* L.debug Analysis Quiet "JV PATHCTX: dbe len = %u pts len = 1 \n" (List.length dbe); *)
-    L.debug Analysis Quiet "widen: Prev MODIFIED %b (if true added Infinite state) \n" (used > 0 && cnt >= 0);
+    L.debug Analysis Quiet "PULSEINF: Prev MODIFIED %b (if true added Infinite state) \n" (used > 0 && cnt >= 0);
     
     let res = if (used > 0 && cnt >= 0) then
                 listpair_combine (plist @ dbe) (rplist @ [pts])
@@ -314,7 +321,6 @@ module PulseTransferFunctions = struct
     | LatentSpecializedTypeIssue _ 
     | InfiniteProgram _ -> 
         Sat (Ok exec_state)
-
 
   let topl_small_step tenv loc procname arguments (return, return_type) exec_state_res =
     let arguments =
@@ -1979,6 +1985,9 @@ let analyze specialization ({InterproceduralAnalysis.tenv; proc_desc} as analysi
     List.for_all pre_post_list ~f
   in
   let process_postconditions node posts_opt ~convert_normal_to_exceptional =
+
+    L.debug Analysis Quiet "PULSEINF: process_postconditions \n";
+    
     match posts_opt with
     | Some (posts, non_disj_astate) ->
         let node_loc = Procdesc.Node.get_loc node in
@@ -2017,9 +2026,14 @@ let analyze specialization ({InterproceduralAnalysis.tenv; proc_desc} as analysi
           report_unnecessary_parameter_copies analysis_data non_disj_astate ) ;
         summary
     | None ->
+       L.debug Analysis Quiet "PULSEINF: process_postconditions EMPTY case \n";
         PulseSummary.empty
   in
   let report_on_and_return_summaries summary =
+
+
+    L.debug Analysis Quiet "PULSEINF: report_on_and_return_summaries \n";
+    
     if Config.trace_topl then
       L.debug Analysis Quiet "ToplTrace: dropped %d disjuncts in %a@\n"
         (PulseTopl.Debug.get_dropped_disjuncts_count ())

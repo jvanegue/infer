@@ -81,9 +81,15 @@ let exec_summary_of_post_common ({InterproceduralAnalysis.proc_desc} as analysis
           location (exec_astate : ExecutionDomain.t) :
           _ ExecutionDomain.base_t SatUnsat.t =
 
+  L.debug Analysis Quiet "PULSEINF: entering exec_summary \n";
+  
   let summarize (astate : AbductiveDomain.t)
       ~(exec_domain_of_summary : AbductiveDomain.Summary.summary -> 'a ExecutionDomain.base_t)
       ~(is_exceptional_state : bool) : _ ExecutionDomain.base_t SatUnsat.t =
+
+
+    L.debug Analysis Quiet "PULSEINF: entering summarize \n";
+    
     let open SatUnsat.Import in
     let+ summary_result =
       AbductiveDomain.Summary.of_post (Procdesc.get_attributes proc_desc) location astate
@@ -93,6 +99,7 @@ let exec_summary_of_post_common ({InterproceduralAnalysis.proc_desc} as analysis
        let r = exec_domain_of_summary summary in
        (match r with
         | InfiniteProgram _ ->
+           L.debug Analysis Quiet "PULSEINF: Reach summarize with InfiniteProgram detected \n";
            let curnode = Metadata.get_alert_node in
            let curloc = (Procdesc.Node.get_loc(curnode())) in 
            let error = ReportableError {astate=astate; diagnostic=(InfiniteError {location=curloc})} in
@@ -160,6 +167,9 @@ let exec_summary_of_post_common ({InterproceduralAnalysis.proc_desc} as analysis
           (* NOTE: this probably leads to the error being dropped as the access trace is unlikely to
              contain the reason for invalidation and thus we will filter out the report. TODO:
              figure out if that's a problem. *)
+
+         L.debug Analysis Quiet "PULSEINF: reporting summary error (dropping alert) \n";
+         
           PulseReport.report_summary_error analysis_data path
             ( ReportableError
                 { diagnostic=
@@ -181,6 +191,7 @@ let exec_summary_of_post_common ({InterproceduralAnalysis.proc_desc} as analysis
       summarize astate ~exec_domain_of_summary:continue_program ~is_exceptional_state:false
   (* already a summary but need to reconstruct the variants to make the type system happy :( *)
   | InfiniteProgram astate ->
+     L.debug Analysis Quiet "PULSEINF: calling summarize for InfiniteProgram \n";
      summarize astate ~exec_domain_of_summary:infinite_raised ~is_exceptional_state:false
   | AbortProgram astate ->
       Sat (AbortProgram astate)
@@ -204,13 +215,17 @@ let exec_summary_of_post_common ({InterproceduralAnalysis.proc_desc} as analysis
 
 
 let force_exit_program analysis_data path post =
+  L.debug Analysis Quiet "PULSEINF: Forced exit program \n";
   exec_summary_of_post_common analysis_data None path post
     ~continue_program:(fun astate -> ExitProgram astate)
     ~exception_raised:(fun astate -> ExitProgram astate)
     ~infinite_raised:(fun  astate -> ExitProgram astate)
 
 let of_posts ({InterproceduralAnalysis.proc_desc} as analysis_data) specialization location posts
-    non_disj =
+      non_disj =
+
+  L.debug Analysis Quiet "PULSEINF: of_posts called \n";
+  
   let pre_post_list =
     List.filter_mapi posts ~f:(fun i (exec_state, path) ->
         L.d_printfln "Creating spec out of state #%d:@\n%a" i
