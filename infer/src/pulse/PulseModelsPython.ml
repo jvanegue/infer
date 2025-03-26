@@ -1110,6 +1110,34 @@ let make_const_key_map (keys : DSL.aval) (values : DSL.aval list) : model =
   assign_ret dict
 
 
+let build_map (args : DSL.aval list) : model =
+  let open DSL.Syntax in
+  start_model
+  @@ fun () ->
+  if List.length args mod 2 <> 0 then
+    L.die InternalError "py_build_map expects even number of arguments" ;
+  let key_val_pairs = List.chunks_of args ~length:2 in
+  let const_strings_only = ref true in
+  let* keys, vals =
+    list_fold key_val_pairs ~init:([], []) ~f:(fun (keys, values) key_val_list ->
+        match key_val_list with
+        | [key; value] -> (
+            let* key_str = as_constant_string key in
+            match key_str with
+            | None ->
+                let* is_maybe_string = is_dynamic_type_maybe_string key in
+                if is_maybe_string then const_strings_only := false ;
+                let* () = remove_allocation_attr_transitively [key; value] in
+                (keys, values) |> ret
+            | Some key_str ->
+                (key_str :: keys, value :: values) |> ret )
+        | _ ->
+            L.die InternalError "py_build_map expects even number of arguments" )
+  in
+  let* dict = Dict.make keys vals ~const_strings_only:!const_strings_only in
+  assign_ret dict
+
+
 let make_function closure _default_values _default_values_kw _annotations _cells_for_closure : model
     =
   let open DSL.Syntax in
@@ -1166,6 +1194,11 @@ let bool_true : model =
   @@ fun () ->
   let* res = Bool.make true in
   assign_ret res
+
+
+let load_assertion_error : model =
+  let open DSL.Syntax in
+  start_model @@ fun () -> report_assert_error
 
 
 let make_string arg : model =
@@ -1332,7 +1365,7 @@ let matchers : matcher list =
   ; -"$builtins" &:: "py_build_const_key_map" <>$ arg $+++$--> make_const_key_map
   ; -"$builtins" &:: "py_build_frozen_set" &::.*+++> unknown ~deep_release:true
   ; -"$builtins" &:: "py_build_list" &::.*+++> build_tuple
-  ; -"$builtins" &:: "py_build_map" &::.*+++> unknown ~deep_release:true
+  ; -"$builtins" &:: "py_build_map" &::.*+++> build_map
   ; -"$builtins" &:: "py_build_set" &::.*+++> unknown ~deep_release:true
   ; -"$builtins" &:: "py_build_slice" &::.*+++> unknown ~deep_release:true
   ; -"$builtins" &:: "py_build_string" &::.*+++> unknown ~deep_release:false
@@ -1402,7 +1435,7 @@ let matchers : matcher list =
   ; -"$builtins" &:: "py_list_append" <>$ arg $+ arg $--> list_append
   ; -"$builtins" &:: "py_list_extend" &::.*+++> unknown ~deep_release:true
   ; -"$builtins" &:: "py_list_to_tuple" &::.*+++> unknown ~deep_release:true
-  ; -"$builtins" &:: "py_load_assertion_error" &::.*+++> unknown ~deep_release:false
+  ; -"$builtins" &:: "py_load_assertion_error" <>--> load_assertion_error
   ; -"$builtins" &:: "py_load_class_deref" &::.*+++> unknown ~deep_release:false
   ; -"$builtins" &:: "py_load_closure" &::.*+++> unknown ~deep_release:false
   ; -"$builtins" &:: "py_load_deref" &::.*+++> unknown ~deep_release:false
