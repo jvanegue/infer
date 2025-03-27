@@ -10,7 +10,8 @@ module F = Format
 module L = Logging
 open PulseBasicInterface
 module BaseDomain = PulseBaseDomain
-module Memory = PulseBaseMemory
+module BaseMemory = PulseBaseMemory
+module BaseStack = PulseBaseStack
 open IOption.Let_syntax
 
 type value = AbstractValue.t [@@deriving compare, equal]
@@ -54,14 +55,30 @@ type substitution = (AbstractValue.t * ValueHistory.t) AbstractValue.Map.t
 
 type 'a substitutor = substitution * 'a -> substitution * 'a
 
-let sub_value (sub, value) =
-  match AbstractValue.Map.find_opt value sub with
-  | Some (v, _history) ->
-      (sub, v)
-  | None ->
-      let v = AbstractValue.mk_fresh () in
-      let sub = AbstractValue.Map.add value (v, ValueHistory.epoch) sub in
-      (sub, v)
+let sub_value : warn:bool -> value substitutor =
+  let incomplete_sub_reported = AnalysisGlobalState.make_dls ~init:(fun () -> false) in
+  let report_incomplete_sub value =
+    (* Without this guard, when something is wrong, the message usually gets printed so many times
+       that analysis jobs get slowed down a LOT. *)
+    if not (DLS.get incomplete_sub_reported) then (
+      DLS.set incomplete_sub_reported true ;
+      L.internal_error "PulseTopl.sub_value given incomplete subtitution for %a@\n" AbstractValue.pp
+        value )
+  in
+  let sub_value ~warn (sub, value) =
+    match AbstractValue.Map.find_opt value sub with
+    | Some (v, _history) ->
+        (sub, v)
+    | None ->
+        (* This happens if the abstract values mentioned in a Topl summary were not matched to abstract
+           values in the caller. It should not happen, but it may if summaries mention "free" abstract
+           values or if the matching algorithm is incomplete. *)
+        if warn then report_incomplete_sub value ;
+        let v = AbstractValue.mk_fresh () in
+        let sub = AbstractValue.Map.add value (v, ValueHistory.epoch) sub in
+        (sub, v)
+  in
+  sub_value
 
 
 let sub_list : 'a substitutor -> 'a list substitutor =
@@ -74,11 +91,25 @@ let sub_list : 'a substitutor -> 'a list substitutor =
   (sub, List.rev xs)
 
 
-type pulse_state =
-  { pulse_post: BaseDomain.t
-  ; pulse_pre: BaseDomain.t
-  ; path_condition: Formula.t
-  ; get_reachable: unit -> AbstractValue.Set.t }
+type pulse_state = {pulse_post: BaseDomain.t; pulse_pre: BaseDomain.t; path_condition: Formula.t}
+
+let vals_of_basedomain {BaseDomain.heap; stack; attrs= _ignore_for_now} =
+  let vals = AbstractValue.Set.empty in
+  let add v vals = AbstractValue.Set.add v vals in
+  let collect_edge vals (_access, (v, _hist)) = add v vals in
+  let collect_heap_binding v edges vals =
+    BaseMemory.Edges.fold edges ~init:(add v vals) ~f:collect_edge
+  in
+  let collect_stack_binding _var v_orig vals = add (ValueOrigin.value v_orig) vals in
+  let vals = BaseMemory.fold collect_heap_binding heap vals in
+  let vals = BaseStack.fold collect_stack_binding stack vals in
+  vals
+
+
+let vals_of_formula phi =
+  let add vals v = AbstractValue.Set.add v vals in
+  Formula.fold_variables phi ~init:AbstractValue.Set.empty ~f:add
+
 
 module Constraint : sig
   type predicate
@@ -104,15 +135,14 @@ module Constraint : sig
   val negate : t list -> t list
   (** computes ¬(c1∨...∨cm) as d1∨...∨dn, where n=|c1|x...x|cm| *)
 
-  val eliminate_exists : keep:(AbstractValue.t -> bool) -> t -> t
-  (** quantifier elimination *)
-
   val size : t -> int
 
-  val substitute : t substitutor
+  val substitute : ?warn:bool -> t substitutor
 
   val simplify : pulse_state -> t -> t
   (** Drop constraints implied by Pulse state. Detect infeasible constraints. *)
+
+  val fold_values : t -> init:'acc -> f:('acc -> value -> 'acc) -> 'acc
 
   val pp : F.formatter -> t -> unit
 end = struct
@@ -187,24 +217,24 @@ end = struct
 
   let size constr = List.length constr
 
-  let substitute_predicate (sub, predicate) =
+  let substitute_predicate ~warn (sub, predicate) =
     let avo x : Formula.operand = AbstractValueOperand x in
     match (predicate : predicate) with
     | Binary (op, AbstractValueOperand l, AbstractValueOperand r) ->
-        let sub, l = sub_value (sub, l) in
-        let sub, r = sub_value (sub, r) in
+        let sub, l = sub_value ~warn (sub, l) in
+        let sub, r = sub_value ~warn (sub, r) in
         (sub, Binary (op, avo l, avo r))
     | Binary (op, AbstractValueOperand l, r) ->
-        let sub, l = sub_value (sub, l) in
+        let sub, l = sub_value ~warn (sub, l) in
         (sub, Binary (op, avo l, r))
     | Binary (op, l, AbstractValueOperand r) ->
-        let sub, r = sub_value (sub, r) in
+        let sub, r = sub_value ~warn (sub, r) in
         (sub, Binary (op, l, avo r))
     | _ ->
         (sub, predicate)
 
 
-  let substitute = sub_list substitute_predicate
+  let substitute ?(warn = false) = sub_list (substitute_predicate ~warn)
 
   let pp_operator f operator =
     match operator with
@@ -249,7 +279,7 @@ end = struct
           "path predicate" = value of shape Constraint.Builtin (_, _, _)
           "heap predicate" = value of shape Constraint.LeadsTo (_,_) or Constraint.NotLeadsTo (_,_)
           "path condition" = (possibly modified) pulse_state.path_condition (of type Formula.t)
-          "heap" = (possibly modified) pulse_state.pulse_post.heap (of type Memory.t)
+          "heap" = (possibly modified) pulse_state.pulse_post.heap (of type BaseMemory.t)
           "new_eqs" = value of type Formula.new_eqs
        end of terminology aside.)
 
@@ -260,7 +290,7 @@ end = struct
        or by the heap, we drop it. Otherwise we conjoin it to the path condition and we normalize
        the path condition. Both conjoining and normalization may render the path condition
        unsatisfiable; if they do not then they may generate new deduced equalities. If the predicate
-       was an equality, we also add it to new equalities, before updating the heap according.
+       was an equality, we also add it to new equalities, before updating the heap accordingly.
        When we apply new equalities as substitutions to the heap, we have one more opportunity to
        detect unsatisfiability. After these updates to the path condition and the heap, we are ready
        to process the next predicate. (The invariant we try to maintain here is that the path
@@ -324,10 +354,10 @@ end = struct
           let is_implied_by_heap () =
             match (op, l, r) with
             | Ne, AbstractValueOperand l, AbstractValueOperand r ->
-                Memory.is_allocated heap l && Memory.is_allocated heap r
+                BaseMemory.is_allocated heap l && BaseMemory.is_allocated heap r
             | Ne, AbstractValueOperand v, ConstOperand (Cint z)
             | Ne, ConstOperand (Cint z), AbstractValueOperand v ->
-                IntLit.iszero z && Memory.is_allocated heap v
+                IntLit.iszero z && BaseMemory.is_allocated heap v
             | _ ->
                 false
           in
@@ -366,9 +396,9 @@ end = struct
               let incorporate_eq heap (eq : Formula.new_eq) =
                 match eq with
                 | Equal (v1, v2) ->
-                    Memory.subst_var ~for_summary:true (v1, v2) heap
+                    BaseMemory.subst_var ~for_summary:true (v1, v2) heap
                 | EqZero v ->
-                    if Memory.is_allocated heap v then
+                    if BaseMemory.is_allocated heap v then
                       let reason () =
                         F.asprintf "value %a is both zero and allocated" AbstractValue.pp v
                       in
@@ -396,9 +426,10 @@ end = struct
                 []
           in
           let true_successors =
-            match Memory.find_opt v heap with
+            match BaseMemory.find_opt v heap with
             | Some edges ->
-                Memory.Edges.bindings edges |> List.map ~f:(function _access, (w, _history) -> w)
+                BaseMemory.Edges.bindings edges
+                |> List.map ~f:(function _access, (w, _history) -> w)
             | None ->
                 []
           in
@@ -462,20 +493,22 @@ end = struct
         [False]
 
 
-  let eliminate_exists ~keep constr =
-    (* TODO(rgrigore): replace the current weak approximation *)
-    let is_live_operand : Formula.operand -> bool = function
+  let fold_values (constr : t) ~init ~f =
+    let fold_operand (op : Formula.operand) acc =
+      match op with
       | AbstractValueOperand v ->
-          keep v
-      | ConstOperand _ ->
-          true
-      | FunctionApplicationOperand _ ->
-          true
+          f acc v
+      | ConstOperand _ | FunctionApplicationOperand _ ->
+          acc
     in
-    let is_live_predicate pred =
-      match pred with Binary (_op, l, r) -> is_live_operand l && is_live_operand r | _ -> true
+    let fold_predicate acc p =
+      match p with
+      | Binary (_op, l, r) ->
+          acc |> fold_operand l |> fold_operand r
+      | True | False ->
+          acc
     in
-    List.filter ~f:is_live_predicate constr
+    List.fold constr ~init ~f:fold_predicate
 end
 
 type step =
@@ -562,11 +595,11 @@ let make_field class_name field_name : Fieldname.t =
 let deref_field_access pulse_state value class_name field_name : Formula.operand option =
   (* Dereferencing is done in 2 steps: (v) --f-> (v1) --*-> (v2) *)
   let heap = pulse_state.pulse_post.heap in
-  let* edges = Memory.find_opt value heap in
+  let* edges = BaseMemory.find_opt value heap in
   let field = make_field class_name field_name in
-  let* v1, _hist = Memory.Edges.find_opt (FieldAccess field) edges in
-  let* edges = Memory.find_opt v1 heap in
-  let* v2, _hist = Memory.Edges.find_opt Dereference edges in
+  let* v1, _hist = BaseMemory.Edges.find_opt (FieldAccess field) edges in
+  let* edges = BaseMemory.find_opt v1 heap in
+  let* v2, _hist = BaseMemory.Edges.find_opt Dereference edges in
   match Formula.as_constant_string pulse_state.path_condition v2 with
   | Some r ->
       Some (Formula.ConstOperand (Const.Cstr r))
@@ -839,44 +872,42 @@ let drop_garbage ~keep state =
   List.filter ~f:should_keep state
 
 
+(* Drop the simple states that mention in the pruned part other variables except those in
+   [pulse_vals_pre] and those in the registers of the pre-simple-state. This is necessary before
+   extracting summaries, so that we don't mentions local values. And it under-approximates if applied
+   in the middle of the symbolic execution. *)
+let drop_ambiguous pulse_state state =
+  let pulse_vals_pre = vals_of_basedomain pulse_state.pulse_pre in
+  let should_keep {pre; pruned; post= _} =
+    let add_register values (_register, v) = AbstractValue.Set.add v values in
+    let ok = List.fold ~f:add_register ~init:pulse_vals_pre pre.memory in
+    let is_ok b v = b && AbstractValue.Set.mem v ok in
+    Constraint.fold_values pruned ~init:true ~f:is_ok
+  in
+  List.filter ~f:should_keep state
+
+
 let simplify pulse_state state =
   (* NOTE: For dropping garbage, we do not consider registers live. If the Topl monitor has a hold
      of something that is garbage for the program, then that something is still garbage. *)
-  let reachable =
-    Stats.incr_topl_reachable_calls () ;
-    pulse_state.get_reachable ()
-  in
-  let eliminate_exists {pre; post; pruned; last_step} =
-    L.d_printfln "@[<v>@[DBG eliminate_exists pulse_state.path_condition %a@]@;@]" Formula.pp
-      pulse_state.path_condition ;
-    let collect memory keep =
-      List.fold ~init:keep ~f:(fun keep (_reg, value) -> AbstractValue.Set.add value keep) memory
-    in
-    let keep = reachable |> collect pre.memory |> collect post.memory in
-    L.d_printfln "@[<v>@[DBG eliminate_exists keep = %a@]@;@]" AbstractValue.Set.pp keep ;
-    let keep v = AbstractValue.Set.mem v keep in
-    let keep v =
-      let result = keep v in
-      L.d_printfln "@[<v>@[DBG keep %a %b@]@;@]" AbstractValue.pp v result ;
-      result
-    in
-    let pruned = Constraint.eliminate_exists ~keep pruned in
-    {pre; post; pruned; last_step}
+  let pulse_vals =
+    let pulse_vals_pre = vals_of_basedomain pulse_state.pulse_pre in
+    let pulse_vals_post = vals_of_basedomain pulse_state.pulse_post in
+    let pulse_vals_path_condition = vals_of_formula pulse_state.path_condition in
+    let ( ++ ) = AbstractValue.Set.union in
+    pulse_vals_pre ++ pulse_vals_post ++ pulse_vals_path_condition
   in
   let simplify_pruned {pre; post; pruned; last_step} =
     let pruned = Constraint.simplify pulse_state pruned in
     {pre; post; pruned; last_step}
   in
-  (* The following three steps are ordered from fastest to slowest, except that `drop_infeasible`
+  (* The following steps are ordered from fastest to slowest, except that `drop_infeasible`
      has to come after `simplify_pruned`. *)
-  let state =
-    (* T147875161 *)
-    if false then List.map ~f:eliminate_exists state else state
-  in
-  let state = drop_garbage ~keep:reachable state in
+  let state = drop_garbage ~keep:pulse_vals state in
   let state = List.map ~f:simplify_pruned state in
   let state = drop_infeasible pulse_state state in
-  List.dedup_and_sort ~compare:compare_simple_state state
+  let state = List.dedup_and_sort ~compare:compare_simple_state state in
+  state
 
 
 let simplify =
@@ -963,18 +994,18 @@ let of_unequal (or_unequal : 'a List.Or_unequal_lengths.t) =
       L.die InternalError "PulseTopl expected lists to be of equal lengths"
 
 
-let sub_configuration (sub, {vertex; memory}) =
+let sub_configuration ?(warn = false) (sub, {vertex; memory}) =
   let keys, values = List.unzip memory in
-  let sub, values = sub_list sub_value (sub, values) in
+  let sub, values = sub_list (sub_value ~warn) (sub, values) in
   let memory = of_unequal (List.zip keys values) in
   (sub, {vertex; memory})
 
 
 (* Does not substitute in [last_step]: not usually needed, and takes much time. *)
 let sub_simple_state (sub, {pre; post; pruned; last_step}) =
-  let sub, pre = sub_configuration (sub, pre) in
-  let sub, post = sub_configuration (sub, post) in
-  let sub, pruned = Constraint.substitute (sub, pruned) in
+  let sub, pre = sub_configuration ~warn:true (sub, pre) in
+  let sub, post = sub_configuration ~warn:false (sub, post) in
+  let sub, pruned = Constraint.substitute ~warn:true (sub, pruned) in
   (sub, {pre; post; pruned; last_step})
 
 
@@ -1028,7 +1059,12 @@ let large_step ~call_location ~callee_proc_name ~substitution pulse_state ~calle
   result |> apply_limits pulse_state
 
 
-let filter_for_summary pulse_state state = drop_infeasible pulse_state state
+let filter_for_summary pulse_state state =
+  (* NOTE: [drop_infeasible] is likely a nop, but it's cheap. *)
+  let state = drop_infeasible pulse_state state in
+  let state = drop_ambiguous pulse_state state in
+  state
+
 
 let description_of_step_data step_data =
   ( match step_data with
@@ -1096,7 +1132,7 @@ let report_errors proc_desc err_log ~pulse_is_manifest state =
   let report_simple_state q =
     (* We assume simplifications happened before calling report_errors. *)
     let topl_is_manifest = Constraint.(equal true_ q.pruned) in
-    if is_issue q then (
+    if is_issue q && (topl_is_manifest || not Config.topl_filter_unsure) then (
       let q = first_error_ss q in
       L.d_printfln ~color:Red "found TOPL error %a" pp_simple_state q ;
       (* Only report at the innermost level where error appears. *)
@@ -1108,16 +1144,19 @@ let report_errors proc_desc err_log ~pulse_is_manifest state =
         let loc = Procdesc.get_loc proc_desc in
         let ltr = make_trace 0 [] q in
         let latent = (not topl_is_manifest) || not pulse_is_manifest in
+        let message = ToplAutomaton.message a q.post.vertex in
         let message =
-          (* 1. topl_is_manifest && not pulse_is_manifest:
-           *    if program execution conditions would be satisfied, monitor would signal error
-           * 2. not topl_is_manifest && pulse_is_manifest:
-           *    execution is unconditional, but the monitor still waits for some conditions to be
-           *    satisfied before signaling error *)
-          String.concat ~sep:" "
-            ( [ToplAutomaton.message a q.post.vertex]
-            @ (if latent && topl_is_manifest then ["TOPL_MANIFEST"] else [])
-            @ if latent && pulse_is_manifest then ["PULSE_MANIFEST"] else [] )
+          if Config.topl_filter_unsure then message
+          else
+            (* 1. topl_is_manifest && not pulse_is_manifest:
+             *    if program execution conditions would be satisfied, monitor would signal error
+             * 2. not topl_is_manifest && pulse_is_manifest:
+             *    execution is unconditional, but the monitor still waits for some conditions to be
+             *    satisfied before signaling error *)
+            String.concat ~sep:" "
+              ( [message]
+              @ (if latent && topl_is_manifest then ["TOPL_MANIFEST"] else [])
+              @ if latent && pulse_is_manifest then ["PULSE_MANIFEST"] else [] )
         in
         if (not latent) || Config.topl_report_latent_issues then
           Reporting.log_issue proc_desc err_log ~loc ~ltr Topl (IssueType.topl_error ~latent)

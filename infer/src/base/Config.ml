@@ -798,6 +798,7 @@ and ( biabduction_write_dotty
     , debug_level_capture
     , debug_level_report
     , deduplicate
+    , deduplicate_by
     , developer_mode
     , filtering
     , frontend_tests
@@ -833,6 +834,16 @@ and ( biabduction_write_dotty
         InferCommand.
           [(Analyze, manual_generic); (Report, manual_generic); (ReportDiff, manual_generic)]
       "Apply issue-specific deduplication during analysis and/or reporting."
+  and deduplicate_by =
+    CLOpt.mk_symbol ~long:"deduplicate-by"
+      ~symbols:[("location", `Location); ("trace", `Trace)]
+      ~eq:PolyVariantEqual.( = ) ~default:`Location
+      ~in_help:InferCommand.[(Report, manual_generic)]
+      "Controls a generic deduplication mechanism. Issue description and issue type are always \
+       taken into account when deduplicating for reporting. In addition, one can also take into \
+       account the location OR the trace. Using the trace to de-duplicate can result in multiple \
+       distinct traces being reported at the same location, which is not possible with the default \
+       deduplication by location."
   and debug_level_analysis =
     CLOpt.mk_int ~long:"debug-level-analysis" ~default:0 ~in_help:all_generic_manuals
       "Debug level for the analysis. See $(b,--debug-level) for accepted values."
@@ -936,6 +947,7 @@ and ( biabduction_write_dotty
   , debug_level_capture
   , debug_level_report
   , deduplicate
+  , deduplicate_by
   , developer_mode
   , filtering
   , frontend_tests
@@ -3618,6 +3630,17 @@ and top_longest_proc_duration_size =
     "Number of procedures for which we track longest analysis duration info."
 
 
+and topl_filter_unsure =
+  CLOpt.mk_bool ~long:"topl-filter-unsure"
+    "When set, reports only a subset of the latent issues. Issues can be latent for two reasons: \
+     the usual reason for Pulse (that it has not seen a callsite with appropriate arguments), or \
+     because Topl is unsure (it did not discharge all conditions specified by the user in the Topl \
+     property). When this option is given, the issues where Topl is unsure are not reported. When \
+     this option is not given, tags TOPL_MANIFEST and PULSE_MANIFEST can be used to distinguish \
+     the reason why an issue is latern. TOPL_MANIFEST means that Topl is sure. NOTE: If Topl \
+     latent issues reporting is turned off completely, then this option has no effect."
+
+
 and topl_max_conjuncts =
   CLOpt.mk_int ~long:"topl-max-conjuncts" ~default:20
     "Stop tracking states that have at least $(i,int) conjuncts"
@@ -4199,6 +4222,8 @@ and debug_level_report = !debug_level_report
 and debug_mode = !debug
 
 and deduplicate = !deduplicate
+
+and deduplicate_by = !deduplicate_by
 
 and dependency_mode = !dependencies
 
@@ -4934,6 +4959,8 @@ and threadsafe_aliases = !threadsafe_aliases
 and timeout = !timeout
 
 and top_longest_proc_duration_size = !top_longest_proc_duration_size
+
+and topl_filter_unsure = !topl_filter_unsure
 
 and topl_max_conjuncts = !topl_max_conjuncts
 

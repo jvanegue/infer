@@ -349,6 +349,8 @@ val debug_mode : bool
 
 val deduplicate : bool
 
+val deduplicate_by : [`Location | `Trace]
+
 val default_hack_builtin_models_rel : string
 
 val dependency_mode : bool
@@ -931,6 +933,8 @@ val threadsafe_aliases : Yojson.Safe.t
 val timeout : float option
 
 val top_longest_proc_duration_size : int option
+
+val topl_filter_unsure : bool
 
 val topl_max_conjuncts : int
 
