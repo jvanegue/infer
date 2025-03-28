@@ -335,12 +335,12 @@ let abduce_ne (a1 : t) (a2 : t) =
         (* non-empty intersection and each predicate can be satisfied by ≥2 elements => we cannot
            know if they are disequal or not *)
         Satisfiable (None, None)
-    | Some e1, None ->
+    | Some e1, None -> (
       match remove_element e1 a2 with
       | Some _ as abduced2 ->
           Satisfiable (None, abduced2)
       | None ->
-          Satisfiable (None, None) 
+          Satisfiable (None, None) )
     | None, Some e2 ->
       match remove_element e2 a1 with
       | Some _ as abduced1 ->

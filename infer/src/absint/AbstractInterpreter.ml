@@ -351,9 +351,9 @@ struct
         let hasnew = not (phys_equal (fst prev) dbe) in
         let post_disj,_,dropped =
           if (hasnew) then
-            join_up_to_with_leq ~limit:disjunct_limit T.DisjDomain.leq ~into:dbe (fst next) true
+            join_up_to_with_leq ~limit:disjunct_limit T.DisjDomain.leq ~into:dbe (fst next)
           else
-            join_up_to_with_leq ~limit:disjunct_limit T.DisjDomain.leq ~into:(fst prev) (fst next) false
+            join_up_to_with_leq ~limit:disjunct_limit T.DisjDomain.leq ~into:(fst prev) (fst next)
         in
          let next_non_disj = (T.NonDisjDomain.widen ~prev:(snd prev) ~next:(snd next) ~num_iters) in
          if leq ~lhs:(post_disj, next_non_disj) ~rhs:prev 

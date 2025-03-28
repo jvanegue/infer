@@ -1603,12 +1603,12 @@ module PulseTransferFunctions = struct
           , path
           , astate_n )
           
-      | Metadata (Abstract _) ->
-      | Metadata (CatchEntry _) ->
-      | Metadata (Nullify _) ->
-      | Metadata (Skip) ->
-      | Metadata (TryEntry _) ->
-      | Metadata (TryExit _) ->
+      | Metadata (Abstract _) 
+      | Metadata (CatchEntry _) 
+      | Metadata (Nullify _) 
+      | Metadata (Skip) 
+      | Metadata (TryEntry _) 
+      | Metadata (TryExit _) 
       | Metadata (VariableLifetimeBegins _) ->
          ([ContinueProgram astate], path, astate_n)
     ) 

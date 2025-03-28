@@ -1504,7 +1504,7 @@ module Atom = struct
        F.fprintf fmt "%a ≠ %a" pp_term t1 pp_term t2
 
   let get_terms atom =
-    let (LessEqual (t1, t2) | LessThan (t1, t2) | Equal (t1, t2) | NotEqual (t1, t2) = atom in
+    let (LessEqual (t1, t2) | LessThan (t1, t2) | Equal (t1, t2) | NotEqual (t1, t2)) = atom in
     (t1, t2)
 
 

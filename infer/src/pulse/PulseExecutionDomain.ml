@@ -201,18 +201,17 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
                 let test = (List.mem ~equal:cmp_four kl key) in
                 if test then (-2) else idx
   in                                                                                                                                   
-  
-  let _ = print_workset workset in
+
   let (repeated_wsidx:int) =
     if (phys_equal same true) then (-1)
     else record_pathcond workset []
   in
   
-  let create_infinite_state (hd:t) (cnt:int) : t =
+  let create_infinite_state (hd:t) : t =
     (* Only create infinite state from a non-error state that is not already an infinite state *)
     match hd with
-    | ExceptionRaised astate -> print_warning "Exception" cnt hd; InfiniteProgram astate
-    | ContinueProgram astate -> print_warning "Continue" cnt hd; InfiniteProgram astate
+    | ExceptionRaised astate -> InfiniteProgram astate
+    | ContinueProgram astate -> InfiniteProgram astate
     | AbortProgram astate -> AbortProgram astate 
     | ExitProgram astate -> ExitProgram astate
     | LatentAbortProgram a -> LatentAbortProgram a
@@ -226,12 +225,8 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
     Metadata.record_alert_node cfgnode;
     let nth = (List.nth state_set idx) in 
     match nth with
-    | None       ->
-       (* This should never happen *)
-       prevlen nextlen idx case num_iters; 
-       [],-1
-    | Some state ->
-       [(create_infinite_state state idx)],idx
+    | None -> [],-1
+    | Some state -> [(create_infinite_state state)],idx
   in
   
   let nextempty = (phys_equal (List.length next) 0) in 
