@@ -182,7 +182,6 @@ let exec_summary_of_post_common ({InterproceduralAnalysis.proc_desc} as analysis
       summarize astate ~exec_domain_of_summary:continue_program ~is_exceptional_state:false
   (* already a summary but need to reconstruct the variants to make the type system happy :( *)
   | InfiniteProgram astate ->
-     L.debug Analysis Quiet "PULSEINF: calling summarize for InfiniteProgram \n";
      summarize astate ~exec_domain_of_summary:infinite_raised ~is_exceptional_state:false
   | AbortProgram astate ->
       Sat (AbortProgram astate)
@@ -206,7 +205,6 @@ let exec_summary_of_post_common ({InterproceduralAnalysis.proc_desc} as analysis
 
 
 let force_exit_program analysis_data path post =
-  L.debug Analysis Quiet "PULSEINF: Forced exit program \n";
   exec_summary_of_post_common analysis_data None path post
     ~continue_program:(fun astate -> ExitProgram astate)
     ~exception_raised:(fun astate -> ExitProgram astate)
@@ -214,9 +212,6 @@ let force_exit_program analysis_data path post =
 
 let of_posts ({InterproceduralAnalysis.proc_desc} as analysis_data) specialization location posts
       non_disj =
-
-  L.debug Analysis Quiet "PULSEINF: of_posts called \n";
-  
   let pre_post_list =
     List.filter_mapi posts ~f:(fun i (exec_state, path) ->
         L.d_printfln "Creating spec out of state #%d:@\n%a" i

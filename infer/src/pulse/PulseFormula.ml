@@ -4309,7 +4309,6 @@ let prune_atoms ~depth atoms formula_new_eqs ifk =
   (* dont add atom on that path as it would be doubly added by prune_binop/and_binop then *)
   let _ = ifk in
   SatUnsat.list_fold atoms ~init:formula_new_eqs ~f:(fun formula_new_eqs atom ->
-      (* L.debug Analysis Quiet "JV: Called prune_atom from prune_atoms \n"; *)
       prune_atom ~depth atom formula_new_eqs false)
 
 let prune_binop ?(depth=0) ~negated (bop:Binop.t) ?(ifk=false) x y formula =

@@ -1971,10 +1971,6 @@ let analyze specialization ({InterproceduralAnalysis.tenv; proc_desc} as analysi
         PulseSummary.empty
   in
   let report_on_and_return_summaries summary =
-
-
-    L.debug Analysis Quiet "PULSEINF: report_on_and_return_summaries \n";
-    
     if Config.trace_topl then
       L.debug Analysis Quiet "ToplTrace: dropped %d disjuncts in %a@\n"
         (PulseTopl.Debug.get_dropped_disjuncts_count ())
