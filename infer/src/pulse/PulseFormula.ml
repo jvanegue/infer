@@ -3989,11 +3989,11 @@ module Formula = struct
     (* interface *)
 
     let and_atom atom phi_new_eqs add_term =
-      (* Debug.p "BEGIN and_atom %a@\n" (Atom.pp_with_pp_var Var.pp) atom ; *)
+      Debug.p "BEGIN and_atom %a@\n" (Atom.pp_with_pp_var Var.pp) atom ; 
       let phi_new_eqs' = and_atom atom phi_new_eqs add_term >>| snd in
-      (* Debug.p "END and_atom %a -> %a@\n" (Atom.pp_with_pp_var Var.pp) atom 
-        (SatUnsat.pp (Pp.pair ~fst:(pp_with_pp_var Var.pp) ~snd:pp_new_eqs))
-          phi_new_eqs' ; *)
+         Debug.p "END and_atom %a -> %a@\n" (Atom.pp_with_pp_var Var.pp) atom 
+           (SatUnsat.pp (Pp.pair ~fst:(pp_with_pp_var Var.pp) ~snd:pp_new_eqs))
+           phi_new_eqs' ; 
       phi_new_eqs'
 
 

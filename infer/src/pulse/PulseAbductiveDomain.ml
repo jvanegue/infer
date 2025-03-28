@@ -100,7 +100,7 @@ let pp_ ~is_summary f
      *)
   let pp_pre_post f =
     if is_summary then F.fprintf f "PRE=@[%a@]@;POST=@[%a@]" PreDomain.pp pre PostDomain.pp post
-    else F.fprintf f "%a;PRE=[%a]" PostDomain.pp post PreDomain.pp pre
+    else F.fprintf f "%a@;PRE=[%a]" PostDomain.pp post PreDomain.pp pre
   in
   F.fprintf f
     "@[<v>%a@;\
