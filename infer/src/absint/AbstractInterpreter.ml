@@ -322,16 +322,10 @@ struct
       | _, [] ->
           false
 
-
     let leq ~lhs ~rhs =
       phys_equal lhs rhs
       || is_trivial_subset (fst lhs) ~of_:(fst rhs)
          && T.NonDisjDomain.leq ~lhs:(snd lhs) ~rhs:(snd rhs)
-
-    (* let rec list_phys_equal l1 l2 = match l1, l2 with
-      | [], [] -> true
-      | x::tl, y::tl' -> phys_equal x y && list_phys_equal tl tl'
-      | _ -> false  *)
 
     let widen ~prev ~next ~num_iters =
 
