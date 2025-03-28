@@ -1454,7 +1454,7 @@ module Term = struct
 
   end
 
-  (* JV: Added as a submodule of module Term for PULSEINF *)
+  (* We use this to track constraints that should not be optimized for infinite loop detection *)
   module Set = struct
     include Stdlib.Set.Make (struct
                 type nonrec t = t [@@deriving compare]
@@ -1484,7 +1484,6 @@ module Atom = struct
     | LessThan of Term.t * Term.t
     | Equal of Term.t * Term.t
     | NotEqual of Term.t * Term.t
- (* | Bitmasked of Term.t * Term.t *)
                              
   [@@deriving compare, equal, yojson_of]
 
@@ -1503,11 +1502,9 @@ module Atom = struct
         F.fprintf fmt "%a = %a" pp_term t1 pp_term t2
     | NotEqual (t1, t2) ->
        F.fprintf fmt "%a ≠ %a" pp_term t1 pp_term t2
-    (* | Bitmasked (t1, t2) ->
-       F.fprintf fmt "%a & %a" pp_term t1 pp_term t2 *)
 
   let get_terms atom =
-    let (LessEqual (t1, t2) | LessThan (t1, t2) | Equal (t1, t2) | NotEqual (t1, t2) (* | Bitmasked (t1, t2) *) ) = atom in
+    let (LessEqual (t1, t2) | LessThan (t1, t2) | Equal (t1, t2) | NotEqual (t1, t2) = atom in
     (t1, t2)
 
 
@@ -1528,8 +1525,6 @@ module Atom = struct
             Equal (t1', t2')
         | NotEqual _ ->
            NotEqual (t1', t2')
-        (* | Bitmasked _ ->
-           Bitmasked (t1', t2') (* JV PULSEINF *) *)
     in
     (acc, t')
 
@@ -1548,8 +1543,6 @@ module Atom = struct
 
   let less_than t1 t2 = LessThan (t1, t2)
 
-  (* let bitmasked t1 t2 = Bitmasked (t1, t2) (* JV PULSEINF *) *)
-                      
   let nnot = function
     | Equal (t1, t2) ->
         NotEqual (t1, t2)
@@ -1559,8 +1552,6 @@ module Atom = struct
         LessThan (t2, t1)
     | LessThan (t1, t2) ->
        LessEqual (t2, t1)
-    (* | Bitmasked (t1, t2) ->
-       Equal (Bitmasked(t1, t2), 0) (* JV PULSEINF *) *)
 
   let map_terms atom ~f = fold_map_terms atom ~init:() ~f:(fun () t -> ((), f t)) |> snd
 
@@ -1573,9 +1564,6 @@ module Atom = struct
         Equal (t1, t2)
     | NotEqual (t1, t2) ->
        NotEqual (t1, t2)
-    (* | Bitmasked (t1, t2) -> 
-       Bitmasked(t1, t2) (* JV PULSEINF *) *)
-
 
   type eval_result = True | False | Atom of t
 
@@ -1603,8 +1591,6 @@ module Atom = struct
           Some [Equal (t1, t2) |> nnot_if negated]
       | NotEqual (t1, t2) ->
          Some [NotEqual (t1, t2) |> nnot_if negated]
-      (* | Bitmasked (t1, t2) ->
-         Some [Bitmasked(t1, t2) |> nnot_if negated] *)
       | And (t1, t2) when not negated -> (
         match
           (aux ~negated:false ~force_to_atom:true t1, aux ~negated:false ~force_to_atom:true t2)
@@ -1676,7 +1662,6 @@ module Atom = struct
           get_as_embedded_atoms ~is_neq_zero (NotEqual (t2, Term.zero))
         else None
     | _ ->
-       (* XXX: JV: May need Bitmasked case here? *)
         None
 
 
@@ -1754,8 +1739,6 @@ module Atom = struct
           True
       | LessThan _ ->
          False
-      (* | Bitmasked _ ->
-         False *)
     else Atom atom
 
 
@@ -2282,9 +2265,6 @@ module Formula = struct
 
     val add_atom : Atom.t -> t -> t
 
-    (* to reenable once shown that it works to cleanup *)
-    (* val add_termination_atom : Atom.t -> t -> t *)
-      
     val and_termcond_atoms : t -> Atom.t list -> t
 
     val and_termcond_binop : t -> Term.t -> t
@@ -2315,15 +2295,9 @@ module Formula = struct
 
     val set_intervals : intervals -> t -> t
 
-    (* val reset_atoms : t -> t *)
-
-    (* val reset_term_eqs : t -> t *)
-
     val get_terminal_conds : t -> Atom.Set.t
 
     val get_terminal_terms : t -> Term.Set.t
-
-    (* val is_empty : t -> bool *)
 
     val join : t -> t -> t
 
@@ -2485,7 +2459,7 @@ module Formula = struct
            ; term_conditions2 } [@warning "+missing-record-field-pattern"] ) as phi ) =
       let is_first = ref true in
       let pp_if condition header pp fmt x =
-        let pp_and fmt = if not !is_first then F.fprintf fmt "@;&& \n" else is_first := false in
+        let pp_and fmt = if not !is_first then F.fprintf fmt "@;&& " else is_first := false in
         if condition then F.fprintf fmt "%t%s: %a" pp_and header pp x
       in
       F.pp_open_hvbox fmt 0 ;
@@ -2832,11 +2806,9 @@ module Formula = struct
       | _ -> phi                                       
 
     let and_termcond_binop (phi:t) (term:Term.t) : t =
-      (* L.debug Analysis Quiet "JV: Adding term_conditions2 - Term \n"; *)
       {phi with term_conditions2= Term.Set.add term phi.term_conditions2}
            
     let remove_atom_ atom atoms atoms_occurrences =
-
       let atoms_occurrences =
         Atom.fold_variables atom ~init:atoms_occurrences ~f:(fun occurrences v' ->
             AtomMapOccurrences.remove v' ~occurred_in:atom occurrences )
@@ -2878,16 +2850,9 @@ module Formula = struct
 
     let set_intervals intervals phi = {phi with intervals}
 
-    (* let reset_atoms phi = {phi with atoms= Atom.Set.empty; atoms_occurrences= Var.Map.empty} *)
-
-    (* let reset_term_eqs phi =
-      {phi with term_eqs= Term.VarMap.empty; term_eqs_occurrences= Var.Map.empty} *)
-
     let get_terminal_conds t = t.term_conditions
 
     let get_terminal_terms t = t.term_conditions2
-
-    (* let is_empty t = (Formula.is_empty t) *)
                              
     let unsafe_mk ~var_eqs ~const_eqs ~type_constraints ~linear_eqs ~term_eqs ~tableau ~intervals ~atoms
         ~linear_eqs_occurrences ~tableau_occurrences ~term_eqs_occurrences ~atoms_occurrences ~term_conditions ~term_conditions2 =
@@ -2978,10 +2943,9 @@ module Formula = struct
               (phi.term_eqs, phi.term_eqs_occurrences)
       in
 
-      (* pulseinf: Is there anything more to do here? *)
-      let term_conditions = (phi.term_conditions) in
+      let term_conditions =  phi.term_conditions in
       let term_conditions2 = phi.term_conditions2 in
-      
+     
       { var_eqs
       ; const_eqs
       ; type_constraints
@@ -3004,7 +2968,6 @@ module Formula = struct
 
     let remove_conditions_for_join atoms phi_lhs phi_rhs =
       List.fold atoms ~init:phi_lhs ~f:(fun phi atom -> remove_condition_for_join atom phi phi_rhs)
-
   end
 
   include Unsafe
@@ -3058,7 +3021,6 @@ module Formula = struct
 
 
   let is_non_pointer {var_eqs; linear_eqs; intervals; atoms} var =
-    (* L.debug Analysis Quiet "JV: Calling Formula.is_non_pointer \n"; *)
     let repr = (VarUF.find var_eqs var :> Var.t) in
     Option.exists (Var.Map.find_opt repr linear_eqs) ~f:(fun v ->
         Option.is_some (LinArith.get_as_const v) )
@@ -3692,7 +3654,6 @@ module Formula = struct
                               Debug.p "Found new atoms %a@\n"
                                 (Pp.seq ~sep:"," (Atom.pp_with_pp_var Var.pp))
                                 atoms ;
-                              (* L.debug Analysis Quiet "JV: Calling and_normalized_atoms from propagate_in_term_eqs (RANGE case) \n"; *)
                               and_normalized_atoms (phi, new_eqs) atoms ~orig_atom:atoms ~add_term:true >>| snd )
                       | Domain | DomainAndRange -> (
                           let* phi, new_eqs = phi_new_eqs_sat in
@@ -3747,7 +3708,6 @@ module Formula = struct
                                   Debug.p "adding atoms %a instead of term_eq@\n"
                                     (Pp.seq ~sep:"," (Atom.pp_with_pp_var Var.pp))
                                     atoms ;
-                                  (* L.debug Analysis Quiet "JV: Calling and_normalized_atoms from propagate_in_term_eqs (DOMAIN case) \n";  *)
                                   and_normalized_atoms (phi, new_eqs) atoms ~orig_atom:atoms ~add_term:true >>| snd
                               | None -> (
                                 match get_term_eq phi t' with
@@ -3962,11 +3922,12 @@ module Formula = struct
 
     and and_normalized_atoms (phi, new_eqs) atoms ~orig_atom ~add_term =
 
-      (* JV: Possibly useful: test if variables in orig_atom are present in term_conds: if so, add orig_atom in term_conds even if add_term is false *)
-      (* May not be necessary thanks to Pulse fresh name creation, which witness the existence of a change without tracking intermediate constraints *)
+      (* Possibly useful: test if variables in orig_atom are present in term_conds: 
+         if so, add orig_atom in term_conds even if add_term is false.
+         Note: this may not be necessary thanks to Pulse fresh name creation which
+         is sufficient to witness the existence of a state update without tracking 
+         intermediate constraints *)
       let upd_phi =
-        (* let _ = (if add_term then "TRUE - adding atom" else "FALSE - not adding atom") in *)
-        (* L.debug Analysis Quiet "JV: and_normalized_atoms: adding termination atom cond \n"; *)
         if add_term then
           (and_termcond_atoms phi orig_atom)
         else
@@ -3980,7 +3941,6 @@ module Formula = struct
 
 
     and and_atom atom (phi, new_eqs) add_term =
-      (* L.debug Analysis Quiet "JV: Calling and_normalized_atoms from and_atom \n"; *)
       normalize_atom phi atom >>= and_normalized_atoms (phi, new_eqs) ~orig_atom:[atom] ~add_term:add_term
 
     and and_var_is_zero v (phi, neweqs) =
@@ -3989,7 +3949,6 @@ module Formula = struct
         let reason () = F.asprintf "%a=0 but %a is an Erlang pointer, hence ≠0" Var.pp v Var.pp v in
         Unsat {reason; source= __POS__}
       else solve_lin_eq neweqs (LinArith.of_var v) (LinArith.of_q Q.zero) phi
-
 
     and and_below v t (phi, new_eqs) =
       let phi, should_zero = add_below v t phi in
@@ -4008,9 +3967,6 @@ module Formula = struct
       if should_zero then and_var_is_zero v (phi, new_eqs) else Sat (phi, new_eqs)
 
     let and_var_term ~fuel v t (phi, new_eqs) =
-      (* L.debug Analysis Quiet "JV: and_var_term: %a=%a in %a,@;new_eqs=%a@\n" Var.pp v (Term.pp Var.pp) t
-        (pp_with_pp_var Var.pp) phi pp_new_eqs new_eqs ; *)
-
       let* (t' : Term.t) =
         normalize_var_const phi t |> Atom.eval_term ~is_neq_zero:(is_neq_zero phi)
       in
@@ -4026,7 +3982,6 @@ module Formula = struct
         | None ->
             Sat (phi, new_eqs)
         | Some atoms ->
-           (* L.debug Analysis Quiet "JV: Calling and_normalized_atoms from and_var_term \n"; *)
             and_normalized_atoms (phi, new_eqs) atoms ~orig_atom:atoms ~add_term:true >>| snd
       in
       solve_normalized_term_eq ~fuel new_eqs t' v' phi
@@ -4044,11 +3999,11 @@ module Formula = struct
 
     let and_normalized_atoms phi_new_eqs atoms ~orig_atom ~add_term =
       let phi_new_eqs' = and_normalized_atoms phi_new_eqs atoms ~orig_atom:orig_atom ~add_term:add_term >>| snd in
-      (* Debug.p "and_normalized_atoms [@[<v>%a@]] -> %a@\n" 
+      Debug.p "and_normalized_atoms [@[<v>%a@]] -> %a@\n" 
         (Pp.seq ~sep:";" (Atom.pp_with_pp_var Var.pp))
         atoms
         (SatUnsat.pp (pp_with_pp_var Var.pp))
-        (SatUnsat.map fst phi_new_eqs') ; *)
+        (SatUnsat.map fst phi_new_eqs') ;
       phi_new_eqs'
 
 
@@ -4069,11 +4024,7 @@ type t =
             condition appears after a call chain of length N. *)
   ; phi: Formula.t
         (** the arithmetic constraints of the current symbolic state; true in both the pre and post
-            since abstract values [Var.t] have immutable semantics *)
-           (* ; term_conds: Atom.Set.t *)
-    (** Termination conditions used to detect recurring set of states. This is the same as the path
-        conditions above without  pruning *)  
-  }
+            since abstract values [Var.t] have immutable semantics *) }
 [@@deriving compare, equal, yojson_of]
 
 let pp_conditions pp_var fmt conditions =
@@ -4097,7 +4048,7 @@ let add_conditions (atoms, depth) conditions =
 
 let ttrue = {conditions= Atom.Map.empty; phi= Formula.ttrue}
 
-(* added pulse-infinite *)
+(* Added for infinite loop detection *)
 let extract_path_cond (var:t) : int Atom.Map.t = var.conditions 
 let extract_term_cond (var:t) = (Formula.get_terminal_conds var.phi)
 let extract_term_cond2 (var:t) = (Formula.get_terminal_terms var.phi)
@@ -4108,9 +4059,7 @@ let termset_is_empty (conds: Term.Set.t) = (Term.Set.is_empty conds)
 let formula_is_empty (var:t) = map_is_empty(extract_path_cond(var)) 
                                && set_is_empty(extract_term_cond(var))
                                && termset_is_empty(extract_term_cond2(var))
-                                         
-(* let formula_is_empty (var:t) = (Formula.is_empty var.phi) *)
-(* end pulse-infinite *)
+(* End infinite loop detection *)
 
 let pp_with_pp_var pp_var fmt {conditions; phi} =
   let pp_conditions fmt conditions =
@@ -4163,8 +4112,6 @@ module Intervals = struct
 
 
   let and_binop ~negated binop op1 op2 ?(ifk=false) (formula, new_eqs) =
-    (* L.debug Analysis Quiet "JV: Intervals.and_binop ~negated:%b %a %a %a \n" negated Binop.pp binop pp_operand op1
-      pp_operand op2 ; *)
     let v1_opt, i1_opt = interval_and_var_of_operand formula.phi op1 in
     let v2_opt, i2_opt = interval_and_var_of_operand formula.phi op2 in
     match CItv.abduce_binop_is_true ~negated binop i1_opt i2_opt with
@@ -4176,46 +4123,29 @@ module Intervals = struct
         in
         Unsat {reason; source= __POS__}
     | Satisfiable (i1_better_opt, i2_better_opt) ->
-       (* L.debug Analysis Quiet "JV: Intervals.and_binop : Satisfiable case \n"; *)
        let refine v_opt i_better_opt formula_new_eqs =
          Option.both v_opt i_better_opt
          |> Option.fold ~init:(Sat formula_new_eqs) ~f:(fun formula_new_eqs (v, i_better) ->
-                (* L.debug Analysis Quiet "JV: Intervals.and_binop : refining interval for %a to %a@\n" Var.pp v CItv.pp i_better ; *)
                 let* formula, new_eqs = formula_new_eqs in
                 let* phi = Formula.add_interval v i_better formula.phi in
                 let* phi, new_eqs =
                   match Var.Map.find v phi.Formula.intervals |> CItv.to_singleton with
                   | None ->
-                     (* L.debug Analysis Quiet "JV: Intervals.and_binop : NONE case NOT entering and_var_term! \n"; *)
                       Sat (phi, new_eqs)
                   | Some i ->
-                     (* L.debug Analysis Quiet "JV: Intervals.and_binop : SOME case Entering var_term! \n"; *)
                      Formula.Normalizer.and_var_term v (Term.of_intlit i) (phi, new_eqs)
                 in
                 let+ formula = incorporate_new_eqs new_eqs {formula with phi} in
                 (formula, new_eqs) )
        in
-       
-       (* L.debug Analysis Quiet "JV: Intervals.and_binop : Creating Atom \n"; *)
-       
-       let need_atom =
-         match ifk with
-         | true ->
-            (* L.debug Analysis Quiet "JV: IFK TRUE - NEED ATOM FROM PRUNE \n"; *)
-            true
-         | false ->
-            (* L.debug Analysis Quiet "JV: IFK FALSE - NOT NEEDED ATOM (not from prune) \n"; *)
-            false
-       in
-       
+
        let binop_unknown (binop : Binop.t) = 
          match binop with
          | Eq | Ne | Le | Lt | Gt | Ge -> false
-         | _ -> (* L.debug Analysis Quiet "JV Found Binop Unknown %a : skipping insertion -- FIXME \n" Binop.pp binop; *) true
+         | _ -> true
        in
        
-       let nformula = (if (phys_equal need_atom false || (binop_unknown binop)) then
-                         formula
+       let nformula = (if (phys_equal ifk false || (binop_unknown binop)) then formula
                        else
                          
         let atom_to_binop (binop : Binop.t) =
@@ -4226,12 +4156,12 @@ module Intervals = struct
           | Lt -> false,Atom.less_than
           | Gt -> true,Atom.less_than
           | Ge -> true,Atom.less_equal
-          | _  ->  L.die InternalError "JV: and_binop: Wrong argument to [mk_atom_of_binop]: %a -- FIXME " Binop.pp binop
+          | _  ->  L.die InternalError "atom_to_binop: Wrong arg: %a should never happen! " Binop.pp binop
         in
         let (inv,op) = (atom_to_binop binop) in
         let invcond = inv in
 
-        (* Handle cases with while (x == x) for non-termination for loops *)
+        (* Handle cases like: while (x == x) for non-termination for loops *)
         let opcond =
           match (Term.of_operand op1, Term.of_operand op2) with
           | Term.Var v1, Term.Var v2 -> (phys_equal v1 v2)
@@ -4239,10 +4169,6 @@ module Intervals = struct
         in
          
         let swapcond = (match (binop: Binop.t) with | Eq -> true | _ -> false) in 
-
-        (* L.debug Analysis Quiet "JV: Inversion %b OpCond %b SwapCond %b for termination constraint with binop %a \n" 
-          invcond opcond swapcond Binop.pp binop; *)
-        
         let swapterm = (Atom.equal Term.zero Term.zero) in
         let atom = 
           if (opcond && swapcond) then swapterm            
@@ -4252,10 +4178,8 @@ module Intervals = struct
              else (op (Term.of_operand op1) (Term.of_operand op2)))
           
         in
-        (* L.debug Analysis Quiet "JV: Added term_cond from binop %a \n" Binop.pp binop; *)
         let newphi = (Formula.and_termcond_atoms formula.phi [atom]) in
-        {formula with phi=newphi})
-                    
+        {formula with phi=newphi})                    
        in
        refine v1_opt i1_better_opt (nformula, new_eqs) >>= refine v2_opt i2_better_opt
 
@@ -4302,8 +4226,6 @@ let and_atom atom formula add_term =
   let open SatUnsat.Import in
   let* updphi, new_eqs = Formula.Normalizer.and_atom atom (formula.phi, RevList.empty) add_term in
 
-  (* let (termcond: Atom.Set.t) = (Formula.get_terminal_conds updphi) in *)
-  (* let newphi = {formula with phi=updphi; term_conds=termcond} in *)
   let newphi = {formula with phi=updphi} in 
   
   let+ (formula:t) = Intervals.incorporate_new_eqs new_eqs newphi in
@@ -4321,7 +4243,6 @@ let mk_atom_of_binop (binop : Binop.t) =
   | Lt ->
       Atom.less_than
   | _ ->
-     L.debug Analysis Quiet "JV: mk_atom_of_binop had unknown Binop! FIXME! (die called) "; 
      L.die InternalError "wrong argument to [mk_atom_of_binop]: %a" Binop.pp binop
 
 
@@ -4334,9 +4255,7 @@ let and_mk_atom binop op1 op2 formula =
   in
   let atom = (mk_atom_of_binop binop) (Term.of_operand op1) (Term.of_operand op2) in
   let+ formula, new_eqs' = and_atom atom formula false in
-  
-  (** (old_formula, RevList.append new_eqs new_eqs') *)
-  (** -JV for pulse-inf .. probably not the right fix *)
+
   (formula, RevList.append new_eqs new_eqs') 
 
 let and_equal op1 op2 formula = and_mk_atom Eq op1 op2 formula
@@ -4348,7 +4267,6 @@ let and_equal_vars v1 v2 formula =
 let and_not_equal = and_mk_atom Ne
 
 let and_is_int v formula =
-  (* L.debug Analysis Quiet "JV: Calling and_is_int with arg FALSE \n"; *)
   let atom = Atom.equal (IsInt (Var v)) Term.one in
   and_atom atom formula false
 
@@ -4376,7 +4294,6 @@ let prune_atom ~depth atom (formula, new_eqs) ifk =
   Debug.p "prune atom %a in %a@\n" (Atom.pp_with_pp_var Var.pp) atom pp formula ;
   let* normalized_atoms = Formula.Normalizer.normalize_atom formula.phi atom in
   let* phi, new_eqs =
-    (* L.debug Analysis Quiet "JV: Calling and_normalized_atoms from prune_atom \n"; *)
     Formula.Normalizer.and_normalized_atoms (formula.phi, new_eqs) normalized_atoms ~orig_atom:[atom] ~add_term:ifk
   in
   (* Sticking this call in slightly hopefully *)
@@ -4385,8 +4302,6 @@ let prune_atom ~depth atom (formula, new_eqs) ifk =
     List.fold normalized_atoms ~init:formula.conditions ~f:(fun conditions atom ->
         add_condition (atom, depth) conditions )
   in
-  (* let orig_tconds = (Formula.get_terminal_conds phi) in *)
-  (* let+ formula = Intervals.incorporate_new_eqs new_eqs {phi; conditions; term_conds=orig_tconds} in *)
   let+ formula = Intervals.incorporate_new_eqs new_eqs {phi; conditions} in 
   (formula, new_eqs)
 
@@ -4404,17 +4319,15 @@ let prune_binop ?(depth=0) ~negated (bop:Binop.t) ?(ifk=false) x y formula =
   let t = Term.of_binop bop tx ty in
   (* [Option.value_exn] is justified by [force_to_atom:true] *)
 
-  (* JV: Check for cases like while (x == x) by rewriting them to while (0 == 0) *)
+  (* Infinite Loop Detection: check for cases like while (x == x) 
+     by rewriting them to while (0 == 0) first *)
   let opcond = match (tx, ty) with
     | Term.Var v1, Term.Var v2 -> (phys_equal v1 v2)
     | _,_ -> false
   in       
-  let swapcond = (match (bop: Binop.t) with | Eq -> true | _ -> false)
-  in 
+  let swapcond = (match (bop: Binop.t) with | Eq -> true | _ -> false) in
   let swapterm = (Term.of_binop Eq Term.zero Term.zero) in
-  let atom = if (opcond && swapcond) then swapterm else t
-  in
-  (* JV: Here add t to term_conditions2 for PULSEINF *)
+  let atom = if (opcond && swapcond) then swapterm else t in
   let newphi = (Formula.and_termcond_binop formula.phi atom) in
   let newformula = {formula with phi=newphi} in
   (* End pulse-inf *)
@@ -4429,7 +4342,6 @@ let prune_binop ?(depth=0) ~negated (bop:Binop.t) ?(ifk=false) x y formula =
      = 4] would prune [4 = 4] and so not add anything to [formula.conditions] instead of adding [x =
      4]. *)
 
-  (* L.debug Analysis Quiet "JV: Calling prune_atoms + and_binop from prune_binop \n"; *)
   prune_atoms ~depth atoms (newformula, RevList.empty) ifk >>= Intervals.and_binop ~negated bop x y ~ifk
 
 let is_known_zero formula v =
@@ -4556,7 +4468,6 @@ let and_dynamic_type v t ?source_file formula =
 (** translate each variable in [formula_foreign] according to [f] then incorporate each fact into
     [formula0] *)
 let and_fold_subst_variables formula0 ~up_to_f:formula_foreign ~init ~f:f_var =
-  (* L.debug Analysis Quiet "JV: and_fold_subst_variables: INSERT FOREIGN EQUATIONS! \n"; *)
   let f_subst acc v =
     let acc', v' = f_var acc v in
     (acc', VarSubst v')
@@ -4649,8 +4560,6 @@ let and_conditions_fold_subst_variables phi0 ~up_to_f:phi_foreign ~init ~f:f_var
     IContainer.fold_of_pervasives_map_fold Atom.Map.fold conditions_foreign ~init
       ~f:(fun (acc_f, phi_new_eqs) (atom_foreign, depth) ->
         let acc_f, atom = Atom.fold_subst_variables atom_foreign ~init:acc_f ~f_subst in
-        
-        (* L.debug Analysis Quiet "JV: Calling prune_atom from add_conditions \n"; *)
         let phi_new_eqs = prune_atom ~depth:(depth + 1) atom phi_new_eqs true |> sat_value_exn in
         (acc_f, phi_new_eqs) )
   in
@@ -4768,7 +4677,6 @@ end = struct
        [keep] accordingly. *)
     let keep = extend_with_restricted_reps_of keep formula in
     let subst = VarUF.reorient formula.phi.var_eqs ~should_keep:(fun x -> Var.Set.mem x keep) in
-    (* let termconds = (Formula.get_terminal_conds formula.phi) in *)
     try
       Sat
         { conditions=
@@ -4936,7 +4844,6 @@ module DeadVariables = struct
         ~term_eqs_occurrences:Var.Map.empty ~atoms_occurrences:Var.Map.empty
         ~term_conditions:Atom.Set.empty ~term_conditions2:Term.Set.empty
     in
-    (* let termcond = (Formula.get_terminal_conds formula.phi) in *)
     let phi = simplify_phi formula.phi in
     let conditions =
       (* discard atoms that callers have no way of influencing, i.e. more or less those that do not
@@ -4947,7 +4854,6 @@ module DeadVariables = struct
         (fun atom _depth -> not (Atom.has_var_notin closed_prunable_vars atom))
         formula.conditions
     in
-    (* Sat ({conditions; phi; term_conds=termcond}, vars_to_keep) *)
     Sat ({conditions; phi}, vars_to_keep) 
 end
 

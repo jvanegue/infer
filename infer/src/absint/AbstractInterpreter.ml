@@ -261,7 +261,7 @@ struct
           over-approximation comes from the fact that leftover elements of [from] are not checked
           for inclusion in [into] so it could be that some of them would have been left out
           regardless of the limit. *)
-    let append_no_duplicates_up_to leq ~limit from ~into ~into_length hasinf =
+    let append_no_duplicates_up_to leq ~limit from ~into ~into_length =
       let rec aux acc n_acc from =
         match from with
         | hd :: tl when n_acc < limit ->
@@ -271,19 +271,8 @@ struct
            (* [hd] implies one of the states in [into]; skip it
                  ([(a=>b) => (a\/b <=> b)]) *)
            if has_geq_disj ~leq ~than:hd into then 
-             (if phys_equal hasinf false then
-
-                (L.debug Analysis Quiet "PULSEINF: append_no_duplicates_up_to: dropped state because disjs are all the same and new state is not inf \n";
-                aux acc n_acc tl)
-              else
-                aux (hd :: acc) (n_acc + 1) tl)
-           
-           (* let isinf = (T.is_infinite hd) in                
-              if (isinf) then aux (hd :: acc) (n_acc + 1) tl 
-              else aux acc n_acc tl) *)
-           
-           else
-             
+             aux acc n_acc tl
+           else             
              aux (hd :: acc) (n_acc + 1) tl
         | _ ->
             (* [from] is empty or [n_acc ≥ limit], either way we are done *)
@@ -301,26 +290,20 @@ struct
 
     (** Ignore states in [lhs] that are over-approximated in [rhs] according to [leq] and
         vice-versa. Favors keeping states in [lhs]. Returns no more than [limit] disjuncts. *)
-    let join_up_to_with_leq ~limit leq ~into:lhs rhs hasinf =
+    let join_up_to_with_leq ~limit leq ~into:lhs rhs =
       let lhs, dropped_from_lhs, lhs_length = length_and_cap_to_limit limit lhs in
       if phys_equal lhs rhs || lhs_length >= limit then
-        (
-          L.debug Analysis Quiet "PULSEINF: join_up_to_with_leq: limit reached, not adding state to post \n";
           (lhs, lhs_length, dropped_from_lhs)
-        )
       else (
-        
-        (* L.debug Analysis Quiet "PULSEINF: join_up_to_with_leq: limit not reached, adding state to post \n";  *)
-        
         (* this filters only in one direction for now, could be worth doing both ways *)
         let kept, kept_length, dropped, _ =
-          append_no_duplicates_up_to leq ~limit (List.rev rhs) ~into:lhs ~into_length:lhs_length hasinf
+          append_no_duplicates_up_to leq ~limit (List.rev rhs) ~into:lhs ~into_length:lhs_length
         in
         (kept, kept_length, dropped_from_lhs @ dropped)
       )
 
     let join_up_to ~limit ~into:lhs rhs =
-      join_up_to_with_leq ~limit (fun ~lhs ~rhs -> T.DisjDomain.equal_fast lhs rhs) ~into:lhs rhs false
+      join_up_to_with_leq ~limit (fun ~lhs ~rhs -> T.DisjDomain.equal_fast lhs rhs) ~into:lhs rhs
 
 
     (* [join_all] is used instead of [join] but the API requires this function to be present *)
@@ -351,55 +334,34 @@ struct
       | _ -> false  *)
 
     let widen ~prev ~next ~num_iters =
-      L.debug Analysis Quiet "PULSEINF widen(%i)@\n" num_iters ;
+
       let max_iter =
         match DConfig.widen_policy with UnderApproximateAfterNumIterations max_iter -> max_iter
       in
-
-      (* This did not change anything on test cases on latest tree *)
-      (* if list_phys_equal (fst prev) (fst next) then
-        
-        ( L.debug Analysis Quiet "PULSEINF: phys_equal, stopping early @\n" ; prev ) 
-      else *)
         
       if num_iters > max_iter then (
-        L.debug Analysis Quiet "PULSEINF: Iteration %d is greater than max iter %d, stopping \n" num_iters max_iter ; 
         DisjunctiveMetadata.incr_interrupted_loops () ;
         prev )
       else (
-        L.debug Analysis Quiet "PULSEINF: widening iteration %i @\n" num_iters; 
-
         let back_edges (prev: T.DisjDomain.t list) (next: T.DisjDomain.t list) (num_iters:int) : T.DisjDomain.t list * int =
           (T.back_edge prev next num_iters) in
-        
-        L.debug Analysis Quiet "PULSEINF: AbsInt back_edge called @\n"; 
-
         let fp = fst prev in
         let fn = fst next in
-
-        L.debug Analysis Quiet "PULSEINF: (before backedge) fst_prev = %u fst_next = %u @\n" (List.length fp) (List.length fn); 
-        
         let dbe,_ = (back_edges fp fn num_iters) in
         let hasnew = not (phys_equal (fst prev) dbe) in
-        
-        L.debug Analysis Quiet "PULSEINF: New DBE length = %u hasnew = %b limit = %u \n" (List.length dbe) hasnew disjunct_limit; 
-        
         let post_disj,_,dropped =
-          L.debug Analysis Quiet "PULSEINF: Widen Just Before LEQ PulseExecutionDomain \n"; 
           if (hasnew) then
             join_up_to_with_leq ~limit:disjunct_limit T.DisjDomain.leq ~into:dbe (fst next) true
           else
             join_up_to_with_leq ~limit:disjunct_limit T.DisjDomain.leq ~into:(fst prev) (fst next) false
         in
          let next_non_disj = (T.NonDisjDomain.widen ~prev:(snd prev) ~next:(snd next) ~num_iters) in
-         (* let post = (post_disj, next_non_disj) in *)
          if leq ~lhs:(post_disj, next_non_disj) ~rhs:prev 
-         then (L.debug Analysis Quiet "PULSEINF: iteration post already in prev: converged@\n"; prev) 
+         then prev
          else (post_disj, add_dropped_disjuncts dropped next_non_disj)
       )
 
     let pp_ (pp_kind : Pp.print_kind) f (disjuncts, non_disj) =
-
       let pp_disjuncts f disjuncts =
         List.iteri (List.rev disjuncts) ~f:(fun i disjunct ->
             F.fprintf f "#%d: @[%a@]@;" i (T.pp_disjunct pp_kind) disjunct )
@@ -485,7 +447,6 @@ struct
     let global_limit = Option.value_exn (AnalysisState.get_remaining_disjuncts ()) in
     let nb_pre = List.length pre_disjuncts in
     let (disjuncts, non_disj_astates), dropped, _, _ =
-
       List.foldi (List.rev pre_disjuncts)
         ~init:(([], []), [], 0, 0)
         ~f:(fun

@@ -14,7 +14,6 @@ module DecompilerExpr = PulseDecompilerExpr
 module Diagnostic = PulseDiagnostic
 module LatentIssue = PulseLatentIssue
 module Formula = PulseFormula
-module L = Logging 
 module Metadata = AbstractInterpreter.DisjunctiveMetadata
          
 (* The type variable is needed to distinguish summaries from plain states.
@@ -103,10 +102,10 @@ let pp_with_kind kind path_opt fmt exec_state =
   F.fprintf fmt "%a%a" (pp_header kind) exec_state (PulsePp.pp kind path_opt) (to_astate exec_state)
 
 
-let pp fmt (exec_state: 'abductive_domain_t base_t) = 
- F.fprintf fmt "%a%a" (pp_header TEXT) exec_state AbductiveDomain.pp (to_astate exec_state)
+let pp fmt exec_state =
+  F.fprintf fmt "%a%a" (pp_header TEXT) exec_state AbductiveDomain.pp (to_astate exec_state)
 
-(* Pulse infinite *)
+(* Infinite loop detector creates a new InfiniteProgram state when detected *)
   
 let widenstate = AnalysisGlobalState.make_dls ~init:(fun () -> (Some (Stdlib.Hashtbl.create 16)))
 
@@ -117,7 +116,6 @@ let add_widenstate key = Utils.with_dls widenstate ~f:(fun widenstate ->
                              | None -> widenstate
                              | Some state -> Stdlib.Hashtbl.add state key (); widenstate)
 
-
 let rec find_infinite_state (lst: t list) : bool =
   match lst with
   | hd::tl ->
@@ -127,21 +125,13 @@ let rec find_infinite_state (lst: t list) : bool =
   | _ -> false
                        
 let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
-
-  L.debug Analysis Quiet "PULSEINF: Entered EXECDOM BACK-EDGE NUMITER %u \n" num_iters; 
-
   let has_infinite_state = find_infinite_state next in
-  if has_infinite_state then (
-    L.debug Analysis Quiet "PULSEINF: POST already had an infinite state - not adding more \n";
+  if has_infinite_state then 
     ([],-1)
-  )
   else
-
   
   let _ = num_iters in
-
   let cfgnode = AnalysisState.get_node_exn() in
-  
   let same = phys_equal prev next in
   
   let rec detect_elem e lst curi : bool * int =
@@ -165,39 +155,6 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
   let prevlen = List.length(prev) in
   let nextlen = List.length(next) in
   let worklen = List.length(workset) in
-
-  L.debug Analysis Quiet "PULSEINF: BACKEDGE prevlen %d nextlen %d diff %d worklen %d NUMITER %u \n" prevlen nextlen (nextlen - prevlen) worklen num_iters; 
-  
-  (* Do-nothing version to avoid debug output *)
-  (* let print_workset _ = true in *)
-  (* Pulse-inf debug output: useful but verbose *)
-  let rec print_workset ws =
-    match ws with
-    | [] -> L.flush_formatters(); true
-    | (hd,_)::tl ->                 
-       pp Format.std_formatter hd;
-       print_workset tl
-  in
-  
-  (* Use this when disabling debug output *)
-  (* let print_warning _ _ _ = () in *)
-
-  (* Force workset printing *)
-  let _ = print_workset workset in 
-
-  let print_warning s cnt state =
-    let _ = state in 
-    L.debug Analysis Quiet "PULSEINF: FOUND infinite state from %s with cnt %i numiter %u \n" s cnt num_iters;
-    L.flush_formatters();
-    pp Format.err_formatter state;
-    L.flush_formatters();
-    L.debug Analysis Quiet "PULSEINF: End infinite state -- now printing workset at bugloc (numiter %u) \n" num_iters;
-    L.flush_formatters();
-    let _ = print_workset workset in
-    L.flush_formatters();
-    L.debug Analysis Quiet "PULSEINF: End Printing Vulnerable Workset numiter %u \n" num_iters;
-    L.flush_formatters(); ()
-  in
   
   let extract_pathcond hd : Formula.t =
    match hd with
@@ -218,8 +175,7 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
       if (phys_equal a e) && (phys_equal b f) && (phys_equal c g) && (phys_equal d h)
       then true else false
     in
-    
-    (* let curlen = (List.length ws) in *)
+
     match ws with
     | [] -> (-1)
     | (hd,idx)::tl ->
@@ -230,24 +186,20 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
        let key = (cfgnode,termcond,pathcond,termcond2) in
        let dl_ws = get_widenstate () in
        match dl_ws with
-       | None -> L.debug Analysis Quiet "PULSEINF: widenstate htable NONE - should never happen! num_iter %u \n" num_iters; -1 
-          | Some ws ->           
-             let prevstate = (Stdlib.Hashtbl.find_opt ws key) in
-             match prevstate with
-             | None ->
-                L.debug Analysis Quiet "PULSEINF: Recorded pathcond NOT in htable (ADDING) idx %d numiter %u \n" idx num_iters; 
-                let _ = add_widenstate key in
-                record_pathcond tl (kl @ [key])
-             | Some _ ->
-                match (Formula.set_is_empty termcond),(Formula.map_is_empty pathcond),(Formula.termset_is_empty termcond2) with 
-                | true,true,true -> idx (* -2 *)
-                | _ ->
-                   let test = (List.mem ~equal:cmp_four kl key) in
-                   if test then 
-                     (L.debug Analysis Quiet "PULSEINF: Recorded pathcond ALREADY in htable (SAME ITER NO BUG) idx %d numiter %u \n" idx num_iters; -2)
-                   else
-                     (L.debug Analysis Quiet "PULSEINF: Recorded pathcond ALREADY in htable! (NON-TERM BUG) idx %d numiter %u \n" idx num_iters; idx)
-                     
+       | None -> -1
+       | Some ws ->           
+          let prevstate = (Stdlib.Hashtbl.find_opt ws key) in
+          match prevstate with
+          | None ->
+             let _ = add_widenstate key in
+             record_pathcond tl (kl @ [key])
+          | Some _ ->
+             match (Formula.set_is_empty termcond),(Formula.map_is_empty pathcond),
+                   (Formula.termset_is_empty termcond2) with 
+             | true,true,true -> idx
+             | _ ->
+                let test = (List.mem ~equal:cmp_four kl key) in
+                if test then (-2) else idx
   in                                                                                                                                   
   
   let _ = print_workset workset in
@@ -271,12 +223,11 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
 
   let create_infinite_state_and_print (state_set: t list) (idx:int) (case:int) =
     let _ = case in
-    L.debug Analysis Quiet "PULSEINF: BUG FOUND - DETECTED REPEATED STATE IDX %d CASE %d numiter %d \n" idx case num_iters; 
     Metadata.record_alert_node cfgnode;
     let nth = (List.nth state_set idx) in 
     match nth with
     | None       ->
-       L.debug Analysis Quiet "PULSEINF: create_infinite_state Nth NONE prevlen %u nextlen %u idx %d case %d numiter %u -- SHOULD NEVER HAPPEN! \n" 
+       (* This should never happen *)
        prevlen nextlen idx case num_iters; 
        [],-1
     | Some state ->
@@ -294,16 +245,14 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
   let rec find_duplicate_state (lst: t list) (curi: int) (maxi: int) : int =
     match lst with
     | hd::tl -> let isrep = (is_repeated hd tl) in
-                (* L.debug Analysis Quiet "JV: Found duplicate state in POST with index = %d \n" curi; *)
                 if (isrep && curi > maxi) then (find_duplicate_state tl (curi+1) curi)
                 else (find_duplicate_state tl (curi+1) maxi)
-    | _ -> L.debug Analysis Quiet "JV: Chosen duplicate in POST has index = %d \n" maxi; maxi 
+    | _ -> maxi
   in  
 
   (* we have a trivial lasso because prev = next - this should trigger an alert *)
   if same && (phys_equal nextempty false) then
-    (L.debug Analysis Quiet "PULSEINF: same && nextempty is true - returning (no bug) \n"; 
-    create_infinite_state_and_print next (find_duplicate_state next 0 (-1)) 1)
+    create_infinite_state_and_print next (find_duplicate_state next 0 (-1)) 1
   
   (* We have one or more newly created equivalent states in the post, trigger an alert *)
   else if (phys_equal worklen 0) && (nextlen - prevlen) > 0 then
@@ -314,8 +263,8 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
     create_infinite_state_and_print next repeated_wsidx 3
 
   (* No recurring state detected, return empty *)
-    else (L.debug Analysis Quiet "PULSEINF: no recurring state detected - returning (no bug) - same: %b nextempty: %b \n" same nextempty; 
-          let _ = print_workset workset in [],-1)
+  else
+    [],-1
          
 type summary = AbductiveDomain.Summary.t base_t [@@deriving compare, equal, yojson_of]
 

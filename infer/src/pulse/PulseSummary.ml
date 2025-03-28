@@ -80,15 +80,10 @@ let exec_summary_of_post_common ({InterproceduralAnalysis.proc_desc} as analysis
           ~continue_program ~exception_raised ~infinite_raised specialization path
           location (exec_astate : ExecutionDomain.t) :
           _ ExecutionDomain.base_t SatUnsat.t =
-
-  L.debug Analysis Quiet "PULSEINF: entering exec_summary \n";
   
   let summarize (astate : AbductiveDomain.t)
       ~(exec_domain_of_summary : AbductiveDomain.Summary.summary -> 'a ExecutionDomain.base_t)
       ~(is_exceptional_state : bool) : _ ExecutionDomain.base_t SatUnsat.t =
-
-
-    L.debug Analysis Quiet "PULSEINF: entering summarize \n";
     
     let open SatUnsat.Import in
     let+ summary_result =
@@ -99,7 +94,6 @@ let exec_summary_of_post_common ({InterproceduralAnalysis.proc_desc} as analysis
        let r = exec_domain_of_summary summary in
        (match r with
         | InfiniteProgram _ ->
-           L.debug Analysis Quiet "PULSEINF: Reach summarize with InfiniteProgram detected \n";
            let curnode = Metadata.get_alert_node in
            let curloc = (Procdesc.Node.get_loc(curnode())) in 
            let error = ReportableError {astate=astate; diagnostic=(InfiniteError {location=curloc})} in
@@ -167,9 +161,6 @@ let exec_summary_of_post_common ({InterproceduralAnalysis.proc_desc} as analysis
           (* NOTE: this probably leads to the error being dropped as the access trace is unlikely to
              contain the reason for invalidation and thus we will filter out the report. TODO:
              figure out if that's a problem. *)
-
-         L.debug Analysis Quiet "PULSEINF: reporting summary error (dropping alert) \n";
-         
           PulseReport.report_summary_error analysis_data path
             ( ReportableError
                 { diagnostic=

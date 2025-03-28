@@ -99,31 +99,25 @@ let pp_ ~is_summary f
   (* print pre then post if it's a summary, other print the post (aka current abstract state) first
      *)
   let pp_pre_post f =
-    if is_summary
-    then F.fprintf f "PRE=@[%a@] \n @;POST=@[%a@]\n" PreDomain.pp pre PostDomain.pp post
-    else F.fprintf f "POST=@[%a@]\n @;PRE=[%a]\n" PostDomain.pp post PreDomain.pp pre
+    if is_summary then F.fprintf f "PRE=@[%a@]@;POST=@[%a@]" PreDomain.pp pre PostDomain.pp post
+    else F.fprintf f "%a;PRE=[%a]" PostDomain.pp post PreDomain.pp pre
   in
   F.fprintf f
-    "\n ---------------------------------- \n
-     PATHCOND=%a;\ \n
-     %t@;\ \n
-     %tneed_dynamic_type_specialization=%a@;\ \n
-     transitive_info=%a@;\ \n
-     recursive_calls=%a@;\ \n
-     skipped_calls=%a@;\ \n
-     Topl=%a@] \n 
-     --------------------------------------------------- \n"
+    "@[<v>%a@;\
+     %t@;\
+     %tneed_dynamic_type_specialization=%a@;\
+     transitive_info=%a@;\
+     recursive_calls=%a@;\
+     skipped_calls=%a@;\
+     Topl=%a@]"
     Formula.pp path_condition pp_pre_post pp_decompiler AbstractValue.Set.pp
     need_dynamic_type_specialization TransitiveInfo.pp transitive_info PulseMutualRecursion.Set.pp
-    recursive_calls SkippedCalls.pp skipped_calls PulseTopl.pp_state topl
-    
+    recursive_calls SkippedCalls.pp skipped_calls PulseTopl.pp_state topl    
 
 
 let pp = pp_ ~is_summary:false
 
 let get_path_condition astate = astate.path_condition
-
-(* let get_termination_condition astate = astate.get_terminal_condition *)
        
 let set_path_condition path_condition astate = {astate with path_condition}
 

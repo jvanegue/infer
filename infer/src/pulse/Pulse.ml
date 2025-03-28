@@ -179,65 +179,45 @@ module PulseTransferFunctions = struct
   module CFG = ProcCfg.ExceptionalNoSinkToExitEdge
   module DisjDomain = AbstractDomain.PairDisjunct (ExecutionDomain) (PathContext)
   module NonDisjDomain = NonDisjDomain
-  module ExecDom = ExecutionDomain
-                 
+  module ExecDom = ExecutionDomain                 
   type analysis_data = PulseSummary.t InterproceduralAnalysis.t
 
-
-  (* check if state is an infiniteprogram state *)
-  (* let is_infinite hd : bool =
-    match hd with
-    | InfiniteProgram _ -> true
-    |_ -> false; *)
-                     
-  (* Call on back_edge from widen in AbstractInterpreter.ml *)
+  (* Logic for infinite loop detection *)
+  (* Called from back_edge in AbstractInterpreter.ml *)
   let back_edge (prev:DisjDomain.t list) (next:DisjDomain.t list) (num_iters:int)  : DisjDomain.t list * int =
-    
-    (* let plen,nlen = List.length(prev), List.length(next) in 
-    L.debug Analysis Quiet "PULSEINF: BACKEDGE NUMITER %d Number of Prev state = %d Number of Post states = %d \n" num_iters plen nlen; *)
-    
-    let rec listpair_split (l:DisjDomain.t list) (o1:ExecDom.t list) (o2:PathContext.t list) =
+    let rec listpair_split l o1 o2 = 
       match l with
       | [] -> (o1,o2)
       | (ed,pc)::tail -> listpair_split tail (ed::o1) (pc::o2)
     in
-    let listpair_combine (l1:ExecDom.t list) (l2: PathContext.t list) : (ExecDom.t * PathContext.t) list =
-      
+    let listpair_combine l1 l2 =
       let l1len,l2len = (List.length l1),(List.length l2) in
-      (* L.debug Analysis Quiet "JV: listpair_combine L1 len = %u L2 len = %u \n" l1len l2len; *)
-      if (l1len <> l2len) then [] else
-        
-        let rec listpair_combine_int (l1:ExecDom.t list) (l2: PathContext.t list) (out: (ExecDom.t * PathContext.t) list)
-                : (ExecDom.t * PathContext.t) list =
+      if (l1len <> l2len) then [] else        
+        let rec listpair_combine_int l1 l2 out =
           match (l1,l2) with
           | hd::tl, hd2::tl2  -> let p = (hd,hd2) in listpair_combine_int tl tl2 (out @ [p])
           | [],[]             -> out
-          | _                 -> L.debug Analysis Quiet "PULSEINF: BACKEDGE MISMATCH in list size to recombine. Should never happen! \n"; out
+          | _                 ->
+             L.debug Analysis Quiet "PULSEINF: BACKEDGE MISMATCH in list size to recombine. Should never happen! \n"; out
         in listpair_combine_int l1 l2 []
     in
     let plist,rplist = listpair_split prev [] [] in
     let nlist,rnlist = listpair_split next [] [] in
-    let dbe,cnt      = (ExecDom.back_edge plist nlist num_iters) in
-    let _,_       = (PathContext.back_edge rplist rnlist num_iters) in    
+    let dbe,cnt = (ExecDom.back_edge plist nlist num_iters) in
+    let _,_ = (PathContext.back_edge rplist rnlist num_iters) in    
     let (pathctx: PathContext.t option) = (List.nth rnlist cnt) in
-
     let used,pts =
       match (pathctx) with
       | Some p -> 1, p
-      | _ ->
-         L.debug Analysis Quiet "PULSEINF: PATHCTX DEBUG: not finding back pathctx at provided index  - this should never happen \n"; 
-         0, PathContext.initial (* pathctx is None *)
+      | _ -> 0, PathContext.initial (* pathctx is None *)
             
     in
-    (* L.debug Analysis Quiet "JV PATHCTX: dbe len = %u pts len = 1 \n" (List.length dbe); *)
-    L.debug Analysis Quiet "PULSEINF: Prev MODIFIED %b (if true added Infinite state) \n" (used > 0 && cnt >= 0);
-    
     let res = if (used > 0 && cnt >= 0) then
                 listpair_combine (plist @ dbe) (rplist @ [pts])
-              else prev (* listpair_combine plist rplist *)
+              else prev 
     in
     (res,-1)
-  (* END OF BACK-EDGE CODE *)
+  (* End back-edge *)
                      
   let get_pvar_formals pname =
     IRAttributes.load pname |> Option.map ~f:ProcAttributes.get_pvar_formals
@@ -1401,8 +1381,6 @@ module PulseTransferFunctions = struct
     | ExceptionRaised _
     (* program already exited, simply propagate the exited state upwards  *)
       | ExitProgram _ ->
-       (* L.debug Analysis Quiet "exec_instr: ExceptionRaised/ExitProgram \n"; *)
-
         ([astate], path, astate_n)
     | ContinueProgram astate -> (
       match instr with
@@ -1416,8 +1394,6 @@ module PulseTransferFunctions = struct
           in
           (astates, path, astate_n)
       | Load {id= lhs_id; e= rhs_exp; loc; typ} ->
-         (* L.debug Analysis Quiet "exec_instr: Load \n"; *)
-
           (* [lhs_id := *rhs_exp] *)
           let model_opt = PulseLoadInstrModels.dispatch ~load:rhs_exp in
           let deref_rhs astate =
@@ -1432,7 +1408,6 @@ module PulseTransferFunctions = struct
                    (astate, ValueOrigin.unknown addr_hist)
              in
              let rhs_addr = ValueOrigin.value rhs_vo in
-             (* L.debug Analysis Quiet "JV: Calling and_is_int_if_integer_type from deref_rhs/Pulse.ml \n"; *)
              and_is_int_if_integer_type typ rhs_addr astate
              >>|| PulseOperations.hack_propagates_type_on_load tenv path loc rhs_exp rhs_addr
              >>|| PulseOperations.add_static_type_objc_class tenv typ rhs_addr loc
@@ -1474,8 +1449,6 @@ module PulseTransferFunctions = struct
           in
           (List.take astates limit, path, non_disj)
       | Store {e1= lhs_exp; e2= rhs_exp; loc; typ} ->
-         (* L.debug Analysis Quiet "exec_instr: Store \n"; *)
-
           (* [*lhs_exp := rhs_exp] *)
           let event =
             match lhs_exp with
@@ -1500,9 +1473,6 @@ module PulseTransferFunctions = struct
             in
 
             let hist = ValueHistory.sequence event rhs_history in
-
-            (* L.debug Analysis Quiet "JV: Calling and_is_int_if_integer_type from exec_instr/STORE \n"; *)
-
             let** astate = and_is_int_if_integer_type typ rhs_addr astate in
             let** astate =
               PulseOperations.cleanup_attribute_store proc_desc path loc astate ~lhs_exp ~rhs_exp
@@ -1547,8 +1517,6 @@ module PulseTransferFunctions = struct
           let astates = PulseReport.report_results analysis_data path loc results in
           (List.take astates limit, path, astate_n)
       | Call (ret, call_exp, actuals, loc, call_flags) ->
-         (* L.debug Analysis Quiet "exec_instr: Call \n"; *)
-
           let astate_n = check_modified_before_destructor actuals call_exp astate astate_n in
           let astates, astate_n =
             List.fold actuals ~init:([astate], astate_n) ~f:(fun (astates, astate_n) (exp, typ) ->
@@ -1609,8 +1577,6 @@ module PulseTransferFunctions = struct
           (astates, path, astate_n)
 
       | Prune (condition, loc, _is_then_branch, _if_kind) ->
-         (* L.debug Analysis Quiet "exec_instr: Prune \n"; *)
-
           let prune_result =
             let=* astate = check_config_usage analysis_data loc condition astate in
             PulseOperations.prune proc_desc path loc ~condition astate
@@ -1631,9 +1597,6 @@ module PulseTransferFunctions = struct
 
       | Metadata (VariableLifetimeBegins {pvar; typ; loc; is_cpp_structured_binding})
            when not (Pvar.is_global pvar) ->
-
-         (* L.debug Analysis Quiet "exec_instr: Metadata VariableLifetimeBegins \n"; *)
-
           let set_uninitialized = (not is_cpp_structured_binding) && not (Typ.is_folly_coro typ) in
           ( [ PulseOperations.realloc_pvar tenv path ~set_uninitialized pvar typ loc astate
               |> ExecutionDomain.continue ]
@@ -1641,32 +1604,13 @@ module PulseTransferFunctions = struct
           , astate_n )
           
       | Metadata (Abstract _) ->
-         (* L.debug Analysis Quiet "exec_instr: Metadata Abstract \n"; *)
-         ([ContinueProgram astate], path, astate_n)
-
       | Metadata (CatchEntry _) ->
-         (* L.debug Analysis Quiet "exec_instr: Metadata CatchEntry \n"; *)
-         ([ContinueProgram astate], path, astate_n)
-
       | Metadata (Nullify _) ->
-         (* L.debug Analysis Quiet "exec_instr: Metadata Nullify \n"; *)
+      | Metadata (Skip) ->
+      | Metadata (TryEntry _) ->
+      | Metadata (TryExit _) ->
+      | Metadata (VariableLifetimeBegins _) ->
          ([ContinueProgram astate], path, astate_n)
-          
-       | Metadata (Skip) ->
-          (* L.debug Analysis Quiet "exec_instr: Skip \n"; *)
-         ([ContinueProgram astate], path, astate_n)
-
-       | Metadata (TryEntry _) ->
-          (* L.debug Analysis Quiet "exec_instr: TryEntry \n"; *)
-         ([ContinueProgram astate], path, astate_n)
-
-       | Metadata (TryExit _) ->
-          (* L.debug Analysis Quiet "exec_instr: Metadata TryExit \n"; *)
-         ([ContinueProgram astate], path, astate_n)
-
-       | Metadata (VariableLifetimeBegins _) ->
-          (* L.debug Analysis Quiet "exec_instr: Metadata VariableLifetimeBegins 2 \n"; *)
-          ([ContinueProgram astate], path, astate_n)
     ) 
 
   let exec_instr_with_oom_protection_and_path_update ~limit ((astate, path), astate_n) analysis_data
@@ -1986,9 +1930,6 @@ let analyze specialization ({InterproceduralAnalysis.tenv; proc_desc} as analysi
     List.for_all pre_post_list ~f
   in
   let process_postconditions node posts_opt ~convert_normal_to_exceptional =
-
-    L.debug Analysis Quiet "PULSEINF: process_postconditions \n";
-    
     match posts_opt with
     | Some (posts, non_disj_astate) ->
         let node_loc = Procdesc.Node.get_loc node in
@@ -2027,7 +1968,6 @@ let analyze specialization ({InterproceduralAnalysis.tenv; proc_desc} as analysi
           report_unnecessary_parameter_copies analysis_data non_disj_astate ) ;
         summary
     | None ->
-       L.debug Analysis Quiet "PULSEINF: process_postconditions EMPTY case \n";
         PulseSummary.empty
   in
   let report_on_and_return_summaries summary =
