@@ -179,46 +179,51 @@ module PulseTransferFunctions = struct
   module CFG = ProcCfg.ExceptionalNoSinkToExitEdge
   module DisjDomain = AbstractDomain.PairDisjunct (ExecutionDomain) (PathContext)
   module NonDisjDomain = NonDisjDomain
-  module ExecDom = ExecutionDomain                 
+  module ExecDom = ExecutionDomain
+
   type analysis_data = PulseSummary.t InterproceduralAnalysis.t
 
   (* Logic for infinite loop detection *)
   (* Called from back_edge in AbstractInterpreter.ml *)
-  let back_edge (prev:DisjDomain.t list) (next:DisjDomain.t list) (num_iters:int)  : DisjDomain.t list * int =
-    let rec listpair_split l o1 o2 = 
-      match l with
-      | [] -> (o1,o2)
-      | (ed,pc)::tail -> listpair_split tail (ed::o1) (pc::o2)
+  let back_edge (prev : DisjDomain.t list) (next : DisjDomain.t list) (num_iters : int) :
+      DisjDomain.t list * int =
+    let rec listpair_split l o1 o2 =
+      match l with [] -> (o1, o2) | (ed, pc) :: tail -> listpair_split tail (ed :: o1) (pc :: o2)
     in
     let listpair_combine l1 l2 =
-      let l1len,l2len = (List.length l1),(List.length l2) in
-      if (l1len <> l2len) then [] else        
+      let l1len, l2len = (List.length l1, List.length l2) in
+      if l1len <> l2len then []
+      else
         let rec listpair_combine_int l1 l2 out =
-          match (l1,l2) with
-          | hd::tl, hd2::tl2  -> let p = (hd,hd2) in listpair_combine_int tl tl2 (out @ [p])
-          | [],[]             -> out
-          | _                 ->
-             L.debug Analysis Quiet "PULSEINF: BACKEDGE MISMATCH in list size to recombine. Should never happen! \n"; out
-        in listpair_combine_int l1 l2 []
+          match (l1, l2) with
+          | hd :: tl, hd2 :: tl2 ->
+              let p = (hd, hd2) in
+              listpair_combine_int tl tl2 (out @ [p])
+          | [], [] ->
+              out
+          | _ ->
+              L.debug Analysis Quiet
+                "PULSEINF: BACKEDGE MISMATCH in list size to recombine. Should never happen! \n" ;
+              out
+        in
+        listpair_combine_int l1 l2 []
     in
-    let plist,rplist = listpair_split prev [] [] in
-    let nlist,rnlist = listpair_split next [] [] in
-    let dbe,cnt = (ExecDom.back_edge plist nlist num_iters) in
-    let _,_ = (PathContext.back_edge rplist rnlist num_iters) in    
-    let (pathctx: PathContext.t option) = (List.nth rnlist cnt) in
-    let used,pts =
-      match (pathctx) with
-      | Some p -> 1, p
-      | _ -> 0, PathContext.initial (* pathctx is None *)
-            
+    let plist, rplist = listpair_split prev [] [] in
+    let nlist, rnlist = listpair_split next [] [] in
+    let dbe, cnt = ExecDom.back_edge plist nlist num_iters in
+    let _, _ = PathContext.back_edge rplist rnlist num_iters in
+    let (pathctx : PathContext.t option) = List.nth rnlist cnt in
+    let used, pts =
+      match pathctx with Some p -> (1, p) | _ -> (0, PathContext.initial (* pathctx is None *))
     in
-    let res = if (used > 0 && cnt >= 0) then
-                listpair_combine (plist @ dbe) (rplist @ [pts])
-              else prev 
+    let res =
+      if used > 0 && cnt >= 0 then listpair_combine (plist @ dbe) (rplist @ [pts]) else prev
     in
-    (res,-1)
+    (res, -1)
+
+
   (* End back-edge *)
-                     
+
   let get_pvar_formals pname =
     IRAttributes.load pname |> Option.map ~f:ProcAttributes.get_pvar_formals
 
@@ -299,9 +304,10 @@ module PulseTransferFunctions = struct
     | ExitProgram _
     | LatentAbortProgram _
     | LatentInvalidAccess _
-    | LatentSpecializedTypeIssue _ 
-    | InfiniteProgram _ -> 
+    | LatentSpecializedTypeIssue _
+    | InfiniteProgram _ ->
         Sat (Ok exec_state)
+
 
   let topl_small_step tenv loc procname arguments (return, return_type) exec_state_res =
     let arguments =
@@ -327,7 +333,7 @@ module PulseTransferFunctions = struct
       | ExitProgram _
       | ExceptionRaised _
       | InfiniteProgram _
-      | LatentInvalidAccess _ 
+      | LatentInvalidAccess _
       | LatentSpecializedTypeIssue _ ->
           exec_state
     in
@@ -1007,15 +1013,13 @@ module PulseTransferFunctions = struct
                          astate )
             in
             ContinueProgram astate
-
         | ExceptionRaised astate ->
             (* clear any builder attributes if we threw so as not to over-report *)
             L.d_printfln "clearing builder attributes on exception" ;
             let astate = AbductiveDomain.finalize_all_hack_builders astate in
             Ok (ExceptionRaised astate)
-        | InfiniteProgram _
-        | ( ExitProgram _
-
+        | ( InfiniteProgram _
+          | ExitProgram _
           | AbortProgram _
           | LatentAbortProgram _
           | LatentInvalidAccess _
@@ -1372,15 +1376,17 @@ module PulseTransferFunctions = struct
       (astate_n : NonDisjDomain.t) ({InterproceduralAnalysis.tenv; proc_desc} as analysis_data)
       cfg_node (instr : Sil.instr) : ExecutionDomain.t list * PathContext.t * NonDisjDomain.t =
     match astate with
-    | AbortProgram _ | LatentAbortProgram _ | LatentInvalidAccess _ | InfiniteProgram _
-    | LatentSpecializedTypeIssue _
-      ->
+    | AbortProgram _
+    | LatentAbortProgram _
+    | LatentInvalidAccess _
+    | InfiniteProgram _
+    | LatentSpecializedTypeIssue _ ->
         ([astate], path, astate_n)
     (* an exception has been raised, we skip the other instructions until we enter in
        exception edge *)
     | ExceptionRaised _
     (* program already exited, simply propagate the exited state upwards  *)
-      | ExitProgram _ ->
+    | ExitProgram _ ->
         ([astate], path, astate_n)
     | ContinueProgram astate -> (
       match instr with
@@ -1467,11 +1473,9 @@ module PulseTransferFunctions = struct
               PulseOperations.eval_to_value_origin path NoAccess loc rhs_exp astate
             in
             let rhs_addr, rhs_history = ValueOrigin.addr_hist rhs_value_origin in
-
             let** astate, ((lhs_addr, _) as lhs_addr_hist) =
               PulseOperations.eval path Write loc lhs_exp astate
             in
-
             let hist = ValueHistory.sequence event rhs_history in
             let** astate = and_is_int_if_integer_type typ rhs_addr astate in
             let** astate =
@@ -1575,18 +1579,15 @@ module PulseTransferFunctions = struct
                 NonDisjDomain.set_captured_variables exp astate_n )
           in
           (astates, path, astate_n)
-
       | Prune (condition, loc, _is_then_branch, _if_kind) ->
           let prune_result =
             let=* astate = check_config_usage analysis_data loc condition astate in
             PulseOperations.prune proc_desc path loc ~condition astate
           in
-
           let results =
             let<++> astate, _ = prune_result in
             astate
           in
-
           let astates = PulseReport.report_exec_results analysis_data path loc results in
           (List.take astates limit, path, astate_n)
       | Metadata (ExitScope (vars, location)) ->
@@ -1594,24 +1595,22 @@ module PulseTransferFunctions = struct
             exit_scope limit vars location path astate astate_n analysis_data
           in
           (exec_states, path, non_disj)
-
       | Metadata (VariableLifetimeBegins {pvar; typ; loc; is_cpp_structured_binding})
-           when not (Pvar.is_global pvar) ->
+        when not (Pvar.is_global pvar) ->
           let set_uninitialized = (not is_cpp_structured_binding) && not (Typ.is_folly_coro typ) in
           ( [ PulseOperations.realloc_pvar tenv path ~set_uninitialized pvar typ loc astate
               |> ExecutionDomain.continue ]
           , path
           , astate_n )
-          
-      | Metadata (Abstract _) 
-      | Metadata (CatchEntry _) 
-      | Metadata (Nullify _) 
-      | Metadata (Skip) 
-      | Metadata (TryEntry _) 
-      | Metadata (TryExit _) 
+      | Metadata (Abstract _)
+      | Metadata (CatchEntry _)
+      | Metadata (Nullify _)
+      | Metadata Skip
+      | Metadata (TryEntry _)
+      | Metadata (TryExit _)
       | Metadata (VariableLifetimeBegins _) ->
-         ([ContinueProgram astate], path, astate_n)
-    ) 
+          ([ContinueProgram astate], path, astate_n) )
+
 
   let exec_instr_with_oom_protection_and_path_update ~limit ((astate, path), astate_n) analysis_data
       cfg_node instr : DisjDomain.t list * NonDisjDomain.t =

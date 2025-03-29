@@ -54,7 +54,6 @@ module type S = sig
   val join : t -> t -> t
 
   val widen : prev:t -> next:t -> num_iters:int -> t
-    
 end
 
 include (* ocaml ignores the warning suppression at toplevel, hence the [include struct ... end] trick *)

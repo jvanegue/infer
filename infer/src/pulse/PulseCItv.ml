@@ -321,11 +321,11 @@ let intersection a1 a2 =
       Option.first_some inter1_opt inter2_opt |> Option.value ~default:a1 |> Option.some
 
 
-let has_empty_intersection a1 a2 = Option.is_none (intersection a1 a2) 
+let has_empty_intersection a1 a2 = Option.is_none (intersection a1 a2)
 
 let abduce_ne (a1 : t) (a2 : t) =
-  if has_empty_intersection a1 a2 then Satisfiable(None, None)
-  else 
+  if has_empty_intersection a1 a2 then Satisfiable (None, None)
+  else
     match (to_singleton a1, to_singleton a2) with
     | Some _, Some _ ->
         (* non-empty intersection between 2 singletons => they are the same singleton and hence the
@@ -341,12 +341,12 @@ let abduce_ne (a1 : t) (a2 : t) =
           Satisfiable (None, abduced2)
       | None ->
           Satisfiable (None, None) )
-    | None, Some e2 ->
+    | None, Some e2 -> (
       match remove_element e2 a1 with
       | Some _ as abduced1 ->
           Satisfiable (abduced1, None)
       | None ->
-          Satisfiable (None, None) 
+          Satisfiable (None, None) )
 
 
 let abduce_le (a1 : t) (a2 : t) =

@@ -112,13 +112,13 @@ let pp_ ~is_summary f
      Topl=%a@]"
     Formula.pp path_condition pp_pre_post pp_decompiler AbstractValue.Set.pp
     need_dynamic_type_specialization TransitiveInfo.pp transitive_info PulseMutualRecursion.Set.pp
-    recursive_calls SkippedCalls.pp skipped_calls PulseTopl.pp_state topl    
+    recursive_calls SkippedCalls.pp skipped_calls PulseTopl.pp_state topl
 
 
 let pp = pp_ ~is_summary:false
 
 let get_path_condition astate = astate.path_condition
-       
+
 let set_path_condition path_condition astate = {astate with path_condition}
 
 let record_transitive_access location astate =
