@@ -238,7 +238,7 @@ let back_edge (prev : t list) (next : t list) (num_iters : int) : t list * int =
     in
     let create_infinite_state_and_print (state_set : t list) (idx : int) (case : int) =
       let _ = case in
-      Metadata.record_alert_node cfgnode ;
+      Metadata.record_infinite_node cfgnode ;
       let nth = List.nth state_set idx in
       match nth with None -> ([], -1) | Some state -> ([create_infinite_state state], idx)
     in

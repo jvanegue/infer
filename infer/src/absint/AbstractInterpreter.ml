@@ -189,34 +189,17 @@ module DisjunctiveMetadata = struct
      update it whenever a relevant action is taken (eg dropping a disjunct). *)
   let proc_metadata = AnalysisGlobalState.make_dls ~init:(fun () -> empty)
 
-  (* This is used to remember the CFG node otherwise we would need to carry the node around in widen
-     and join as well as other places that may need to access the current CFG node during analysis *)
-
-  let cfg_node =
+  let infinite_loop_node =
     AnalysisGlobalState.make_dls ~init:(fun () -> Procdesc.Node.dummy Procname.empty_block)
 
 
-  let record_cfg_node (cfgnode : Procdesc.Node.t) =
-    Utils.with_dls cfg_node ~f:(fun cfg_node ->
-        let _ = cfg_node in
-        cfgnode )
+  let record_infinite_node (infinitenode : Procdesc.Node.t) =
+    Utils.with_dls infinite_loop_node ~f:(fun infinite_loop_node ->
+        let _ = infinite_loop_node in
+        infinitenode )
 
 
-  let get_cfg_node () = DLS.get cfg_node
-
-  let alert_node =
-    AnalysisGlobalState.make_dls ~init:(fun () -> Procdesc.Node.dummy Procname.empty_block)
-
-
-  (* End CFG node tracking for alerts *)
-
-  let record_alert_node (alertnode : Procdesc.Node.t) =
-    Utils.with_dls alert_node ~f:(fun alert_node ->
-        let _ = alert_node in
-        alertnode )
-
-
-  let get_alert_node () = DLS.get alert_node
+  let get_infinite_node () = DLS.get infinite_loop_node
 
   let add_dropped_disjuncts dropped_disjuncts =
     Utils.with_dls proc_metadata ~f:(fun proc_metadata ->
@@ -280,10 +263,10 @@ struct
         | hd :: tl when n_acc < limit ->
             (* check with respect to the original [into] and not [acc] as we assume lists of
                disjuncts are already deduplicated *)
-
-            (* [hd] implies one of the states in [into]; skip it
-                  ([(a=>b) => (a\/b <=> b)]) *)
-            if has_geq_disj ~leq ~than:hd into then aux acc n_acc tl
+            if has_geq_disj ~leq ~than:hd into then
+              (* [hd] implies one of the states in [into]; skip it
+                    ([(a=>b) => (a\/b <=> b)]) *)
+              aux acc n_acc tl
             else aux (hd :: acc) (n_acc + 1) tl
         | _ ->
             (* [from] is empty or [n_acc ≥ limit], either way we are done *)

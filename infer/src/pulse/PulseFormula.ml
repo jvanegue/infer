@@ -2190,8 +2190,8 @@ module Formula = struct
             (** like [linear_eqs_occurrences] but for [term_eqs] so bindings are from variables to
                 sets of terms *)
       ; atoms_occurrences: AtomMapOccurrences.t  (** likewise for [atoms] *)
-      ; term_conditions: Atom.Set.t  (** Termination conditions for pulse-inf *)
-      ; term_conditions2: Term.Set.t  (** Termination conditions for pulse-inf *) }
+      ; raw_atoms_conds: Atom.Set.t  (** Termination conditions for pulse-inf *)
+      ; raw_term_conds: Term.Set.t  (** Termination conditions for pulse-inf *) }
     [@@deriving compare, equal, yojson_of]
 
     val pp_with_pp_var : (F.formatter -> Var.t -> unit) -> F.formatter -> t -> unit
@@ -2319,8 +2319,8 @@ module Formula = struct
       -> tableau_occurrences:VarMapOccurrences.t
       -> term_eqs_occurrences:TermMapOccurrences.t
       -> atoms_occurrences:AtomMapOccurrences.t
-      -> term_conditions:Atom.Set.t
-      -> term_conditions2:Term.Set.t
+      -> raw_atoms_conds:Atom.Set.t
+      -> raw_term_conds:Term.Set.t
       -> t
     (** escape hatch *)
   end = struct
@@ -2341,8 +2341,8 @@ module Formula = struct
       ; tableau_occurrences: VarMapOccurrences.t
       ; term_eqs_occurrences: TermMapOccurrences.t
       ; atoms_occurrences: AtomMapOccurrences.t
-      ; term_conditions: Atom.Set.t  (** Termination conditions for pulse-inf *)
-      ; term_conditions2: Term.Set.t }
+      ; raw_atoms_conds: Atom.Set.t  (** Termination conditions for pulse-inf *)
+      ; raw_term_conds: Term.Set.t }
     [@@deriving compare, equal, yojson_of]
 
     let ttrue =
@@ -2358,8 +2358,8 @@ module Formula = struct
       ; tableau_occurrences= Var.Map.empty
       ; term_eqs_occurrences= Var.Map.empty
       ; atoms_occurrences= Var.Map.empty
-      ; term_conditions= Atom.Set.empty
-      ; term_conditions2= Term.Set.empty }
+      ; raw_atoms_conds= Atom.Set.empty
+      ; raw_term_conds= Term.Set.empty }
 
 
     let get_repr phi x = VarUF.find phi.var_eqs x
@@ -2379,12 +2379,12 @@ module Formula = struct
          ; tableau_occurrences= _
          ; term_eqs_occurrences= _
          ; atoms_occurrences= _
-         ; term_conditions
-         ; term_conditions2 } [@warning "+missing-record-field-pattern"] ) =
+         ; raw_atoms_conds
+         ; raw_term_conds } [@warning "+missing-record-field-pattern"] ) =
       VarUF.is_empty var_eqs && Var.Map.is_empty const_eqs && Var.Map.is_empty type_constraints
       && Var.Map.is_empty linear_eqs && term_eqs_is_empty term_eqs && Var.Map.is_empty tableau
-      && Var.Map.is_empty intervals && Atom.Set.is_empty atoms && Atom.Set.is_empty term_conditions
-      && Term.Set.is_empty term_conditions2
+      && Var.Map.is_empty intervals && Atom.Set.is_empty atoms && Atom.Set.is_empty raw_atoms_conds
+      && Term.Set.is_empty raw_term_conds
 
 
     (* {2 [term_eqs] interface due to the totally opaque type} *)
@@ -2457,8 +2457,8 @@ module Formula = struct
            ; tableau_occurrences
            ; term_eqs_occurrences
            ; atoms_occurrences
-           ; term_conditions
-           ; term_conditions2 } [@warning "+missing-record-field-pattern"] ) as phi ) =
+           ; raw_atoms_conds
+           ; raw_term_conds } [@warning "+missing-record-field-pattern"] ) as phi ) =
       let is_first = ref true in
       let pp_if condition header pp fmt x =
         let pp_and fmt = if not !is_first then F.fprintf fmt "@;&& " else is_first := false in
@@ -2488,13 +2488,13 @@ module Formula = struct
         fmt intervals ;
       (pp_if (not (Atom.Set.is_empty atoms)) "atoms" (Atom.Set.pp_with_pp_var pp_var)) fmt atoms ;
       (pp_if
-         (not (Atom.Set.is_empty term_conditions))
+         (not (Atom.Set.is_empty raw_atoms_conds))
          "term_conds" (Atom.Set.pp_with_pp_var pp_var) )
-        fmt term_conditions ;
+        fmt raw_atoms_conds ;
       (pp_if
-         (not (Term.Set.is_empty term_conditions2))
+         (not (Term.Set.is_empty raw_term_conds))
          "term_conds2" (Term.Set.pp_with_pp_var pp_var) )
-        fmt term_conditions2 ;
+        fmt raw_term_conds ;
       if Config.debug_level_analysis >= 3 then (
         (pp_if
            (not (Var.Map.is_empty linear_eqs_occurrences))
@@ -2802,7 +2802,7 @@ module Formula = struct
         Atom.fold_variables atom ~init:phi.atoms_occurrences ~f:(fun occurrences v' ->
             AtomMapOccurrences.add v' ~occurs_in:atom occurrences )
       in
-      {phi with term_conditions= Atom.Set.add atom phi.term_conditions; atoms_occurrences}
+      {phi with raw_atoms_conds= Atom.Set.add atom phi.raw_atoms_conds; atoms_occurrences}
 
 
     let rec and_termcond_atoms (phi : t) (atoms : Atom.t list) : t =
@@ -2815,7 +2815,7 @@ module Formula = struct
 
 
     let and_termcond_binop (phi : t) (term : Term.t) : t =
-      {phi with term_conditions2= Term.Set.add term phi.term_conditions2}
+      {phi with raw_term_conds= Term.Set.add term phi.raw_term_conds}
 
 
     let remove_atom_ atom atoms atoms_occurrences =
@@ -2860,13 +2860,13 @@ module Formula = struct
 
     let set_intervals intervals phi = {phi with intervals}
 
-    let get_terminal_conds t = t.term_conditions
+    let get_terminal_conds t = t.raw_atoms_conds
 
-    let get_terminal_terms t = t.term_conditions2
+    let get_terminal_terms t = t.raw_term_conds
 
     let unsafe_mk ~var_eqs ~const_eqs ~type_constraints ~linear_eqs ~term_eqs ~tableau ~intervals
         ~atoms ~linear_eqs_occurrences ~tableau_occurrences ~term_eqs_occurrences ~atoms_occurrences
-        ~term_conditions ~term_conditions2 =
+        ~raw_atoms_conds ~raw_term_conds =
       { var_eqs
       ; const_eqs
       ; type_constraints
@@ -2879,8 +2879,8 @@ module Formula = struct
       ; tableau_occurrences
       ; term_eqs_occurrences
       ; atoms_occurrences
-      ; term_conditions
-      ; term_conditions2 }
+      ; raw_atoms_conds
+      ; raw_term_conds }
 
 
     let join phi1 _phi2 =
@@ -2953,8 +2953,8 @@ module Formula = struct
               term_eqs_v
               (phi.term_eqs, phi.term_eqs_occurrences)
       in
-      let term_conditions = phi.term_conditions in
-      let term_conditions2 = phi.term_conditions2 in
+      let raw_atoms_conds = phi.raw_atoms_conds in
+      let raw_term_conds = phi.raw_term_conds in
       { var_eqs
       ; const_eqs
       ; type_constraints
@@ -2967,8 +2967,8 @@ module Formula = struct
       ; tableau_occurrences
       ; term_eqs_occurrences
       ; atoms_occurrences
-      ; term_conditions
-      ; term_conditions2 }
+      ; raw_atoms_conds
+      ; raw_term_conds }
 
 
     let remove_condition_for_join atom phi_lhs phi_rhs =
@@ -3009,8 +3009,8 @@ module Formula = struct
          ; tableau_occurrences= _
          ; term_eqs_occurrences= _
          ; atoms_occurrences= _
-         ; term_conditions= _
-         ; term_conditions2= _ } [@warning "+missing-record-field-pattern"] ) as phi ) ~init ~f =
+         ; raw_atoms_conds= _
+         ; raw_term_conds= _ } [@warning "+missing-record-field-pattern"] ) as phi ) ~init ~f =
     let init = VarUF.fold_elements var_eqs ~init ~f in
     let init = fold_constant_var_map const_eqs ~init ~f in
     let init = fold_type_constraints_map type_constraints ~init ~f in
@@ -4088,12 +4088,6 @@ let set_is_empty (conds : Atom.Set.t) = Atom.Set.is_empty conds
 
 let termset_is_empty (conds : Term.Set.t) = Term.Set.is_empty conds
 
-let formula_is_empty (var : t) =
-  map_is_empty (extract_path_cond var)
-  && set_is_empty (extract_term_cond var)
-  && termset_is_empty (extract_term_cond2 var)
-
-
 (* End infinite loop detection *)
 
 let pp_with_pp_var pp_var fmt {conditions; phi} =
@@ -4680,7 +4674,7 @@ end = struct
            at this point since they will be reconstructed by callers *)
       ~linear_eqs_occurrences:Var.Map.empty ~tableau_occurrences:Var.Map.empty
       ~term_eqs_occurrences:Var.Map.empty ~atoms_occurrences:Var.Map.empty
-      ~term_conditions:Atom.Set.empty ~term_conditions2:Term.Set.empty
+      ~raw_atoms_conds:Atom.Set.empty ~raw_term_conds:Term.Set.empty
 
 
   let extend_with_restricted_reps_of keep formula =
@@ -4873,7 +4867,7 @@ module DeadVariables = struct
              point since they will be reconstructed by callers *)
         ~linear_eqs_occurrences:Var.Map.empty ~tableau_occurrences:Var.Map.empty
         ~term_eqs_occurrences:Var.Map.empty ~atoms_occurrences:Var.Map.empty
-        ~term_conditions:Atom.Set.empty ~term_conditions2:Term.Set.empty
+        ~raw_atoms_conds:Atom.Set.empty ~raw_term_conds:Term.Set.empty
     in
     let phi = simplify_phi formula.phi in
     let conditions =
@@ -5030,8 +5024,8 @@ let pp_formula_explained pp_var fmt {phi} =
        ; tableau_occurrences= _
        ; term_eqs_occurrences= _
        ; atoms_occurrences= _
-       ; term_conditions= _
-       ; term_conditions2= _ } [@warning "+missing-record-field-pattern"] ) =
+       ; raw_atoms_conds= _
+       ; raw_term_conds= _ } [@warning "+missing-record-field-pattern"] ) =
     phi
   in
   let is_map_non_empty m = not (Var.Map.is_empty m) in

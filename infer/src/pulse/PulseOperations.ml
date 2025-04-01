@@ -395,7 +395,6 @@ let prune pdesc path location ~condition astate =
         (* TODO: eval to value origin and place an Invalidation event in the corresponding value history *)
         let** astate, lhs_op = eval_to_operand path location exp_lhs astate in
         let** astate, rhs_op = eval_to_operand path location exp_rhs astate in
-
         if is_this_equal_to_param_in_constructor pdesc ~negated bop lhs_op rhs_op astate then
           let reason () =
             F.asprintf
@@ -405,7 +404,6 @@ let prune pdesc path location ~condition astate =
               (Procdesc.get_proc_name pdesc)
           in
           Unsat {reason; source= __POS__}
-
         else
           let is_bop_equal =
             match (bop, negated) with Eq, false | Ne, true -> true | _ -> false
@@ -442,7 +440,8 @@ let prune pdesc path location ~condition astate =
                 ValueOrigin.hist vo
           in
           let++ astate =
-            PulseArithmetic.prune_binop ~negated bop ~ifkind:true (to_op lhs_op) (to_op rhs_op) astate
+            PulseArithmetic.prune_binop ~negated bop ~ifkind:true (to_op lhs_op) (to_op rhs_op)
+              astate
           in
           let hist =
             match (to_hist lhs_op, to_hist rhs_op) with
@@ -454,7 +453,6 @@ let prune pdesc path location ~condition astate =
                 ValueHistory.binary_op bop lhs_hist rhs_hist
           in
           (astate, hist)
-
     | UnOp (LNot, exp', _) ->
         prune_aux ~negated:(not negated) exp' astate
     | exp ->

@@ -1,9 +1,9 @@
-(*
+/*
  * Copyright (c) Facebook, Inc. and its affiliates.
-  *
-  * This source code is licensed under the MIT license found in the
-  * LICENSE file in the root directory of this source tree.
- *)
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
 
 // works - OK
 void empty_function_ok() { return; }
@@ -435,8 +435,6 @@ void benchmark_cook06_ok() {
 
 /* pulseinf: works good - no bug */
 // Cook et al. 2006 proves termination with non determinism
-// #include <stdlib.h>
-// int	nondet() { return (rand()); }
 void benchmark_simple_cook06_ok() {
   int x = nondet(), y = nondet(), z = nondet();
   if (y > 0) {

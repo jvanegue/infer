@@ -651,9 +651,9 @@ let add_need_dynamic_type_specialization needs execution_states =
         | ExecutionDomain.ExceptionRaised astate ->
             ExceptionRaised (update_astate astate)
         | ContinueProgram astate ->
-           ContinueProgram (update_astate astate)
+            ContinueProgram (update_astate astate)
         | InfiniteProgram astate ->
-           InfiniteProgram (update_astate astate)
+            InfiniteProgram (update_astate astate)
         | ExitProgram summary ->
             ExitProgram (update_summary summary)
         | AbortProgram summary ->

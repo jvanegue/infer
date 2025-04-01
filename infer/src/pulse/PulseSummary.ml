@@ -92,7 +92,7 @@ let exec_summary_of_post_common ({InterproceduralAnalysis.proc_desc} as analysis
         let r = exec_domain_of_summary summary in
         match r with
         | InfiniteProgram _ ->
-            let curnode = Metadata.get_alert_node in
+            let curnode = Metadata.get_infinite_node in
             let curloc = Procdesc.Node.get_loc (curnode ()) in
             let error = ReportableError {astate; diagnostic= InfiniteError {location= curloc}} in
             PulseReport.report_summary_error analysis_data path (error, summary)

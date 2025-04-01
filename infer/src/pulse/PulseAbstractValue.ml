@@ -30,6 +30,7 @@ let mk_fresh_restricted () =
   DLS.set next_fresh_restricted (v - 1) ;
   v
 
+
 let is_restricted v = v < 0
 
 let is_unrestricted v = v > 0
