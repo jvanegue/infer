@@ -5,8 +5,10 @@
  * LICENSE file in the root directory of this source tree.
  *)
 
-open! IStd
+(** dummy version of [LlvmSledgeFrontend] *)
 
-val capture : string -> In_channel.t -> unit
+module LlvmSledgeFrontend = struct
+  exception Invalid_llvm of string
 
-val capture_llair : string -> Llair.program -> unit
+  let translate ?dump_bitcode:_ _input = assert false
+end
