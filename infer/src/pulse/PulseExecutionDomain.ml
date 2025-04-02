@@ -190,8 +190,8 @@ let back_edge (prev : t list) (next : t list) (num_iters : int) : t list * int =
       | (hd, idx) :: tl -> (
           let cond = extract_pathcond hd in
           let pathcond = Formula.extract_path_cond cond in
-          let termcond = Formula.extract_term_cond cond in
-          let termcond2 = Formula.extract_term_cond2 cond in
+          let termcond = Formula.extract_terminal_atoms cond in
+          let termcond2 = Formula.extract_terminal_terms cond in
           let key = (cfgnode, termcond, pathcond, termcond2) in
           let dl_ws = get_widenstate () in
           match dl_ws with

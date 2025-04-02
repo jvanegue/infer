@@ -92,9 +92,9 @@ type t =
 
 val extract_path_cond : t -> int Atom.Map.t
 
-val extract_term_cond : t -> Atom.Set.t
+val extract_terminal_atoms : t -> Atom.Set.t
 
-val extract_term_cond2 : t -> Term.Set.t
+val extract_terminal_terms : t -> Term.Set.t
 
 val map_is_empty : int Atom.Map.t -> bool
 

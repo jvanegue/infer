@@ -4078,9 +4078,9 @@ let ttrue = {conditions= Atom.Map.empty; phi= Formula.ttrue}
 (* Added for infinite loop detection *)
 let extract_path_cond (var : t) : int Atom.Map.t = var.conditions
 
-let extract_term_cond (var : t) = Formula.get_terminal_conds var.phi
+let extract_terminal_atoms (var : t) = Formula.get_terminal_conds var.phi
 
-let extract_term_cond2 (var : t) = Formula.get_terminal_terms var.phi
+let extract_terminal_terms (var : t) = Formula.get_terminal_terms var.phi
 
 let map_is_empty (conds : int Atom.Map.t) = Atom.Map.is_empty conds
 
