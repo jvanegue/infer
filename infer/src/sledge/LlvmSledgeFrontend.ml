@@ -903,9 +903,9 @@ and xlate_opcode : x -> Llvm.llvalue -> Llvm.Opcode.t -> Inst.t list * Exp.t =
               let llelt =
                 match Llvm.classify_type lltyp with
                 | Pointer ->
-                    (* TODO(jul): i64 is rubbish, need to get the type from
-                       the getelementptr instruction itself if possible *)
-                    Llvm.i64_type x.llcontext
+                    (* TODO(jul): we have no type to put here since llvm has made all pointers
+                       opaque *)
+                    Llvm.array_type lltyp 1
                 | _ ->
                     fail "xlate_opcode %a not a Pointer: %i %a" pp_lltype lltyp i pp_llvalue llv ()
               in
@@ -1864,14 +1864,7 @@ let translate ?dump_bitcode : string -> Llair.program =
   check_datalayout llcontext lldatalayout ;
   let x = {llcontext; lldatalayout} in
   let globals =
-    Llvm.fold_left_globals
-      (fun globals llg ->
-        if
-          Poly.equal (Llvm.linkage llg) Appending
-          && Llvm.(array_length (element_type (type_of llg))) = 0
-        then globals
-        else xlate_global x llg :: globals )
-      [] llmodule
+    Llvm.fold_left_globals (fun globals llg -> xlate_global x llg :: globals) [] llmodule
   in
   let functions =
     Llvm.fold_left_functions
