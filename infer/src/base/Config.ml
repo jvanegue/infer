@@ -373,11 +373,6 @@ let etc_dir = bin_dir ^/ Filename.parent_dir_name ^/ "etc"
 
 let config_dir = bin_dir ^/ Filename.parent_dir_name ^/ "config"
 
-(** Path to the database dump with model summaries *)
-let biabduction_models_sql = lib_dir ^/ "models.sql"
-
-let biabduction_models_jar = lib_dir ^/ "java" ^/ "models.jar"
-
 (** Path to the textual file with Hack models *)
 let default_hack_builtin_models = lib_dir ^/ "hack" ^/ "models.sil"
 
@@ -1552,6 +1547,16 @@ and dump_duplicate_symbols =
     "Dump all symbols with the same name that are defined in more than one file."
 
 
+and dump_llair =
+  CLOpt.mk_bool ~long:"dump-llair"
+    "Output a llair program from the captured file. To be used with the llvm frontend"
+
+
+and dump_llair_text =
+  CLOpt.mk_bool ~long:"dump-llair-text"
+    "Output a llair program in text from the captured file. To be used with the llvm frontend"
+
+
 and dump_textual =
   CLOpt.mk_bool ~long:"dump-textual"
     "Generate a SIL program from the captured target. A $(i,filename.sil) file is generated for \
@@ -2293,7 +2298,10 @@ and print_active_checkers =
     "Print the active checkers before starting the analysis"
 
 
-and print_builtins = CLOpt.mk_bool ~long:"print-builtins" "Print the builtin functions and exit"
+and _print_builtins =
+  CLOpt.mk_bool ~deprecated:["print-builtins"] ~deprecated_no:["no-print-builtins"] ~long:""
+    "DEPRECATED Print the builtin functions and exit"
+
 
 and print_using_diff =
   CLOpt.mk_bool ~long:"print-using-diff" ~default:true
@@ -2577,6 +2585,18 @@ and pulse_model_return_nonnull_list =
   CLOpt.mk_string_list ~long:"pulse-model-return-nonnull-list"
     ~in_help:InferCommand.[(Analyze, manual_pulse)]
     "Regex of methods that should be modelled as returning non-null in Pulse"
+
+
+and pulse_model_return_nullable =
+  CLOpt.mk_string_opt ~long:"pulse-model-return-nullable"
+    ~in_help:InferCommand.[(Analyze, manual_pulse)]
+    "Regex of methods that should be modelled as returning nullable values in Pulse"
+
+
+and pulse_model_return_nullable_list =
+  CLOpt.mk_string_list ~long:"pulse-model-return-nullable-list"
+    ~in_help:InferCommand.[(Analyze, manual_pulse)]
+    "Regex of methods that should be modelled as returning nullable values in Pulse"
 
 
 and pulse_model_return_this =
@@ -4155,6 +4175,10 @@ and dotty_cfg_libs = !dotty_cfg_libs
 
 and dump_duplicate_symbols = !dump_duplicate_symbols
 
+and dump_llair = !dump_llair
+
+and dump_llair_text = !dump_llair_text
+
 and dump_textual = !dump_textual
 
 and dynamic_dispatch_json_file_path = !dynamic_dispatch_json_file_path
@@ -4417,8 +4441,6 @@ and preanalysis_html = !preanalysis_html
 
 and print_active_checkers = !print_active_checkers
 
-and print_builtins = !print_builtins
-
 and print_jbir = !print_jbir
 
 and print_logs = !print_logs
@@ -4533,6 +4555,11 @@ and pulse_model_return_first_arg = Option.map ~f:Str.regexp !pulse_model_return_
 and pulse_model_return_nonnull =
   join_patterns ~pattern_opt:pulse_model_return_nonnull
     ~pattern_list:pulse_model_return_nonnull_list
+
+
+and pulse_model_return_nullable =
+  join_patterns ~pattern_opt:pulse_model_return_nullable
+    ~pattern_list:pulse_model_return_nullable_list
 
 
 and pulse_model_return_this = Option.map ~f:Str.regexp !pulse_model_return_this
@@ -4876,6 +4903,7 @@ and topl_properties =
   let parse topl_file =
     let f ch =
       let lexbuf = Lexing.from_channel ch in
+      Lexing.set_filename lexbuf topl_file ;
       try ToplParser.properties (ToplLexer.token ()) lexbuf
       with ToplParser.Error ->
         let Lexing.{pos_lnum; pos_bol; pos_cnum; _} = Lexing.lexeme_start_p lexbuf in
