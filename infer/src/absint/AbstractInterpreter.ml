@@ -265,7 +265,7 @@ struct
                disjuncts are already deduplicated *)
             if has_geq_disj ~leq ~than:hd into then
               (* [hd] implies one of the states in [into]; skip it
-                    ([(a=>b) => (a\/b <=> b)]) *)
+                 ([(a=>b) => (a\/b <=> b)]) *)
               aux acc n_acc tl
             else aux (hd :: acc) (n_acc + 1) tl
         | _ ->
@@ -330,19 +330,13 @@ struct
         DisjunctiveMetadata.incr_interrupted_loops () ;
         prev )
       else
-        let back_edges (prev : T.DisjDomain.t list) (next : T.DisjDomain.t list) (num_iters : int) :
-            T.DisjDomain.t list * int =
-          T.back_edge prev next num_iters
-        in
-        let fp = fst prev in
-        let fn = fst next in
-        let dbe, _ = back_edges fp fn num_iters in
-        let hasnew = not (phys_equal (fst prev) dbe) in
+        let back_edges (prev : T.DisjDomain.t list) (next : T.DisjDomain.t list) (num_iters : int) : T.DisjDomain.t list * int =
+          T.back_edge prev next num_iters in
+        let newstates, _ = back_edges (fst prev) (fst next) num_iters in
+        let hasnew = not (phys_equal (fst prev) newstates) in
         let post_disj, _, dropped =
-          if hasnew then
-            join_up_to_with_leq ~limit:disjunct_limit T.DisjDomain.leq ~into:dbe (fst next)
-          else
-            join_up_to_with_leq ~limit:disjunct_limit T.DisjDomain.leq ~into:(fst prev) (fst next)
+          let instates = if hasnew then newstates else (fst prev) in
+          join_up_to_with_leq ~limit:disjunct_limit T.DisjDomain.leq ~into:instates (fst next)
         in
         let next_non_disj = T.NonDisjDomain.widen ~prev:(snd prev) ~next:(snd next) ~num_iters in
         if leq ~lhs:(post_disj, next_non_disj) ~rhs:prev then prev

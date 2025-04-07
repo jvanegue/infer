@@ -32,7 +32,7 @@ loop:
   1 disjuncts:
 #0: two_branch0.0
 Non-disjunctive state: ⊥
-CFG Metadata: dropped_disjuncts= 3; interrupted_loops= 0
+CFG Metadata: dropped_disjuncts= 5; interrupted_loops= 0
 
 
   No issues found  
@@ -80,7 +80,7 @@ loop:
 #2: two_branch0.0.two_branch1.0
 #3: two_branch0.0.two_branch1.1
 Non-disjunctive state: ⊥
-CFG Metadata: dropped_disjuncts= 11; interrupted_loops= 0
+CFG Metadata: dropped_disjuncts= 10; interrupted_loops= 0
 
 
   No issues found  
@@ -175,7 +175,7 @@ loop:
   1 disjuncts:
 #0: two_branch0.0
 Non-disjunctive state: ⊥
-CFG Metadata: dropped_disjuncts= 3; interrupted_loops= 0
+CFG Metadata: dropped_disjuncts= 4; interrupted_loops= 0
 
 
   No issues found  
@@ -223,7 +223,7 @@ loop:
 #2: two_branch0.0.two_branch1.0
 #3: two_branch0.0.two_branch1.1
 Non-disjunctive state: ⊥
-CFG Metadata: dropped_disjuncts= 9; interrupted_loops= 0
+CFG Metadata: dropped_disjuncts= 8; interrupted_loops= 0
 
 
   No issues found  
