@@ -483,11 +483,27 @@ let build_tuple args : model =
   assign_ret tuple
 
 
-let build_class closure _name _args : model =
+let init_method_name = "__init__"
+
+let init_method_name_suffix = "::" ^ init_method_name
+
+let super_attribute_name = "__infer_single_super"
+
+let class_companion_attribute_name = "__infer_class_companion"
+
+let build_class closure _name base_classes : model =
   let open DSL.Syntax in
   start_model
   @@ fun () ->
-  let* class_ = Dict.make [] [] ~const_strings_only:true in
+  (* Note: we only deal with single inheritance for now *)
+  let super_keys, super_values =
+    match base_classes with
+    | [] ->
+        ([], [])
+    | base_class :: _ignored_for_now ->
+        ([super_attribute_name], [base_class])
+  in
+  let* class_ = Dict.make super_keys super_values ~const_strings_only:true in
   let gen_closure_args _ = ret [class_] in
   let* _ = apply_python_closure closure gen_closure_args in
   assign_ret class_
@@ -516,21 +532,16 @@ let call_closure_dsl ~closure ~arg_names:_ ~args : DSL.aval DSL.model_monad =
   apply_python_closure closure gen_closure_args
 
 
-let call_dsl ~callable ~arg_names ~args =
+let try_run_constructor ~class_companion ~self args =
   let open DSL.Syntax in
-  let* opt_static_type = get_static_type callable in
-  match opt_static_type with
-  | Some (Typ.PythonClass (ClassCompanion {module_name; class_name})) ->
-      let instance_type = Typ.PythonClass (ClassInstance {module_name; class_name}) in
-      L.d_printfln ~color:Orange "calling a constructor for type %a" Typ.Name.pp instance_type ;
-      let* new_instance = constructor ~deref:false instance_type [] in
-      let* init_closure = Dict.get_str_key ~propagate_static_type:true callable "__init__" in
-      let args = new_instance :: args in
-      let* _ = call_closure_dsl ~closure:init_closure ~arg_names:[] ~args in
-      ret new_instance
-  | _ ->
-      L.d_printfln ~color:Orange "calling closure %a" AbstractValue.pp (fst callable) ;
-      call_closure_dsl ~closure:callable ~arg_names ~args
+  let* init_closure =
+    Dict.get_str_key ~propagate_static_type:true class_companion init_method_name
+  in
+  let* opt = get_dynamic_type ~ask_specialization:true init_closure in
+  if Option.is_some opt then
+    let args = self :: args in
+    call_closure_dsl ~closure:init_closure ~arg_names:[] ~args |> ignore
+  else ret ()
 
 
 let await_awaitable arg : unit DSL.model_monad =
@@ -666,39 +677,6 @@ let try_catch_lib_model_using_static_type ~default closure args =
       default ()
 
 
-let call callable arg_names args : model =
-  (* TODO: take into account named args *)
-  let open DSL.Syntax in
-  start_model
-  @@ fun () ->
-  let* opt_dynamic_type_data = get_dynamic_type ~ask_specialization:true callable in
-  let* res =
-    match opt_dynamic_type_data with
-    | Some {Formula.typ= {Typ.desc= Tstruct (PythonClass (BuiltinClosure builtin))}} -> (
-        let* opt_special_call = modelled_python_call (PyBuiltin builtin) args in
-        match opt_special_call with
-        | None ->
-            L.die InternalError "builtin %s was not successfully recognized"
-              (PythonClassName.to_string (BuiltinClosure builtin))
-        | Some res ->
-            L.d_printfln "catching reserved builtin call %s"
-              (PythonClassName.to_string (BuiltinClosure builtin)) ;
-            ret res )
-    | Some {Formula.typ= {Typ.desc= Tstruct type_name}} -> (
-        let* opt_catched_lib_model_res = try_catch_lib_model type_name args in
-        match opt_catched_lib_model_res with
-        | Some res ->
-            L.d_printfln "catching reserved lib call using dynamic type %a" Typ.Name.pp type_name ;
-            ret res
-        | None ->
-            call_dsl ~callable ~arg_names ~args )
-    | _ ->
-        let default () = call_dsl ~callable ~arg_names ~args in
-        try_catch_lib_model_using_static_type ~default callable args
-  in
-  assign_ret res
-
-
 let call_function_ex closure tuple dict : model =
   (* TODO: take into account named args *)
   let open DSL.Syntax in
@@ -731,8 +709,8 @@ let gen_start_coroutine : model =
 
 let is_module_captured module_name =
   let function_name = "__module_body__" in
-  let class_name = PythonClassName.Filename module_name in
-  let proc_name = Procname.make_python ~class_name:(Some class_name) ~function_name in
+  let module_name = PythonClassName.Filename module_name in
+  let proc_name = Procname.make_python ~module_name ~function_name in
   IRAttributes.load proc_name |> Option.map ~f:(fun _ -> proc_name)
 
 
@@ -744,7 +722,7 @@ let lookup_module module_name =
       ret (module_, Some proc_name)
   | None -> (
       (* it is not a capture module name *)
-      let module_name_init = module_name ^ "::__init__" in
+      let module_name_init = module_name ^ init_method_name_suffix in
       match is_module_captured module_name_init with
       | None ->
           (* neither it is a captured package name *)
@@ -758,14 +736,54 @@ let lookup_module module_name =
           ret (module_, Some proc_name) )
 
 
-let initialize_class_companion ~module_name ~class_name class_companion_object =
+let get_supers_class_names ~module_name ~class_name =
+  let open DSL.Syntax in
+  let type_name : Typ.name = PythonClass (ClassCompanion {module_name; class_name}) in
+  let* supers = tenv_get_supers type_name in
+  List.filter_map supers ~f:(function
+    | Typ.PythonClass (ClassCompanion {class_name}) ->
+        Some class_name
+    | _ ->
+        None )
+  |> ret
+
+
+let initialize_class_companion_and_supers ~module_name ~class_name class_companion_object =
   let open DSL.Syntax in
   let* module_, _ = lookup_module module_name in
-  let module_tname = PythonClassName.Filename module_name in
-  let class_initializer =
-    Procname.make_python ~class_name:(Some module_tname) ~function_name:class_name
+  let call_class_initializer class_name class_companion_object =
+    let module_name = PythonClassName.Filename module_name in
+    let class_initializer = Procname.make_python ~module_name ~function_name:class_name in
+    python_call class_initializer [("globals", module_); ("locals", class_companion_object)]
+    |> ignore
   in
-  python_call class_initializer [("globals", module_); ("locals", class_companion_object)] |> ignore
+  let seen, marked_as_seen =
+    let set = ref IString.Set.empty in
+    let seen name = IString.Set.mem name !set in
+    let marked_as_seen name = set := IString.Set.add name !set in
+    (seen, marked_as_seen)
+  in
+  let rec initialize class_name class_companion_object =
+    if seen class_name then (* should not happen but you can never be too cautious *)
+      ret ()
+    else (
+      marked_as_seen class_name ;
+      let* supers = get_supers_class_names ~module_name ~class_name in
+      if List.is_empty supers then (
+        L.d_printfln ~color:Orange "initializing class %s" class_name ;
+        call_class_initializer class_name class_companion_object )
+      else (
+        L.d_printfln ~color:Orange "initializing class %s and its super classe(s) %a" class_name
+          (Pp.comma_seq F.pp_print_string) supers ;
+        let single_super_class_name = List.hd_exn supers in
+        (* we dont deal with multi-inheritance yet *)
+        let* parent_class_companion =
+          Dict.get_str_key ~propagate_static_type:true class_companion_object super_attribute_name
+        in
+        let* () = initialize single_super_class_name parent_class_companion in
+        call_class_initializer class_name class_companion_object ) )
+  in
+  initialize class_name class_companion_object
 
 
 let get_class_companion aval =
@@ -782,8 +800,11 @@ let initialize_if_class_companion value : unit DSL.model_monad =
   let open DSL.Syntax in
   let* opt_class_companion = get_class_companion value in
   option_iter opt_class_companion ~f:(fun (module_name, class_name) ->
-      L.d_printfln ~color:Orange "initializing companion class %s" class_name ;
-      initialize_class_companion ~module_name ~class_name value )
+      let* already_initialized = Dict.contains_str_key value "__name__" in
+      if ThreeValuedLogic.is_true already_initialized then ret ()
+      else (
+        L.d_printfln ~color:Orange "initializing class companion %s" class_name ;
+        initialize_class_companion_and_supers ~module_name ~class_name value ) )
 
 
 let get_class_instance aval =
@@ -797,6 +818,42 @@ let get_class_instance aval =
       ret (Some (module_name, class_name))
   | _ ->
       ret None
+
+
+type attribute_search_result =
+  | Found of {result: DSL.aval; class_object: DSL.aval}
+  | NotFoundMayBeMissing
+(* TODO add NotFoundMustBeMissing *)
+
+let rec get_attr_class_object_dsl class_object attr : attribute_search_result DSL.model_monad =
+  let open DSL.Syntax in
+  let* key_in_current_class = Dict.contains_str_key class_object attr in
+  if ThreeValuedLogic.is_true key_in_current_class then
+    let* result = Dict.get_str_key ~propagate_static_type:true class_object attr in
+    ret (Found {result; class_object})
+  else
+    let* must_have_super =
+      is_known_field class_object (Fieldname.make dict_tname super_attribute_name)
+    in
+    if must_have_super then
+      let* super = Dict.get_str_key ~propagate_static_type:true class_object super_attribute_name in
+      get_attr_class_object_dsl super attr
+    else
+      ret NotFoundMayBeMissing (* refine the logic to return NotFoundMustBeMissing when possible *)
+
+
+let lookup_class_companion ~module_name ~class_name obj : DSL.aval DSL.model_monad =
+  let open DSL.Syntax in
+  let* has_companion_class = Dict.contains_str_key obj class_companion_attribute_name in
+  if ThreeValuedLogic.is_true has_companion_class then
+    Dict.get_str_key ~propagate_static_type:true obj class_companion_attribute_name
+  else
+    (* for now, we don't try to set the [class_companion_attribute_name] field in this case *)
+    let* class_companion_object = Dict.make ~const_strings_only:true [] [] in
+    let* () =
+      initialize_class_companion_and_supers ~module_name ~class_name class_companion_object
+    in
+    ret class_companion_object
 
 
 let get_attr_dsl obj attr : DSL.aval DSL.model_monad =
@@ -814,19 +871,21 @@ let get_attr_dsl obj attr : DSL.aval DSL.model_monad =
              be to mark this case as unreachable. We may come back later if specialization gives us
              some dynamic type for [obj]. *)
           Dict.get_str_key ~propagate_static_type:true obj attr
-      | Some (module_name, class_name) ->
-          let* class_companion_object = Dict.make ~const_strings_only:true [] [] in
-          let* () = initialize_class_companion ~module_name ~class_name class_companion_object in
+      | Some (module_name, class_name) -> (
+          let* class_companion_object = lookup_class_companion ~module_name ~class_name obj in
           L.d_printfln ~color:Orange
             "checking if the attribute %s belongs to the companion class %s.%s (in value %a)...@;"
             attr module_name class_name AbstractValue.pp (fst class_companion_object) ;
-          let* key_in_companion = Dict.contains_str_key class_companion_object attr in
-          if ThreeValuedLogic.is_true key_in_companion then
-            Dict.get_str_key ~propagate_static_type:true class_companion_object attr
-          else
-            (* for now, we assume in such a situation that the attribute is in the instance. It would
-               be great to 'record' such an assumption to make sure the caller context agrees *)
-            Dict.get_str_key ~propagate_static_type:true obj attr
+          let* try_get_attribute_from_companion =
+            get_attr_class_object_dsl class_companion_object attr
+          in
+          match try_get_attribute_from_companion with
+          | Found {result; class_object} ->
+              L.d_printfln ~color:Orange "attribute was find in %a@;" AbstractValue.pp
+                (fst class_object) ;
+              ret result
+          | _ ->
+              Dict.get_str_key ~propagate_static_type:true obj attr )
   in
   let* () = initialize_if_class_companion res in
   ret res
@@ -837,6 +896,56 @@ let get_attr obj attr : model =
   start_model
   @@ fun () ->
   let* res = get_attr_dsl obj attr in
+  assign_ret res
+
+
+let call_dsl ~callable ~arg_names ~args =
+  let open DSL.Syntax in
+  let* opt_static_type = get_static_type callable in
+  match opt_static_type with
+  | Some (Typ.PythonClass (ClassCompanion {module_name; class_name})) ->
+      let instance_type = Typ.PythonClass (ClassInstance {module_name; class_name}) in
+      L.d_printfln ~color:Orange "calling a constructor for type %a" Typ.Name.pp instance_type ;
+      let* () = initialize_if_class_companion callable in
+      let* self = constructor ~deref:false instance_type [] in
+      let* () = Dict.set_str_key self class_companion_attribute_name callable in
+      let* () = try_run_constructor ~class_companion:callable ~self args in
+      ret self
+  | _ ->
+      L.d_printfln ~color:Orange "calling closure %a" AbstractValue.pp (fst callable) ;
+      call_closure_dsl ~closure:callable ~arg_names ~args
+
+
+let call callable arg_names args : model =
+  (* TODO: take into account named args *)
+  let open DSL.Syntax in
+  start_model
+  @@ fun () ->
+  let* opt_dynamic_type_data = get_dynamic_type ~ask_specialization:true callable in
+  let* res =
+    match opt_dynamic_type_data with
+    | Some {Formula.typ= {Typ.desc= Tstruct (PythonClass (BuiltinClosure builtin))}} -> (
+        let* opt_special_call = modelled_python_call (PyBuiltin builtin) args in
+        match opt_special_call with
+        | None ->
+            L.die InternalError "builtin %s was not successfully recognized"
+              (PythonClassName.to_string (BuiltinClosure builtin))
+        | Some res ->
+            L.d_printfln "catching reserved builtin call %s"
+              (PythonClassName.to_string (BuiltinClosure builtin)) ;
+            ret res )
+    | Some {Formula.typ= {Typ.desc= Tstruct type_name}} -> (
+        let* opt_catched_lib_model_res = try_catch_lib_model type_name args in
+        match opt_catched_lib_model_res with
+        | Some res ->
+            L.d_printfln "catching reserved lib call using dynamic type %a" Typ.Name.pp type_name ;
+            ret res
+        | None ->
+            call_dsl ~callable ~arg_names ~args )
+    | _ ->
+        let default () = call_dsl ~callable ~arg_names ~args in
+        try_catch_lib_model_using_static_type ~default callable args
+  in
   assign_ret res
 
 
@@ -890,7 +999,7 @@ let is_package aval : string option DSL.model_monad =
   ret
     ( match opt_dynamic_type_data with
     | Some {Formula.typ= {Typ.desc= Tstruct (PythonClass (Filename name))}}
-      when String.is_suffix name ~suffix:"::__init__" ->
+      when String.is_suffix name ~suffix:init_method_name_suffix ->
         Some name
     | _ ->
         None )

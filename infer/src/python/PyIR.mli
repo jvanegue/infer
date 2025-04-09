@@ -38,6 +38,8 @@ module SSA : sig
   val pp : Format.formatter -> t -> unit
 
   module Hashtbl : Stdlib.Hashtbl.S with type key = t
+
+  module Map : Stdlib.Map.S with type key = t
 end
 
 module Ident : sig
@@ -274,6 +276,8 @@ end
 
 module Module : sig
   type t = {name: Ident.t; toplevel: CFG.t; functions: CFG.t QualName.Map.t}
+
+  val pp : Format.formatter -> t -> unit [@@warning "-unused-value-declaration"]
 end
 
 val mk : debug:bool -> path_prefix:string option -> FFI.Code.t -> (Module.t, Error.t) result

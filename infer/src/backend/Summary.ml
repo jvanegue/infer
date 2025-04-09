@@ -12,34 +12,13 @@ module L = Logging
 module BStats = Stats
 
 module Stats = struct
-  type t =
-    { failure_kind: Exception.failure_kind option
-          (** what type of failure stopped the analysis (if any) *)
-    ; symops: int  (** Number of SymOp's throughout the whole analysis of the function *)
-    ; mutable nodes_visited: IInt.Set.t  (** Nodes visited *) }
+  type t = {mutable nodes_visited: IInt.Set.t  (** Nodes visited *)}
 
-  let empty = {failure_kind= None; symops= 0; nodes_visited= IInt.Set.empty}
+  let empty = {nodes_visited= IInt.Set.empty}
 
   let is_visited stats node_id = IInt.Set.mem node_id stats.nodes_visited
 
   let add_visited stats node_id = stats.nodes_visited <- IInt.Set.add node_id stats.nodes_visited
-
-  let update ?(add_symops = 0) ?failure_kind stats =
-    let symops = stats.symops + add_symops in
-    let failure_kind = match failure_kind with None -> stats.failure_kind | some -> some in
-    {stats with symops; failure_kind}
-
-
-  let pp_failure_kind_opt fmt failure_kind_opt =
-    match failure_kind_opt with
-    | Some failure_kind ->
-        Exception.pp_failure_kind fmt failure_kind
-    | None ->
-        F.pp_print_string fmt "NONE"
-
-
-  let pp fmt {failure_kind; symops} =
-    F.fprintf fmt "FAILURE:%a SYMOPS:%d@\n" pp_failure_kind_opt failure_kind symops
 end
 
 type t =
@@ -69,17 +48,16 @@ let pp_signature fmt {proc_name} =
 
 let pp_no_stats_specs fmt summary = F.fprintf fmt "%a@\n" pp_signature summary
 
-let pp_text fmt ({proc_name; err_log; payloads; stats; dependencies} as summary) =
+let pp_text fmt ({proc_name; err_log; payloads; dependencies} as summary) =
   pp_no_stats_specs fmt summary ;
-  F.fprintf fmt "%a@\n%a%a%a" pp_errlog err_log Stats.pp stats (Payloads.pp Pp.text proc_name)
-    payloads Dependencies.pp dependencies
+  F.fprintf fmt "%a@\n%a%a" pp_errlog err_log (Payloads.pp Pp.text proc_name) payloads
+    Dependencies.pp dependencies
 
 
-let pp_html source fmt ({proc_name; err_log; payloads; stats} as summary) =
+let pp_html source fmt ({proc_name; err_log; payloads} as summary) =
   let pp_escaped pp fmt x = F.fprintf fmt "%s" (Escape.escape_xml (F.asprintf "%a" pp x)) in
   F.pp_force_newline fmt () ;
   Pp.html_with_color Black (pp_escaped pp_no_stats_specs) fmt summary ;
-  F.fprintf fmt "<br />%a<br />@\n" Stats.pp stats ;
   Errlog.pp_html source [] fmt err_log ;
   Io_infer.Html.pp_hline fmt () ;
   F.fprintf fmt "<button type='button' onclick='toggleDetailsBlock()'>Toggle details</button>" ;
@@ -202,19 +180,17 @@ module OnDisk = struct
     (clear_cache, remove_from_cache, add, find_opt, set_lru_limit)
 
 
-  let spec_of_procname, spec_of_model =
-    let mk_lazy_load_stmt table =
+  let spec_of_procname =
+    let lazy_load_statement =
       Database.register_statement AnalysisDatabase
-        "SELECT report_summary, summary_metadata FROM %s WHERE proc_uid = :k"
-        (Database.string_of_analysis_table table)
+        "SELECT report_summary, summary_metadata FROM specs WHERE proc_uid = :k"
     in
-    let mk_eager_load_stmt table =
+    let eager_load_statement =
       Database.register_statement AnalysisDatabase
-        "SELECT report_summary, summary_metadata, %s FROM %s WHERE proc_uid = :k"
+        "SELECT report_summary, summary_metadata, %s FROM specs WHERE proc_uid = :k"
         (F.asprintf "%a" (Pp.seq ~sep:", " F.pp_print_string) PayloadId.database_fields)
-        (Database.string_of_analysis_table table)
     in
-    let load_spec ~lazy_payloads ~load_statement table proc_name =
+    let load_spec ~lazy_payloads ~load_statement proc_name =
       Database.with_registered_statement load_statement ~f:(fun db load_stmt ->
           let proc_uid = Procname.to_unique_id proc_name in
           Sqlite3.bind load_stmt 1 (Sqlite3.Data.TEXT proc_uid)
@@ -224,38 +200,22 @@ module OnDisk = struct
               let report_summary = Sqlite3.column stmt 0 |> ReportSummary.SQLite.deserialize in
               let summary_metadata = Sqlite3.column stmt 1 |> SummaryMetadata.SQLite.deserialize in
               let payloads =
-                if lazy_payloads then Payloads.SQLite.lazy_load table ~proc_uid
+                if lazy_payloads then Payloads.SQLite.lazy_load ~proc_uid
                 else Payloads.SQLite.eager_load ~first_column:2 stmt
               in
               mk_full_summary payloads report_summary summary_metadata ) )
     in
-    let mk_load_spec (table : Database.analysis_table) =
-      let is_specs_table = match table with Specs -> true | BiabductionModelsSpecs -> false in
-      let lazy_load_statement = mk_lazy_load_stmt table in
-      let eager_load_statement = mk_eager_load_stmt table in
-      fun ~lazy_payloads proc_name ->
-        if is_specs_table then BStats.incr_summary_file_try_load () ;
-        let load_statement = if lazy_payloads then lazy_load_statement else eager_load_statement in
-        let opt = load_spec ~lazy_payloads ~load_statement table proc_name in
-        if is_specs_table && Option.is_some opt then BStats.incr_summary_read_from_disk () ;
-        opt
-    in
-    let spec_of_procname = mk_load_spec Specs in
-    let spec_of_model = mk_load_spec BiabductionModelsSpecs in
-    (spec_of_procname, spec_of_model)
+    fun ~lazy_payloads proc_name ->
+      BStats.incr_summary_file_try_load () ;
+      let load_statement = if lazy_payloads then lazy_load_statement else eager_load_statement in
+      let opt = load_spec ~lazy_payloads ~load_statement proc_name in
+      if Option.is_some opt then BStats.incr_summary_read_from_disk () ;
+      opt
 
 
   (** Load procedure summary for the given procedure name and update spec table *)
   let load_summary_to_spec_table ~lazy_payloads analysis_req proc_name =
-    let summ_opt =
-      match spec_of_procname ~lazy_payloads proc_name with
-      | None when (not Config.multicore) && BiabductionModels.mem proc_name ->
-          (* most of the time we don't run biabduction and it's the only analysis with non-NULL
-             specs in these models, so load lazily *)
-          spec_of_model ~lazy_payloads:true proc_name
-      | summ_opt ->
-          summ_opt
-    in
+    let summ_opt = spec_of_procname ~lazy_payloads proc_name in
     Option.iter ~f:(add_to_cache proc_name analysis_req) summ_opt ;
     summ_opt
 
@@ -345,7 +305,7 @@ module OnDisk = struct
              let proc_uid = Sqlite3.column_text stmt 0 in
              let report_summary = Sqlite3.column stmt 2 |> ReportSummary.SQLite.deserialize in
              let summary_metadata = Sqlite3.column stmt 3 |> SummaryMetadata.SQLite.deserialize in
-             let payloads = Payloads.SQLite.lazy_load Specs ~proc_uid in
+             let payloads = Payloads.SQLite.lazy_load ~proc_uid in
              let spec = mk_full_summary payloads report_summary summary_metadata in
              f spec )
 

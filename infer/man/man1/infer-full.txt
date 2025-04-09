@@ -137,30 +137,6 @@ OPTIONS
            --no-annotation-reachability-report-source-and-sink)
            See also infer-analyze(1).
 
-       --biabduction
-           Activates: biabduction checker: This analysis deals with a range
-           of issues, many linked to memory safety.
-           
-           DEPRECATED: This has been replaced by Pulse and will be removed
-           in the next release.
-            (Conversely: --no-biabduction)
-           See also infer-analyze(1).
-
-       --biabduction-only
-           Activates: Enable biabduction and disable all other checkers
-           (Conversely: --no-biabduction-only)
-           See also infer-analyze(1).
-
-       --biabduction-unsafe-malloc
-           Activates: Assume that malloc(3) never returns null. (Conversely:
-           --no-biabduction-unsafe-malloc)
-           See also infer-analyze(1).
-
-       --biabduction-write-dotty
-           Activates: Produce dotty files for specs and retain cycles reports
-           in infer-out/captured. (Conversely: --no-biabduction-write-dotty)
-           See also infer-analyze(1).
-
        --bitcode-capture
            Activates: [EXPERIMENTAL] Use llvm frontend to capture files
            compiled with clang (Conversely: --no-bitcode-capture)
@@ -564,12 +540,6 @@ OPTIONS
            Available issue types are as follows:
              
            ARBITRARY_CODE_EXECUTION_UNDER_LOCK (enabled by default),
-             ARRAY_OUT_OF_BOUNDS_L1 (disabled by default),
-             ARRAY_OUT_OF_BOUNDS_L2 (disabled by default),
-             ARRAY_OUT_OF_BOUNDS_L3 (disabled by default),
-             Abduction_case_not_implemented (enabled by default),
-             Array_of_pointsto (enabled by default),
-             Assert_failure (enabled by default),
              BAD_ARG (enabled by default),
              BAD_ARG_LATENT (disabled by default),
              BAD_GENERATOR (enabled by default),
@@ -582,9 +552,6 @@ OPTIONS
              BAD_RECORD_LATENT (disabled by default),
              BAD_RETURN (enabled by default),
              BAD_RETURN_LATENT (disabled by default),
-             BIABDUCTION_ANALYSIS_STOPS (disabled by default),
-             BIABDUCTION_MEMORY_LEAK (disabled by default),
-             BIABDUCTION_RETAIN_CYCLE (enabled by default),
              BLOCK_PARAMETER_NOT_NULL_CHECKED (enabled by default),
              BUFFER_OVERRUN_L1 (enabled by default),
              BUFFER_OVERRUN_L2 (enabled by default),
@@ -593,14 +560,12 @@ OPTIONS
              BUFFER_OVERRUN_L5 (disabled by default),
              BUFFER_OVERRUN_S2 (enabled by default),
              BUFFER_OVERRUN_U5 (disabled by default),
-             Bad_footprint (enabled by default),
              CAPTURED_STRONG_SELF (enabled by default),
              CHECKERS_ALLOCATES_MEMORY (enabled by default),
              CHECKERS_ANNOTATION_REACHABILITY_ERROR (enabled by default),
              CHECKERS_CALLS_EXPENSIVE_METHOD (enabled by default),
              CHECKERS_EXPENSIVE_OVERRIDES_UNANNOTATED (enabled by default),
              CHECKERS_FRAGMENT_RETAINS_VIEW (enabled by default),
-             CLASS_CAST_EXCEPTION (disabled by default),
              COMPARED_TO_NULL_AND_DEREFERENCED (disabled by default),
              CONDITION_ALWAYS_FALSE (disabled by default),
              CONDITION_ALWAYS_TRUE (disabled by default),
@@ -611,22 +576,16 @@ OPTIONS
              CONSTANT_ADDRESS_DEREFERENCE_LATENT (disabled by default),
              CXX_REF_CAPTURED_IN_BLOCK (enabled by default),
              CXX_STRING_CAPTURED_IN_BLOCK (disabled by default),
-             Cannot_star (enabled by default),
-             DANGLING_POINTER_DEREFERENCE (disabled by default),
-             DANGLING_POINTER_DEREFERENCE_MAYBE (disabled by default),
              DATA_FLOW_TO_SINK (disabled by default),
              DEADLOCK (enabled by default),
              DEAD_STORE (enabled by default),
-             DIVIDE_BY_ZERO (disabled by default),
              DO_NOT_REPORT (enabled by default),
-             EMPTY_VECTOR_ACCESS (enabled by default),
              EXECUTION_TIME_COMPLEXITY_INCREASE (enabled by default),
              EXECUTION_TIME_COMPLEXITY_INCREASE_UI_THREAD (enabled by
            default),
              EXECUTION_TIME_UNREACHABLE_AT_EXIT (disabled by default),
              EXPENSIVE_EXECUTION_TIME (disabled by default),
              EXPENSIVE_LOOP_INVARIANT_CALL (enabled by default),
-             Failure_exe (enabled by default),
              GUARDEDBY_VIOLATION (enabled by default),
              IMPURE_FUNCTION (enabled by default),
              INEFFICIENT_KEYSET_ITERATOR (enabled by default),
@@ -637,7 +596,6 @@ OPTIONS
              INFERBO_ALLOC_MAY_BE_NEGATIVE (enabled by default),
              INFINITE_EXECUTION_TIME (disabled by default),
              INFINITE_RECURSION (disabled by default),
-             INHERENTLY_DANGEROUS_FUNCTION (enabled by default),
              INTEGER_OVERFLOW_L1 (enabled by default),
              INTEGER_OVERFLOW_L2 (enabled by default),
              INTEGER_OVERFLOW_L5 (disabled by default),
@@ -646,15 +604,11 @@ OPTIONS
              INVALID_SIL (enabled by default),
              INVARIANT_CALL (disabled by default),
              IPC_ON_UI_THREAD (enabled by default),
-             Internal_error (enabled by default),
              LAB_RESOURCE_LEAK (enabled by default),
              LINEAGE_FLOW (enabled by default),
              LOCKLESS_VIOLATION (enabled by default),
              LOCK_CONSISTENCY_VIOLATION (enabled by default),
              LOCK_ON_UI_THREAD (disabled by default),
-             Leak_after_array_abstraction (enabled by default),
-             Leak_in_footprint (enabled by default),
-             Leak_unknown_origin (disabled by default),
              MEMORY_LEAK_C (enabled by default),
              MEMORY_LEAK_CPP (disabled by default),
              MISSING_REQUIRED_PROP (enabled by default),
@@ -662,7 +616,6 @@ OPTIONS
              MODIFIES_IMMUTABLE (enabled by default),
              MULTIPLE_WEAKSELF (enabled by default),
              MUTUAL_RECURSION_CYCLE (disabled by default),
-             Missing_fld (enabled by default),
              NIL_BLOCK_CALL (enabled by default),
              NIL_BLOCK_CALL_LATENT (disabled by default),
              NIL_INSERTION_INTO_COLLECTION (enabled by default),
@@ -689,12 +642,8 @@ OPTIONS
              NULLPTR_DEREFERENCE_LATENT (disabled by default),
              NULL_ARGUMENT (enabled by default),
              NULL_ARGUMENT_LATENT (disabled by default),
-             NULL_DEREFERENCE (enabled by default),
              OPTIONAL_EMPTY_ACCESS (enabled by default),
              OPTIONAL_EMPTY_ACCESS_LATENT (disabled by default),
-             PRECONDITION_NOT_FOUND (enabled by default),
-             PRECONDITION_NOT_MET (enabled by default),
-             PREMATURE_NIL_TERMINATION_ARGUMENT (enabled by default),
              PULSE_ASSERTION_ERROR (disabled by default),
              PULSE_CANNOT_INSTANTIATE_ABSTRACT_CLASS (disabled by default),
              PULSE_CONST_REFABLE (enabled by default),
@@ -723,20 +672,17 @@ OPTIONS
              PULSE_UNNECESSARY_COPY_THRIFT_ASSIGNMENT (enabled by default),
              PURE_FUNCTION (enabled by default),
              REGEX_OP_ON_UI_THREAD (enabled by default),
-             RESOURCE_LEAK (enabled by default),
              RETAIN_CYCLE (enabled by default),
              RETAIN_CYCLE_NO_WEAK_INFO (disabled by default),
              SCOPE_LEAKAGE (enabled by default),
              SELF_IN_BLOCK_PASSED_TO_INIT (enabled by default),
              SENSITIVE_DATA_FLOW (disabled by default),
-             SKIP_FUNCTION (disabled by default),
              STACK_VARIABLE_ADDRESS_ESCAPE (enabled by default),
              STARVATION (enabled by default),
              STATIC_CONSTRUCTOR_STALL (disabled by default),
              STATIC_INITIALIZATION_ORDER_FIASCO (enabled by default),
              STRICT_MODE_VIOLATION (enabled by default),
              STRONG_SELF_NOT_CHECKED (enabled by default),
-             Symexec_memory_error (enabled by default),
              TAINT_ERROR (enabled by default),
              THREAD_SAFETY_VIOLATION (enabled by default),
              TOPL_ERROR (enabled by default),
@@ -750,8 +696,7 @@ OPTIONS
              USE_AFTER_LIFETIME_LATENT (disabled by default),
              VECTOR_INVALIDATION (enabled by default),
              VECTOR_INVALIDATION_LATENT (disabled by default),
-             WEAK_SELF_IN_NO_ESCAPE_BLOCK (enabled by default),
-             Wrong_argument_number (enabled by default).
+             WEAK_SELF_IN_NO_ESCAPE_BLOCK (enabled by default).
            
            See also infer-report(1).
 
@@ -908,8 +853,8 @@ OPTIONS
            infer-reportdiff(1), and infer-run(1).
 
        --help-checker +checker-id
-           Show information about a checker, for example biabduction. To see
-           the list of all checkers, see --list-checkers.
+           Show information about a checker, for example pulse. To see the
+           list of all checkers, see --list-checkers.
            See also infer-help(1).
 
        --help-format { auto | groff | pager | plain }
@@ -2296,9 +2241,8 @@ OPTIONS
            See also infer-analyze(1).
 
        --timeout float
-           Time after which any checker (except biabduction) should give up
-           analysing the current function or method, in seconds. Not
-           implemented for multicore mode
+           Time after which any checker should give up analysing the current
+           function or method, in seconds. Not implemented for multicore mode
            See also infer-analyze(1) and infer-run(1).
 
        --top-longest-proc-duration-size int
@@ -2405,100 +2349,6 @@ INTERNAL OPTIONS
            path. For instance, with bactraking level 1, it will convert
            /my/source/File.java with project root /my/root into
            ../source/File.java
-
-       --biabduction-abs-struct int
-           Specify abstraction level for fields of structs:
-           - 0 = no
-           - 1 = forget some fields during matching (and so lseg
-           abstraction)
-           
-
-       --biabduction-abs-val int
-           Specify abstraction level for expressions:
-           - 0 = no abstraction
-           - 1 = evaluate all expressions abstractly
-           - 2 = 1 + abstract constant integer values during join
-           
-
-       --biabduction-allow-leak
-           Activates: Forget leaked memory during abstraction (Conversely:
-           --no-biabduction-allow-leak)
-
-       --biabduction-array-level int
-           Level of treating the array indexing and pointer arithmetic:
-           - 0 = treats both features soundly
-           - 1 = assumes that the size of every array is infinite
-           - 2 = assumes that all heap dereferences via array indexing and
-           pointer arithmetic are correct
-           
-
-       --biabduction-coverage
-           analysis mode to maximize coverage (can take longer)
-
-       --biabduction-exit-node-bias
-           nodes nearest the exit node are analyzed first
-
-       --biabduction-iterations int
-           Specify the maximum number of operations for each function,
-           expressed as a multiple of symbolic operations and a multiple of
-           seconds of elapsed time
-
-       --biabduction-join-cond int
-           Set the strength of the final information-loss check used by the
-           join:
-           - 0 = use the most aggressive join for preconditions
-           - 1 = use the least aggressive join for preconditions
-           
-
-       --biabduction-memleak-buckets ,-separated sequence of { all | cf | arc
-       | narc | cpp | unknown_origin }
-           Specify the memory leak buckets to be checked in C++.
-
-       --biabduction-models-mode
-           Activates: Analysis of the biabduction models (Conversely:
-           --no-biabduction-models-mode)
-
-       --biabduction-monitor-prop-size
-           Activates: Monitor size of props, and print every time the current
-           max is exceeded (Conversely: --no-biabduction-monitor-prop-size)
-
-       --biabduction-nelseg
-           Activates: Use only nonempty lsegs (Conversely:
-           --no-biabduction-nelseg)
-
-       --biabduction-only-footprint
-           Activates: Skip the re-execution phase (Conversely:
-           --no-biabduction-only-footprint)
-
-       --biabduction-seconds-per-iteration float
-           Set the number of seconds per iteration (see
-           --biabduction-iterations)
-
-       --biabduction-seconds-per-iteration-reset
-           Cancel the effect of --biabduction-seconds-per-iteration.
-
-       --biabduction-symops-per-iteration int
-           Set the number of symbolic operations per iteration (see
-           --biabduction-iterations)
-
-       --biabduction-symops-per-iteration-reset
-           Cancel the effect of --biabduction-symops-per-iteration.
-
-       --biabduction-trace-join
-           Activates: Detailed tracing information during prop join
-           operations (Conversely: --no-biabduction-trace-join)
-
-       --biabduction-trace-rearrange
-           Activates: Detailed tracing information during prop re-arrangement
-           operations (Conversely: --no-biabduction-trace-rearrange)
-
-       --biabduction-type-size
-           Activates: Consider the size of types during analysis, e.g. cannot
-           use an int pointer to write to a char (Conversely:
-           --no-biabduction-type-size)
-
-       --biabduction-visits-bias
-           nodes visited fewer times are analyzed first
 
        --bo-field-depth-limit-reset
            Cancel the effect of --bo-field-depth-limit.
@@ -3020,12 +2870,6 @@ INTERNAL OPTIONS
        --noescaping-function-list-reset
            Set --noescaping-function-list to the empty list.
 
-       --nullable-annotation-name string
-           Specify a custom nullable annotation name.
-
-       --nullable-annotation-name-reset
-           Cancel the effect of --nullable-annotation-name.
-
        --objc-block-execution-macro-reset
            Cancel the effect of --objc-block-execution-macro.
 
@@ -3039,10 +2883,6 @@ INTERNAL OPTIONS
 
        --oom-threshold-reset
            Cancel the effect of --oom-threshold.
-
-       --print-buckets
-           Activates: Show the internal bucket of Infer reports in their
-           textual description (Conversely: --no-print-buckets)
 
        --print-jbir
            Activates: Print JBir translation of Java bytecode in logs
@@ -3441,10 +3281,6 @@ INTERNAL OPTIONS
        --stats-dir-previous-reset
            Cancel the effect of --stats-dir-previous.
 
-       --no-subtype-multirange
-           Deactivates: Use the multirange subtyping domain. Used in the Java
-           frontend and in biabduction. (Conversely: --subtype-multirange)
-
        --suffix-match-changed-files
            Activates: When computing the set of files to analyze using
            --changed-files-index, a file will be analyzed if a name in the
@@ -3497,6 +3333,15 @@ INTERNAL OPTIONS
        --topl-max-disjuncts int
            Under-approximate after int disjunctions in the domain
 
+       --topl-nonnull-soft
+           Activates: Normally Topl tries to prove the constraints specified
+           in the user-defined property. If it fails, then it does not report
+           corresponding issues. For 'soft' predicates though, it does report
+           corresponding issues. Thus, a soft predicate only filters out
+           cases where its negation can be proved. This flag makes
+           constraints of the form 'X!=0' be treated as 'soft'. (Conversely:
+           --no-topl-nonnull-soft)
+
        --topl-properties +path
            [EXPERIMENTAL] Specify a file containing a temporal property
            definition (e.g., jdk.topl).
@@ -3509,10 +3354,6 @@ INTERNAL OPTIONS
            become manifest, when the latent issue itself is enabled. (Similar
            to --pulse-report-latent-issues.) (Conversely:
            --topl-report-latent-issues)
-
-       --trace-error
-           Activates: Detailed tracing information during error explanation
-           (Conversely: --no-trace-error)
 
        --trace-events
            Activates: Emit Chrome performance trace events in
