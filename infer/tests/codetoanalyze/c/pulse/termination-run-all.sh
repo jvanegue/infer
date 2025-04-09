@@ -48,8 +48,8 @@ rm -fr infer-out/ infinite.o infer-run.log
 #$ROOT/infer/bin/infer run --pulse-only --debug-level=2 --pulse-widen-threshold=20 --print-logs -g -- clang -c pulseinf/goto_in_loop.c 2> infer-run.log
 #$ROOT/infer/bin/infer run --pulse-only --debug-level=2 --pulse-widen-threshold=20 --print-logs -g -- clang -c pulseinf/goto_cross_loop.c 2> infer-run.log
 #$ROOT/infer/bin/infer run --pulse-only --debug-level=2 --pulse-widen-threshold=3 --print-logs -g -- clang -c pulseinf/nestedloop_chen10_bad.c 2> infer-run.log
-
 $ROOT/infer/bin/infer run --pulse-only --debug-level=2 --print-logs -g -- clang -c pulseinf/assign_paren_bad.c 2> infer-run.log
+
 grep PULSEINF infer-out/logs
 
 # All tests in one file (Debug mode)

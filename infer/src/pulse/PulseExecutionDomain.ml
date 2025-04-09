@@ -139,8 +139,8 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
 
   
   let _ = num_iters in
-
-  let cfgnode = AnalysisState.get_node_exn() in
+  
+  let cfgnode = AnalysisState.get_node () |> Option.value_exn in
   
   let same = phys_equal prev next in
   
