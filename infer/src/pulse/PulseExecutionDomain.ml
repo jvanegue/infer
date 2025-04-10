@@ -214,10 +214,14 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
   (* Used when the workset is not empty *)
   let rec record_pathcond ws kl : int =
 
-    let cmp_four (a,b,c,d) (e,f,g,h) =
+    (* This brings 30% less false positives but also remove 10-15% of real bugs involving goto *)
+    (* This should stay enabled in the upstream version to minimize FP *)
+    (* let cmp_four (a,b,c,d) (e,f,g,h) =
       if (phys_equal a e) && (phys_equal b f) && (phys_equal c g) && (phys_equal d h)
       then true else false
-    in
+    in *)
+    
+    let cmp_four _ _ = false in
     
     (* let curlen = (List.length ws) in *)
     match ws with

@@ -751,8 +751,8 @@ void allocate_all_in_array_ok(int* array[]) {
   }
 }
 
-/* Goto in loop */
-/* Pulseinf: used to be detected! now FN */
+/* Infinite Goto in loop */
+/* Pulseinf: FN */ 
 void FN_goto_in_loop_bad()
 {
   int i = 0;
@@ -768,8 +768,9 @@ void FN_goto_in_loop_bad()
 
 
 /* Goto in loop */
-/* Pulseinf: FN */
-void FN_goto_cross_loop_bad()
+/* Pulseinf: find bug in CAV version */
+/* Upstream merged version would not find bug if we integrate the low FP fix for "same iteration lasso" */
+void goto_cross_loop_bad()
 {
   int i = 0;
 
