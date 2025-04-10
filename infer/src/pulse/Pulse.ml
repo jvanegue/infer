@@ -230,7 +230,7 @@ module PulseTransferFunctions = struct
             
     in
     (* L.debug Analysis Quiet "JV PATHCTX: dbe len = %u pts len = 1 \n" (List.length dbe); *)
-    L.debug Analysis Quiet "PULSEINF: Prev MODIFIED %b (if true added Infinite state) \n" (used > 0 && cnt >= 0);
+    (* L.debug Analysis Quiet "PULSEINF: Prev MODIFIED %b (if true added Infinite state) \n" (used > 0 && cnt >= 0); *)
     
     let res = if (used > 0 && cnt >= 0) then
                 listpair_combine (plist @ dbe) (rplist @ [pts])
@@ -1987,7 +1987,7 @@ let analyze specialization ({InterproceduralAnalysis.tenv; proc_desc} as analysi
   in
   let process_postconditions node posts_opt ~convert_normal_to_exceptional =
 
-    L.debug Analysis Quiet "PULSEINF: process_postconditions \n";
+    (* L.debug Analysis Quiet "PULSEINF: process_postconditions \n"; *)
     
     match posts_opt with
     | Some (posts, non_disj_astate) ->
@@ -2027,13 +2027,13 @@ let analyze specialization ({InterproceduralAnalysis.tenv; proc_desc} as analysi
           report_unnecessary_parameter_copies analysis_data non_disj_astate ) ;
         summary
     | None ->
-       L.debug Analysis Quiet "PULSEINF: process_postconditions EMPTY case \n";
+       (* L.debug Analysis Quiet "PULSEINF: process_postconditions EMPTY case \n"; *)
         PulseSummary.empty
   in
   let report_on_and_return_summaries summary =
 
 
-    L.debug Analysis Quiet "PULSEINF: report_on_and_return_summaries \n";
+    (* L.debug Analysis Quiet "PULSEINF: report_on_and_return_summaries \n"; *)
     
     if Config.trace_topl then
       L.debug Analysis Quiet "ToplTrace: dropped %d disjuncts in %a@\n"
