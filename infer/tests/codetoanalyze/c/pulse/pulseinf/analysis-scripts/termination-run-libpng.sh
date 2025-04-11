@@ -1,25 +1,9 @@
 #!/bin/bash
 
-rm -fr infer-out/ infinite.o *~ infer-run-libpng.log
+INFER_HOME=/huge/jvanegue/PUBLIC_GITHUB/infer
 
 make clean
-time /huge/jvanegue/PUBLIC_GITHUB/infer/infer/bin/infer --debug-level 0 --pulse-widen-threshold=30 --pulse-only -- make -j30 2> infer-run-linux_libpng.log
-
-# executing the saved github tree
-#/huge/jvanegue/PUBLIC_GITHUB/infer/infer/bin/infer run --pulse-only -- make 2> infer-run-libpng.log
+time $INFER_HOME/infer/bin/infer --pulse-only -- make -j30 2> infer-run-linux_libpng.log
 python3 -m json.tool infer-out/report.json > report-indented.json
-# Julien: should test with --pulse-widen-threshold N and N big value (for gupta test)
-
-# Julien's original
-#~/infer/infer/bin/infer run --debug-level 2 --print-logs --pulse-only -g -- clang++ -c infinite.cpp 2> infer-run.log
-#~/infer/infer/bin/infer capture --debug-level 2 --print-logs --pulse-only -g -- clang++ -c infinite.cpp 2> infer-capture.log
-#~/infer/infer/bin/infer analyze --debug-level 2 --print-logs --pulse-only -g -- clang++ -c infinite.cpp 2> infer-analyze.log
-
-# Suggested by Jules for debugging
-#~/infer/infer/bin/infer --debug-level 2 --print-logs --pulse-only -g -- clang++ -c infinite.cpp 2> infer-pulseonly.log
 
 echo Finished running termination tests. See reported-indented.json
-#echoGrepping for JV in logs
-#echo
-#grep JV *.log
-#grep JV infer-out/logs
