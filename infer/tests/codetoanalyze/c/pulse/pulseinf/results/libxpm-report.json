@@ -1,0 +1,1078 @@
+[
+    {
+        "bug_type": "USE_AFTER_FREE",
+        "qualifier": "accessing `ptr` that was invalidated by call to `free()` on line 198.",
+        "severity": "ERROR",
+        "category": "Memory error",
+        "line": 266,
+        "column": 2,
+        "procedure": "XpmCreateBufferFromXpmImage",
+        "procedure_start_line": 105,
+        "file": "src/CrBufFrI.c",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "src/CrBufFrI.c",
+                "line_number": 146,
+                "column_number": 20,
+                "description": "macro expanded here"
+            },
+            {
+                "level": 0,
+                "filename": "src/XpmI.h",
+                "line_number": 71,
+                "column_number": -1,
+                "description": "invalidation part of the trace starts here"
+            },
+            {
+                "level": 1,
+                "filename": "src/CrBufFrI.c",
+                "line_number": 146,
+                "column_number": 20,
+                "description": "macro expanded here"
+            },
+            {
+                "level": 1,
+                "filename": "src/XpmI.h",
+                "line_number": 71,
+                "column_number": -1,
+                "description": "allocated by call to `malloc` (modelled)"
+            },
+            {
+                "level": 1,
+                "filename": "src/CrBufFrI.c",
+                "line_number": 146,
+                "column_number": 5,
+                "description": "assigned"
+            },
+            {
+                "level": 1,
+                "filename": "src/CrBufFrI.c",
+                "line_number": 198,
+                "column_number": 18,
+                "description": "macro expanded here"
+            },
+            {
+                "level": 1,
+                "filename": "src/XpmI.h",
+                "line_number": 72,
+                "column_number": -1,
+                "description": "was invalidated by call to `free()`"
+            },
+            {
+                "level": 0,
+                "filename": "src/CrBufFrI.c",
+                "line_number": 146,
+                "column_number": 20,
+                "description": "macro expanded here"
+            },
+            {
+                "level": 0,
+                "filename": "src/XpmI.h",
+                "line_number": 71,
+                "column_number": -1,
+                "description": "use-after-lifetime part of the trace starts here"
+            },
+            {
+                "level": 1,
+                "filename": "src/CrBufFrI.c",
+                "line_number": 146,
+                "column_number": 20,
+                "description": "macro expanded here"
+            },
+            {
+                "level": 1,
+                "filename": "src/XpmI.h",
+                "line_number": 71,
+                "column_number": -1,
+                "description": "allocated by call to `malloc` (modelled)"
+            },
+            {
+                "level": 1,
+                "filename": "src/CrBufFrI.c",
+                "line_number": 146,
+                "column_number": 5,
+                "description": "assigned"
+            },
+            {
+                "level": 1,
+                "filename": "src/CrBufFrI.c",
+                "line_number": 266,
+                "column_number": 2,
+                "description": "macro expanded here"
+            },
+            {
+                "level": 1,
+                "filename": "src/XpmI.h",
+                "line_number": 69,
+                "column_number": -1,
+                "description": "invalid access occurs here"
+            }
+        ],
+        "bug_trace_length": 8,
+        "bug_trace_max_depth": 1,
+        "key": "CrBufFrI.c|XpmCreateBufferFromXpmImage|USE_AFTER_FREE",
+        "node_key": "13afa1003940266c332ddddeecbf3ad4",
+        "hash": "99ae75ee033224ca962d3c5e0e8277a8",
+        "bug_type_hum": "Use After Free",
+        "extras": {}
+    },
+    {
+        "bug_type": "MEMORY_LEAK_C",
+        "qualifier": "Memory dynamically allocated by `malloc` on line 172 is not freed after the last access at line 244, column 2.",
+        "severity": "ERROR",
+        "category": "Resource leak",
+        "line": 244,
+        "column": 2,
+        "procedure": "XpmCreateDataFromXpmImage",
+        "procedure_start_line": 103,
+        "file": "src/CrDatFrI.c",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "src/CrDatFrI.c",
+                "line_number": 172,
+                "column_number": 24,
+                "description": "macro expanded here"
+            },
+            {
+                "level": 0,
+                "filename": "src/XpmI.h",
+                "line_number": 71,
+                "column_number": -1,
+                "description": "allocation part of the trace starts here"
+            },
+            {
+                "level": 1,
+                "filename": "src/CrDatFrI.c",
+                "line_number": 172,
+                "column_number": 24,
+                "description": "macro expanded here"
+            },
+            {
+                "level": 1,
+                "filename": "src/XpmI.h",
+                "line_number": 71,
+                "column_number": -1,
+                "description": "allocated by `malloc` here"
+            },
+            {
+                "level": 0,
+                "filename": "src/CrDatFrI.c",
+                "line_number": 244,
+                "column_number": 2,
+                "description": "macro expanded here"
+            },
+            {
+                "level": 0,
+                "filename": "src/XpmI.h",
+                "line_number": 69,
+                "column_number": -1,
+                "description": "memory becomes unreachable here"
+            }
+        ],
+        "bug_trace_length": 3,
+        "bug_trace_max_depth": 1,
+        "key": "CrDatFrI.c|XpmCreateDataFromXpmImage|MEMORY_LEAK_C",
+        "node_key": "a3aee70cdd866ec20ce3b01b9f7929e4",
+        "hash": "aa2153c842df2a0336d57e1237725911",
+        "bug_type_hum": "Memory Leak",
+        "extras": {}
+    },
+    {
+        "bug_type": "USE_AFTER_FREE",
+        "qualifier": "accessing `fd` that was closed with `fclose()` on line 75.",
+        "severity": "ERROR",
+        "category": "Memory error",
+        "line": 77,
+        "column": 2,
+        "procedure": "XpmReadFileToBuffer",
+        "procedure_start_line": 54,
+        "file": "src/RdFToBuf.c",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "src/RdFToBuf.c",
+                "line_number": 67,
+                "column_number": 10,
+                "description": "invalidation part of the trace starts here"
+            },
+            {
+                "level": 1,
+                "filename": "src/RdFToBuf.c",
+                "line_number": 67,
+                "column_number": 10,
+                "description": "in call to function `open` with no summary"
+            },
+            {
+                "level": 1,
+                "filename": "src/RdFToBuf.c",
+                "line_number": 67,
+                "column_number": 5,
+                "description": "assigned"
+            },
+            {
+                "level": 1,
+                "filename": "src/RdFToBuf.c",
+                "line_number": 75,
+                "column_number": 10,
+                "description": "was closed with `fclose()`"
+            },
+            {
+                "level": 0,
+                "filename": "src/RdFToBuf.c",
+                "line_number": 67,
+                "column_number": 10,
+                "description": "use-after-lifetime part of the trace starts here"
+            },
+            {
+                "level": 1,
+                "filename": "src/RdFToBuf.c",
+                "line_number": 67,
+                "column_number": 10,
+                "description": "in call to function `open` with no summary"
+            },
+            {
+                "level": 1,
+                "filename": "src/RdFToBuf.c",
+                "line_number": 67,
+                "column_number": 5,
+                "description": "assigned"
+            },
+            {
+                "level": 1,
+                "filename": "src/RdFToBuf.c",
+                "line_number": 77,
+                "column_number": 2,
+                "description": "invalid access occurs here"
+            }
+        ],
+        "bug_trace_length": 8,
+        "bug_trace_max_depth": 1,
+        "key": "RdFToBuf.c|XpmReadFileToBuffer|USE_AFTER_FREE",
+        "node_key": "a448a348ca89c989a81885e48ebd9471",
+        "hash": "e733033123dc4e8f9e95fd14960f258e",
+        "bug_type_hum": "Use After Free",
+        "extras": {}
+    },
+    {
+        "bug_type": "USE_AFTER_FREE",
+        "qualifier": "accessing `fds[in]` that was closed with `fclose()` on line 186.",
+        "severity": "ERROR",
+        "category": "Memory error",
+        "line": 194,
+        "column": 5,
+        "procedure": "xpmPipeThrough",
+        "procedure_start_line": 130,
+        "file": "src/RdFToI.c",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "src/RdFToI.c",
+                "line_number": 142,
+                "column_number": 10,
+                "description": "invalidation part of the trace starts here"
+            },
+            {
+                "level": 1,
+                "filename": "src/RdFToI.c",
+                "line_number": 142,
+                "column_number": 10,
+                "description": "variable `fds` accessed here"
+            },
+            {
+                "level": 1,
+                "filename": "src/RdFToI.c",
+                "line_number": 186,
+                "column_number": 10,
+                "description": "was closed with `fclose()`"
+            },
+            {
+                "level": 0,
+                "filename": "src/RdFToI.c",
+                "line_number": 142,
+                "column_number": 10,
+                "description": "use-after-lifetime part of the trace starts here"
+            },
+            {
+                "level": 1,
+                "filename": "src/RdFToI.c",
+                "line_number": 142,
+                "column_number": 10,
+                "description": "variable `fds` accessed here"
+            },
+            {
+                "level": 1,
+                "filename": "src/RdFToI.c",
+                "line_number": 194,
+                "column_number": 5,
+                "description": "invalid access occurs here"
+            }
+        ],
+        "bug_trace_length": 6,
+        "bug_trace_max_depth": 1,
+        "key": "RdFToI.c|xpmPipeThrough|USE_AFTER_FREE",
+        "node_key": "84c09b8b3b784857d267448514e0d734",
+        "hash": "885b16df6b7abfb508439a0670134d0c",
+        "bug_type_hum": "Use After Free",
+        "extras": {}
+    },
+    {
+        "bug_type": "USE_AFTER_FREE",
+        "qualifier": "accessing `fd` that was closed with `fclose()` on line 260.",
+        "severity": "ERROR",
+        "category": "Memory error",
+        "line": 264,
+        "column": 6,
+        "procedure": "OpenReadFile",
+        "procedure_start_line": 202,
+        "file": "src/RdFToI.c",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "src/RdFToI.c",
+                "line_number": 211,
+                "column_number": 11,
+                "description": "invalidation part of the trace starts here"
+            },
+            {
+                "level": 1,
+                "filename": "src/RdFToI.c",
+                "line_number": 211,
+                "column_number": 11,
+                "description": "in call to function `open` with no summary"
+            },
+            {
+                "level": 1,
+                "filename": "src/RdFToI.c",
+                "line_number": 211,
+                "column_number": 2,
+                "description": "assigned"
+            },
+            {
+                "level": 1,
+                "filename": "src/RdFToI.c",
+                "line_number": 260,
+                "column_number": 27,
+                "description": "was closed with `fclose()`"
+            },
+            {
+                "level": 0,
+                "filename": "src/RdFToI.c",
+                "line_number": 211,
+                "column_number": 11,
+                "description": "use-after-lifetime part of the trace starts here"
+            },
+            {
+                "level": 1,
+                "filename": "src/RdFToI.c",
+                "line_number": 211,
+                "column_number": 11,
+                "description": "in call to function `open` with no summary"
+            },
+            {
+                "level": 1,
+                "filename": "src/RdFToI.c",
+                "line_number": 211,
+                "column_number": 2,
+                "description": "assigned"
+            },
+            {
+                "level": 1,
+                "filename": "src/RdFToI.c",
+                "line_number": 264,
+                "column_number": 6,
+                "description": "invalid access occurs here"
+            }
+        ],
+        "bug_trace_length": 8,
+        "bug_trace_max_depth": 1,
+        "key": "RdFToI.c|OpenReadFile|USE_AFTER_FREE",
+        "node_key": "15d66d727c8499405e5243cfaff02224",
+        "hash": "5613682142f82218114a4d3d2ccad267",
+        "bug_type_hum": "Use After Free",
+        "extras": {}
+    },
+    {
+        "bug_type": "USE_AFTER_FREE",
+        "qualifier": "accessing `fd` that was closed with `fclose()` on line 342.",
+        "severity": "ERROR",
+        "category": "Memory error",
+        "line": 346,
+        "column": 6,
+        "procedure": "OpenWriteFile",
+        "procedure_start_line": 312,
+        "file": "src/WrFFrI.c",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "src/WrFFrI.c",
+                "line_number": 324,
+                "column_number": 11,
+                "description": "invalidation part of the trace starts here"
+            },
+            {
+                "level": 1,
+                "filename": "src/WrFFrI.c",
+                "line_number": 324,
+                "column_number": 11,
+                "description": "allocated by call to `open` (modelled)"
+            },
+            {
+                "level": 1,
+                "filename": "src/WrFFrI.c",
+                "line_number": 324,
+                "column_number": 2,
+                "description": "assigned"
+            },
+            {
+                "level": 1,
+                "filename": "src/WrFFrI.c",
+                "line_number": 342,
+                "column_number": 27,
+                "description": "was closed with `fclose()`"
+            },
+            {
+                "level": 0,
+                "filename": "src/WrFFrI.c",
+                "line_number": 324,
+                "column_number": 11,
+                "description": "use-after-lifetime part of the trace starts here"
+            },
+            {
+                "level": 1,
+                "filename": "src/WrFFrI.c",
+                "line_number": 324,
+                "column_number": 11,
+                "description": "allocated by call to `open` (modelled)"
+            },
+            {
+                "level": 1,
+                "filename": "src/WrFFrI.c",
+                "line_number": 324,
+                "column_number": 2,
+                "description": "assigned"
+            },
+            {
+                "level": 1,
+                "filename": "src/WrFFrI.c",
+                "line_number": 346,
+                "column_number": 6,
+                "description": "invalid access occurs here"
+            }
+        ],
+        "bug_trace_length": 8,
+        "bug_trace_max_depth": 1,
+        "key": "WrFFrI.c|OpenWriteFile|USE_AFTER_FREE",
+        "node_key": "15d66d727c8499405e5243cfaff02224",
+        "hash": "231c5b5e70e63a0b0517a21cd7b37ef5",
+        "bug_type_hum": "Use After Free",
+        "extras": {}
+    },
+    {
+        "bug_type": "NULLPTR_DEREFERENCE",
+        "qualifier": "`i` could be null (null value originating from line 266) and is dereferenced.",
+        "severity": "ERROR",
+        "category": "Null pointer dereference",
+        "line": 273,
+        "column": 6,
+        "procedure": "SetCloseColor",
+        "procedure_start_line": 183,
+        "file": "src/create.c",
+        "bug_trace": [
+            {
+                "level": 1,
+                "filename": "src/create.c",
+                "line_number": 266,
+                "column_number": 21,
+                "description": "macro expanded here"
+            },
+            {
+                "level": 1,
+                "filename": "src/XpmI.h",
+                "line_number": 73,
+                "column_number": -1,
+                "description": "in call to `calloc (null case)` (modelled)"
+            },
+            {
+                "level": 1,
+                "filename": "src/create.c",
+                "line_number": 266,
+                "column_number": 21,
+                "description": "macro expanded here"
+            },
+            {
+                "level": 1,
+                "filename": "src/XpmI.h",
+                "line_number": 73,
+                "column_number": -1,
+                "description": "is assigned to the null pointer"
+            },
+            {
+                "level": 1,
+                "filename": "src/create.c",
+                "line_number": 265,
+                "column_number": 2,
+                "description": "assigned"
+            },
+            {
+                "level": 1,
+                "filename": "src/create.c",
+                "line_number": 273,
+                "column_number": 6,
+                "description": "invalid access occurs here"
+            }
+        ],
+        "bug_trace_length": 4,
+        "bug_trace_max_depth": 1,
+        "key": "create.c|SetCloseColor|NULLPTR_DEREFERENCE",
+        "node_key": "0cd47092cf78f103e55846cf98cd808c",
+        "hash": "df3423b264ad81db7da88e191cdfdec6",
+        "bug_type_hum": "Null Dereference",
+        "extras": {}
+    },
+    {
+        "bug_type": "NULLPTR_DEREFERENCE",
+        "qualifier": "`i` could be null (null value originating from line 266) and is dereferenced.",
+        "severity": "ERROR",
+        "category": "Null pointer dereference",
+        "line": 288,
+        "column": 6,
+        "procedure": "SetCloseColor",
+        "procedure_start_line": 183,
+        "file": "src/create.c",
+        "bug_trace": [
+            {
+                "level": 1,
+                "filename": "src/create.c",
+                "line_number": 266,
+                "column_number": 21,
+                "description": "macro expanded here"
+            },
+            {
+                "level": 1,
+                "filename": "src/XpmI.h",
+                "line_number": 73,
+                "column_number": -1,
+                "description": "in call to `calloc (null case)` (modelled)"
+            },
+            {
+                "level": 1,
+                "filename": "src/create.c",
+                "line_number": 266,
+                "column_number": 21,
+                "description": "macro expanded here"
+            },
+            {
+                "level": 1,
+                "filename": "src/XpmI.h",
+                "line_number": 73,
+                "column_number": -1,
+                "description": "is assigned to the null pointer"
+            },
+            {
+                "level": 1,
+                "filename": "src/create.c",
+                "line_number": 265,
+                "column_number": 2,
+                "description": "assigned"
+            },
+            {
+                "level": 1,
+                "filename": "src/create.c",
+                "line_number": 288,
+                "column_number": 6,
+                "description": "invalid access occurs here"
+            }
+        ],
+        "bug_trace_length": 4,
+        "bug_trace_max_depth": 1,
+        "key": "create.c|SetCloseColor|NULLPTR_DEREFERENCE",
+        "node_key": "66e39bc017bc86ea1ed9cb6380a58a85",
+        "hash": "df3423b264ad81db7da88e191cdfdec6",
+        "bug_type_hum": "Null Dereference",
+        "extras": {}
+    },
+    {
+        "bug_type": "NULLPTR_DEREFERENCE",
+        "qualifier": "`i` could be null (null value originating from line 500) and is dereferenced.",
+        "severity": "ERROR",
+        "category": "Null pointer dereference",
+        "line": 502,
+        "column": 3,
+        "procedure": "CreateColors",
+        "procedure_start_line": 415,
+        "file": "src/create.c",
+        "bug_trace": [
+            {
+                "level": 1,
+                "filename": "src/create.c",
+                "line_number": 500,
+                "column_number": 24,
+                "description": "macro expanded here"
+            },
+            {
+                "level": 1,
+                "filename": "src/XpmI.h",
+                "line_number": 73,
+                "column_number": -1,
+                "description": "in call to `calloc (null case)` (modelled)"
+            },
+            {
+                "level": 1,
+                "filename": "src/create.c",
+                "line_number": 500,
+                "column_number": 24,
+                "description": "macro expanded here"
+            },
+            {
+                "level": 1,
+                "filename": "src/XpmI.h",
+                "line_number": 73,
+                "column_number": -1,
+                "description": "is assigned to the null pointer"
+            },
+            {
+                "level": 1,
+                "filename": "src/create.c",
+                "line_number": 500,
+                "column_number": 6,
+                "description": "assigned"
+            },
+            {
+                "level": 1,
+                "filename": "src/create.c",
+                "line_number": 502,
+                "column_number": 3,
+                "description": "invalid access occurs here"
+            }
+        ],
+        "bug_trace_length": 4,
+        "bug_trace_max_depth": 1,
+        "key": "create.c|CreateColors|NULLPTR_DEREFERENCE",
+        "node_key": "53c608064e746b38ff3a892da83eb871",
+        "hash": "ab7d36e6a70186cec19f8cfd6b5a2ef2",
+        "bug_type_hum": "Null Dereference",
+        "extras": {}
+    },
+    {
+        "bug_type": "PULSE_UNINITIALIZED_VALUE",
+        "qualifier": "`pixels` is read without initialization during the call to `PutImagePixels8()`.",
+        "severity": "ERROR",
+        "category": "Memory error",
+        "line": 772,
+        "column": 6,
+        "procedure": "XpmCreateImageFromXpmImage",
+        "procedure_start_line": 662,
+        "file": "src/create.c",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "src/create.c",
+                "line_number": 729,
+                "column_number": 30,
+                "description": "macro expanded here"
+            },
+            {
+                "level": 0,
+                "filename": "src/XpmI.h",
+                "line_number": 71,
+                "column_number": -1,
+                "description": "allocated by call to `malloc` (modelled)"
+            },
+            {
+                "level": 0,
+                "filename": "src/create.c",
+                "line_number": 729,
+                "column_number": 5,
+                "description": "assigned"
+            },
+            {
+                "level": 0,
+                "filename": "src/create.c",
+                "line_number": 772,
+                "column_number": 6,
+                "description": "when calling `PutImagePixels8` here"
+            },
+            {
+                "level": 1,
+                "filename": "src/create.c",
+                "line_number": 1368,
+                "column_number": 1,
+                "description": "parameter `pixels` of PutImagePixels8"
+            },
+            {
+                "level": 1,
+                "filename": "src/create.c",
+                "line_number": 1403,
+                "column_number": 22,
+                "description": "read to uninitialized value occurs here"
+            }
+        ],
+        "bug_trace_length": 5,
+        "bug_trace_max_depth": 1,
+        "key": "create.c|XpmCreateImageFromXpmImage|PULSE_UNINITIALIZED_VALUE",
+        "node_key": "ba04c5e779a5784819f68ed3be0d65cf",
+        "hash": "1506d6b80c53975052a7df483887b912",
+        "bug_type_hum": "Uninitialized Value",
+        "extras": {}
+    },
+    {
+        "bug_type": "PULSE_UNINITIALIZED_VALUE",
+        "qualifier": "`pixels` is read without initialization during the call to `PutImagePixels1()`.",
+        "severity": "ERROR",
+        "category": "Memory error",
+        "line": 776,
+        "column": 6,
+        "procedure": "XpmCreateImageFromXpmImage",
+        "procedure_start_line": 662,
+        "file": "src/create.c",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "src/create.c",
+                "line_number": 729,
+                "column_number": 30,
+                "description": "macro expanded here"
+            },
+            {
+                "level": 0,
+                "filename": "src/XpmI.h",
+                "line_number": 71,
+                "column_number": -1,
+                "description": "allocated by call to `malloc` (modelled)"
+            },
+            {
+                "level": 0,
+                "filename": "src/create.c",
+                "line_number": 729,
+                "column_number": 5,
+                "description": "assigned"
+            },
+            {
+                "level": 0,
+                "filename": "src/create.c",
+                "line_number": 776,
+                "column_number": 6,
+                "description": "when calling `PutImagePixels1` here"
+            },
+            {
+                "level": 1,
+                "filename": "src/create.c",
+                "line_number": 1415,
+                "column_number": 1,
+                "description": "parameter `pixels` of PutImagePixels1"
+            },
+            {
+                "level": 1,
+                "filename": "src/create.c",
+                "line_number": 1473,
+                "column_number": 31,
+                "description": "read to uninitialized value occurs here"
+            }
+        ],
+        "bug_trace_length": 5,
+        "bug_trace_max_depth": 1,
+        "key": "create.c|XpmCreateImageFromXpmImage|PULSE_UNINITIALIZED_VALUE",
+        "node_key": "ba04c5e779a5784819f68ed3be0d65cf",
+        "hash": "02ec76f7dc428a5bff76e69dae79d1b8",
+        "bug_type_hum": "Uninitialized Value",
+        "extras": {}
+    },
+    {
+        "bug_type": "PULSE_UNINITIALIZED_VALUE",
+        "qualifier": "`pixels` is read without initialization during the call to `PutImagePixels16()`.",
+        "severity": "ERROR",
+        "category": "Memory error",
+        "line": 779,
+        "column": 6,
+        "procedure": "XpmCreateImageFromXpmImage",
+        "procedure_start_line": 662,
+        "file": "src/create.c",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "src/create.c",
+                "line_number": 729,
+                "column_number": 30,
+                "description": "macro expanded here"
+            },
+            {
+                "level": 0,
+                "filename": "src/XpmI.h",
+                "line_number": 71,
+                "column_number": -1,
+                "description": "allocated by call to `malloc` (modelled)"
+            },
+            {
+                "level": 0,
+                "filename": "src/create.c",
+                "line_number": 729,
+                "column_number": 5,
+                "description": "assigned"
+            },
+            {
+                "level": 0,
+                "filename": "src/create.c",
+                "line_number": 779,
+                "column_number": 6,
+                "description": "when calling `PutImagePixels16` here"
+            },
+            {
+                "level": 1,
+                "filename": "src/create.c",
+                "line_number": 1287,
+                "column_number": 1,
+                "description": "parameter `pixels` of PutImagePixels16"
+            },
+            {
+                "level": 1,
+                "filename": "src/create.c",
+                "line_number": 1336,
+                "column_number": 11,
+                "description": "read to uninitialized value occurs here"
+            }
+        ],
+        "bug_trace_length": 5,
+        "bug_trace_max_depth": 1,
+        "key": "create.c|XpmCreateImageFromXpmImage|PULSE_UNINITIALIZED_VALUE",
+        "node_key": "ba04c5e779a5784819f68ed3be0d65cf",
+        "hash": "4ca286a0ceb86c58334a16319a6b3979",
+        "bug_type_hum": "Uninitialized Value",
+        "extras": {}
+    },
+    {
+        "bug_type": "PULSE_UNINITIALIZED_VALUE",
+        "qualifier": "`pixels` is read without initialization during the call to `PutImagePixels32()`.",
+        "severity": "ERROR",
+        "category": "Memory error",
+        "line": 782,
+        "column": 6,
+        "procedure": "XpmCreateImageFromXpmImage",
+        "procedure_start_line": 662,
+        "file": "src/create.c",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "src/create.c",
+                "line_number": 729,
+                "column_number": 30,
+                "description": "macro expanded here"
+            },
+            {
+                "level": 0,
+                "filename": "src/XpmI.h",
+                "line_number": 71,
+                "column_number": -1,
+                "description": "allocated by call to `malloc` (modelled)"
+            },
+            {
+                "level": 0,
+                "filename": "src/create.c",
+                "line_number": 729,
+                "column_number": 5,
+                "description": "assigned"
+            },
+            {
+                "level": 0,
+                "filename": "src/create.c",
+                "line_number": 782,
+                "column_number": 6,
+                "description": "when calling `PutImagePixels32` here"
+            },
+            {
+                "level": 1,
+                "filename": "src/create.c",
+                "line_number": 1177,
+                "column_number": 1,
+                "description": "parameter `pixels` of PutImagePixels32"
+            },
+            {
+                "level": 1,
+                "filename": "src/create.c",
+                "line_number": 1254,
+                "column_number": 11,
+                "description": "read to uninitialized value occurs here"
+            }
+        ],
+        "bug_trace_length": 5,
+        "bug_trace_max_depth": 1,
+        "key": "create.c|XpmCreateImageFromXpmImage|PULSE_UNINITIALIZED_VALUE",
+        "node_key": "ba04c5e779a5784819f68ed3be0d65cf",
+        "hash": "0b95fb8922eb4161f2002d61e4189e44",
+        "bug_type_hum": "Uninitialized Value",
+        "extras": {}
+    },
+    {
+        "bug_type": "NULLPTR_DEREFERENCE",
+        "qualifier": "`p` could be null (null value originating from line 335) and is dereferenced.",
+        "severity": "ERROR",
+        "category": "Null pointer dereference",
+        "line": 375,
+        "column": 6,
+        "procedure": "xpmGetString",
+        "procedure_start_line": 304,
+        "file": "src/data.c",
+        "bug_trace": [
+            {
+                "level": 1,
+                "filename": "src/data.c",
+                "line_number": 335,
+                "column_number": 15,
+                "description": "macro expanded here"
+            },
+            {
+                "level": 1,
+                "filename": "src/XpmI.h",
+                "line_number": 71,
+                "column_number": -1,
+                "description": "in call to `malloc (null case)` (modelled)"
+            },
+            {
+                "level": 1,
+                "filename": "src/data.c",
+                "line_number": 335,
+                "column_number": 15,
+                "description": "macro expanded here"
+            },
+            {
+                "level": 1,
+                "filename": "src/XpmI.h",
+                "line_number": 71,
+                "column_number": -1,
+                "description": "is assigned to the null pointer"
+            },
+            {
+                "level": 1,
+                "filename": "src/data.c",
+                "line_number": 335,
+                "column_number": 2,
+                "description": "assigned"
+            },
+            {
+                "level": 1,
+                "filename": "src/data.c",
+                "line_number": 375,
+                "column_number": 6,
+                "description": "invalid access occurs here"
+            }
+        ],
+        "bug_trace_length": 4,
+        "bug_trace_max_depth": 1,
+        "key": "data.c|xpmGetString|NULLPTR_DEREFERENCE",
+        "node_key": "d5e1d648221104458ac9a87db5b2d330",
+        "hash": "b7755b2ff44bb1fdce67436180c749de",
+        "bug_type_hum": "Null Dereference",
+        "extras": {}
+    },
+    {
+        "bug_type": "MEMORY_LEAK_C",
+        "qualifier": "Memory dynamically allocated by `malloc`, indirectly via call to `AtomMake()` on line 182 is not freed after the last access at line 182, column 8.",
+        "severity": "ERROR",
+        "category": "Resource leak",
+        "line": 182,
+        "column": 8,
+        "procedure": "xpmHashIntern",
+        "procedure_start_line": 172,
+        "file": "src/hashtab.c",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "src/hashtab.c",
+                "line_number": 182,
+                "column_number": 16,
+                "description": "allocation part of the trace starts here"
+            },
+            {
+                "level": 1,
+                "filename": "src/hashtab.c",
+                "line_number": 182,
+                "column_number": 16,
+                "description": "when calling `AtomMake` here"
+            },
+            {
+                "level": 2,
+                "filename": "src/hashtab.c",
+                "line_number": 49,
+                "column_number": 40,
+                "description": "macro expanded here"
+            },
+            {
+                "level": 2,
+                "filename": "src/XpmI.h",
+                "line_number": 71,
+                "column_number": -1,
+                "description": "allocated by `malloc` here"
+            },
+            {
+                "level": 0,
+                "filename": "src/hashtab.c",
+                "line_number": 182,
+                "column_number": 8,
+                "description": "memory becomes unreachable here"
+            }
+        ],
+        "bug_trace_length": 4,
+        "bug_trace_max_depth": 2,
+        "key": "hashtab.c|xpmHashIntern|MEMORY_LEAK_C",
+        "node_key": "9887292b5c1a009867c5efa742707f12",
+        "hash": "305b51d45d25a9fe01e1d83ab2e691f5",
+        "bug_type_hum": "Memory Leak",
+        "extras": {}
+    },
+    {
+        "bug_type": "MEMORY_LEAK_C",
+        "qualifier": "Memory dynamically allocated by `malloc`, indirectly via call to `xpmGetString()` on line 654 is not freed after the last access at line 700, column 1.",
+        "severity": "ERROR",
+        "category": "Resource leak",
+        "line": 700,
+        "column": 1,
+        "procedure": "xpmParseExtensions",
+        "procedure_start_line": 593,
+        "file": "src/parse.c",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "src/parse.c",
+                "line_number": 654,
+                "column_number": 11,
+                "description": "allocation part of the trace starts here"
+            },
+            {
+                "level": 1,
+                "filename": "src/parse.c",
+                "line_number": 654,
+                "column_number": 11,
+                "description": "when calling `xpmGetString` here"
+            },
+            {
+                "level": 2,
+                "filename": "src/data.c",
+                "line_number": 335,
+                "column_number": 15,
+                "description": "macro expanded here"
+            },
+            {
+                "level": 2,
+                "filename": "src/XpmI.h",
+                "line_number": 71,
+                "column_number": -1,
+                "description": "allocated by `malloc` here"
+            },
+            {
+                "level": 0,
+                "filename": "src/parse.c",
+                "line_number": 700,
+                "column_number": 1,
+                "description": "memory becomes unreachable here"
+            }
+        ],
+        "bug_trace_length": 4,
+        "bug_trace_max_depth": 2,
+        "key": "parse.c|xpmParseExtensions|MEMORY_LEAK_C",
+        "node_key": "54342beef24d0955a1da24b857ff00e7",
+        "hash": "6b8da5ae6f61cad2e25c5637aea3a786",
+        "bug_type_hum": "Memory Leak",
+        "extras": {}
+    }
+]

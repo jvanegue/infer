@@ -1,0 +1,70 @@
+[
+    {
+        "bug_type": "INFINITE_LOOP",
+        "qualifier": "Recurring state leading to infinite execution at line 856, column 3.",
+        "severity": "ERROR",
+        "category": "No_category",
+        "line": 856,
+        "column": 3,
+        "procedure": "writeRandomBytes_dev_urandom",
+        "procedure_start_line": 846,
+        "file": "lib/xmlparse.c",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "lib/xmlparse.c",
+                "line_number": 856,
+                "column_number": 3,
+                "description": "in loop"
+            }
+        ],
+        "bug_trace_length": 1,
+        "bug_trace_max_depth": 0,
+        "key": "xmlparse.c|writeRandomBytes_dev_urandom|INFINITE_LOOP",
+        "node_key": "fa0c051eb65fbf8d37c52865108bb194",
+        "hash": "200486901e7d424d2211aecbde61ff01",
+        "bug_type_hum": "Infinite Loop",
+        "extras": {}
+    },
+    {
+        "bug_type": "NULLPTR_DEREFERENCE",
+        "qualifier": "`afterValue` could be null (null value originating from line 8827) and is dereferenced.",
+        "severity": "ERROR",
+        "category": "Null pointer dereference",
+        "line": 8829,
+        "column": 49,
+        "procedure": "getDebugLevel",
+        "procedure_start_line": 8818,
+        "file": "lib/xmlparse.c",
+        "bug_trace": [
+            {
+                "level": 1,
+                "filename": "lib/xmlparse.c",
+                "line_number": 8827,
+                "column_number": 3,
+                "description": "is assigned to the null pointer"
+            },
+            {
+                "level": 1,
+                "filename": "lib/xmlparse.c",
+                "line_number": 8827,
+                "column_number": 3,
+                "description": "assigned"
+            },
+            {
+                "level": 1,
+                "filename": "lib/xmlparse.c",
+                "line_number": 8829,
+                "column_number": 49,
+                "description": "invalid access occurs here"
+            }
+        ],
+        "bug_trace_length": 3,
+        "bug_trace_max_depth": 1,
+        "key": "xmlparse.c|getDebugLevel|NULLPTR_DEREFERENCE",
+        "node_key": "9a5729cbb1ab67961062d7f781041ecd",
+        "hash": "04afdda47a6a670c2bc15da1645b228a",
+        "bug_type_hum": "Null Dereference",
+        "extras": {}
+    }
+]

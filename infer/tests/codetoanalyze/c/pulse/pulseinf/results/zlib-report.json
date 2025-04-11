@@ -1,0 +1,118 @@
+[
+    {
+        "bug_type": "INFINITE_LOOP",
+        "qualifier": "Recurring state leading to infinite execution at line 211, column 5.",
+        "severity": "ERROR",
+        "category": "No_category",
+        "line": 211,
+        "column": 5,
+        "procedure": "gz_fetch",
+        "procedure_start_line": 208,
+        "file": "gzread.c",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "gzread.c",
+                "line_number": 211,
+                "column_number": 5,
+                "description": "in loop"
+            }
+        ],
+        "bug_trace_length": 1,
+        "bug_trace_max_depth": 0,
+        "key": "gzread.c|gz_fetch|INFINITE_LOOP",
+        "node_key": "1dc3356f6070a264d4b0808f17592b6c",
+        "hash": "fefd25ff5f928a4aaa7fdaa1c9d40498",
+        "bug_type_hum": "Infinite Loop",
+        "extras": {}
+    },
+    {
+        "bug_type": "INFINITE_LOOP",
+        "qualifier": "Recurring state leading to infinite execution at line 100, column 5.",
+        "severity": "ERROR",
+        "category": "No_category",
+        "line": 100,
+        "column": 5,
+        "procedure": "gz_comp",
+        "procedure_start_line": 65,
+        "file": "gzwrite.c",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "gzwrite.c",
+                "line_number": 100,
+                "column_number": 5,
+                "description": "in loop"
+            }
+        ],
+        "bug_trace_length": 1,
+        "bug_trace_max_depth": 0,
+        "key": "gzwrite.c|gz_comp|INFINITE_LOOP",
+        "node_key": "9d9b3fe366249614a82b9f2fb906304a",
+        "hash": "22454b4faa88ea5157bfe61f3d5c5116",
+        "bug_type_hum": "Infinite Loop",
+        "extras": {}
+    },
+    {
+        "bug_type": "MEMORY_LEAK_C",
+        "qualifier": "Memory dynamically allocated by `malloc`, indirectly via call to `zcalloc()` on line 203 is not freed after the last access at line 216, column 1.",
+        "severity": "ERROR",
+        "category": "Resource leak",
+        "line": 216,
+        "column": 1,
+        "procedure": "inflateInit2_",
+        "procedure_start_line": 178,
+        "file": "inflate.c",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "inflate.c",
+                "line_number": 203,
+                "column_number": 13,
+                "description": "macro expanded here"
+            },
+            {
+                "level": 0,
+                "filename": "zutil.h",
+                "line_number": 245,
+                "column_number": -1,
+                "description": "allocation part of the trace starts here"
+            },
+            {
+                "level": 1,
+                "filename": "inflate.c",
+                "line_number": 203,
+                "column_number": 13,
+                "description": "macro expanded here"
+            },
+            {
+                "level": 1,
+                "filename": "zutil.h",
+                "line_number": 245,
+                "column_number": -1,
+                "description": "when calling `zcalloc` here"
+            },
+            {
+                "level": 2,
+                "filename": "zutil.c",
+                "line_number": 288,
+                "column_number": 39,
+                "description": "allocated by `malloc` here"
+            },
+            {
+                "level": 0,
+                "filename": "inflate.c",
+                "line_number": 216,
+                "column_number": 1,
+                "description": "memory becomes unreachable here"
+            }
+        ],
+        "bug_trace_length": 4,
+        "bug_trace_max_depth": 2,
+        "key": "inflate.c|inflateInit2_|MEMORY_LEAK_C",
+        "node_key": "9887292b5c1a009867c5efa742707f12",
+        "hash": "3d43c57f83756909abd8a544224e5741",
+        "bug_type_hum": "Memory Leak",
+        "extras": {}
+    }
+]

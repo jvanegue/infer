@@ -1,0 +1,3482 @@
+[
+    {
+        "bug_type": "PULSE_UNNECESSARY_COPY_ASSIGNMENT",
+        "qualifier": "copy assigned variable `t` is not modified after it is copied from `last.operator->().exponent` on line 190.",
+        "suggestion": "To avoid the copy, call `std::move` instead. If this copy was intentional, call `folly::copy` to make it explicit and hence suppress the warning.",
+        "severity": "ERROR",
+        "category": "Perf regression",
+        "line": 190,
+        "column": 4,
+        "procedure": "CryptoPP::GeneralCascadeMultiplication<8f8f6f6ca933454c>",
+        "procedure_start_line": 172,
+        "file": "algebra.cpp",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "ecp.cpp",
+                "line_number": 488,
+                "column_number": 16,
+                "description": "first instantiated at"
+            },
+            {
+                "level": 0,
+                "filename": "algebra.cpp",
+                "line_number": 190,
+                "column_number": 4,
+                "description": "copy assigned here (with type `CryptoPP::Integer&`)"
+            }
+        ],
+        "bug_trace_length": 2,
+        "bug_trace_max_depth": 0,
+        "key": "algebra.cpp|CryptoPP::GeneralCascadeMultiplication<8f8f6f6ca933454c>|PULSE_UNNECESSARY_COPY_ASSIGNMENT",
+        "node_key": "8b8b006aaa6ca3baaf5cdf25c1766850",
+        "hash": "eda9554da076c45cb530e898da5be044",
+        "bug_type_hum": "Unnecessary Copy Assignment",
+        "extras": {
+            "copy_type": "CryptoPP::Integer&"
+        }
+    },
+    {
+        "bug_type": "INFINITE_LOOP",
+        "qualifier": "Recurring state leading to infinite execution at line 46, column 2.",
+        "severity": "ERROR",
+        "category": "No_category",
+        "line": 46,
+        "column": 2,
+        "procedure": "CryptoPP::AlignedAllocate",
+        "procedure_start_line": 40,
+        "file": "allocate.cpp",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "allocate.cpp",
+                "line_number": 46,
+                "column_number": 2,
+                "description": "in loop"
+            }
+        ],
+        "bug_trace_length": 1,
+        "bug_trace_max_depth": 0,
+        "key": "allocate.cpp|CryptoPP::AlignedAllocate|INFINITE_LOOP",
+        "node_key": "7d8c45ed01e55aba992fbb0ffb6aa875",
+        "hash": "e20c9ea3fee7e77047f91f931ca2fea7",
+        "bug_type_hum": "Infinite Loop",
+        "extras": {}
+    },
+    {
+        "bug_type": "INFINITE_LOOP",
+        "qualifier": "Recurring state leading to infinite execution at line 92, column 2.",
+        "severity": "ERROR",
+        "category": "No_category",
+        "line": 92,
+        "column": 2,
+        "procedure": "CryptoPP::UnalignedAllocate",
+        "procedure_start_line": 89,
+        "file": "allocate.cpp",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "allocate.cpp",
+                "line_number": 92,
+                "column_number": 2,
+                "description": "in loop"
+            }
+        ],
+        "bug_trace_length": 1,
+        "bug_trace_max_depth": 0,
+        "key": "allocate.cpp|CryptoPP::UnalignedAllocate|INFINITE_LOOP",
+        "node_key": "7d8c45ed01e55aba992fbb0ffb6aa875",
+        "hash": "aa539b98a4c37bc4461daa623ecf4b48",
+        "bug_type_hum": "Infinite Loop",
+        "extras": {}
+    },
+    {
+        "bug_type": "INFINITE_LOOP",
+        "qualifier": "Recurring state leading to infinite execution at line 411, column 2.",
+        "severity": "ERROR",
+        "category": "No_category",
+        "line": 411,
+        "column": 2,
+        "procedure": "CryptoPP::EncodedObjectFilter::Put",
+        "procedure_start_line": 401,
+        "file": "asn.cpp",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "asn.cpp",
+                "line_number": 411,
+                "column_number": 2,
+                "description": "in loop"
+            }
+        ],
+        "bug_trace_length": 1,
+        "bug_trace_max_depth": 0,
+        "key": "asn.cpp|Put|INFINITE_LOOP",
+        "node_key": "c9ad13ee426f02c783316ff34a38c600",
+        "hash": "d1ba8dc7354d9df51c55b7dff83abf64",
+        "bug_type_hum": "Infinite Loop",
+        "extras": {}
+    },
+    {
+        "bug_type": "PULSE_UNINITIALIZED_VALUE",
+        "qualifier": "`this.m_g.c1.reg.m_size` is read without initialization during the call to `CryptoPP::XTR_DH::XTR_DH()`.",
+        "severity": "ERROR",
+        "category": "Memory error",
+        "line": 298,
+        "column": 4,
+        "procedure": "CryptoPP::Test::BenchMarkKeyAgreement<CryptoPP::XTR_DH>",
+        "procedure_start_line": 295,
+        "file": "bench3.cpp",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "bench3.cpp",
+                "line_number": 298,
+                "column_number": 2,
+                "description": "struct field address `m_g.c1.reg.m_size` created"
+            },
+            {
+                "level": 0,
+                "filename": "bench3.cpp",
+                "line_number": 298,
+                "column_number": 4,
+                "description": "when calling `CryptoPP::XTR_DH::XTR_DH` here"
+            },
+            {
+                "level": 1,
+                "filename": "xtrcrypt.cpp",
+                "line_number": 24,
+                "column_number": 1,
+                "description": "parameter `this` of CryptoPP::XTR_DH::XTR_DH"
+            },
+            {
+                "level": 1,
+                "filename": "xtrcrypt.cpp",
+                "line_number": 29,
+                "column_number": 2,
+                "description": "when calling `CryptoPP::Integer::BERDecode` here"
+            },
+            {
+                "level": 2,
+                "filename": "integer.cpp",
+                "line_number": 3463,
+                "column_number": 1,
+                "description": "parameter `this` of CryptoPP::Integer::BERDecode"
+            },
+            {
+                "level": 2,
+                "filename": "integer.cpp",
+                "line_number": 3468,
+                "column_number": 2,
+                "description": "when calling `CryptoPP::Integer::Decode` here"
+            },
+            {
+                "level": 3,
+                "filename": "integer.cpp",
+                "line_number": 3380,
+                "column_number": 1,
+                "description": "parameter `this` of CryptoPP::Integer::Decode"
+            },
+            {
+                "level": 3,
+                "filename": "integer.cpp",
+                "line_number": 3397,
+                "column_number": 2,
+                "description": "when calling `CryptoPP::SecBlock<unsigned long,CryptoPP::AllocatorWithCleanup<unsigned long,1>>::CleanNew` here"
+            },
+            {
+                "level": 4,
+                "filename": "secblock.h",
+                "line_number": 1143,
+                "column_number": 2,
+                "description": "parameter `this` of CryptoPP::SecBlock<unsigned long,CryptoPP::AllocatorWithCleanup<unsigned long,1>>::CleanNew"
+            },
+            {
+                "level": 4,
+                "filename": "secblock.h",
+                "line_number": 1145,
+                "column_number": 3,
+                "description": "when calling `CryptoPP::SecBlock<unsigned long,CryptoPP::AllocatorWithCleanup<unsigned long,1>>::New` here"
+            },
+            {
+                "level": 5,
+                "filename": "secblock.h",
+                "line_number": 1126,
+                "column_number": 2,
+                "description": "parameter `this` of CryptoPP::SecBlock<unsigned long,CryptoPP::AllocatorWithCleanup<unsigned long,1>>::New"
+            },
+            {
+                "level": 5,
+                "filename": "secblock.h",
+                "line_number": 1128,
+                "column_number": 37,
+                "description": "read to uninitialized value occurs here"
+            }
+        ],
+        "bug_trace_length": 12,
+        "bug_trace_max_depth": 5,
+        "key": "bench3.cpp|CryptoPP::Test::BenchMarkKeyAgreement<CryptoPP::XTR_DH>|PULSE_UNINITIALIZED_VALUE",
+        "node_key": "41e3b5b85b742519f10585a2d25b82af",
+        "hash": "26cf05739113a8c6a336f4b0a29e2c1e",
+        "bug_type_hum": "Uninitialized Value",
+        "extras": {}
+    },
+    {
+        "bug_type": "INFINITE_LOOP",
+        "qualifier": "Recurring state leading to infinite execution at line 23, column 3.",
+        "severity": "ERROR",
+        "category": "No_category",
+        "line": 23,
+        "column": 3,
+        "procedure": "CryptoPP::Blowfish::Base::UncheckedSetKey",
+        "procedure_start_line": 9,
+        "file": "blowfish.cpp",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "blowfish.cpp",
+                "line_number": 23,
+                "column_number": 3,
+                "description": "in loop"
+            }
+        ],
+        "bug_trace_length": 1,
+        "bug_trace_max_depth": 0,
+        "key": "blowfish.cpp|UncheckedSetKey|INFINITE_LOOP",
+        "node_key": "c1d780a30890a1959aa2c529d08326c6",
+        "hash": "3bb577c1046042b32548d90c4579ca98",
+        "bug_type_hum": "Infinite Loop",
+        "extras": {}
+    },
+    {
+        "bug_type": "MEMORY_LEAK_C",
+        "qualifier": "Memory dynamically allocated by `malloc`, indirectly via call to `CryptoPP::Filter::AttachedTransformation()` on line 834 is not freed after the last access at line 838, column 1.",
+        "severity": "ERROR",
+        "category": "Resource leak",
+        "line": 838,
+        "column": 1,
+        "procedure": "CryptoPP::BufferedTransformation::Attach",
+        "procedure_start_line": 832,
+        "file": "cryptlib.cpp",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "cryptlib.cpp",
+                "line_number": 834,
+                "column_number": 6,
+                "description": "allocation part of the trace starts here"
+            },
+            {
+                "level": 1,
+                "filename": "cryptlib.cpp",
+                "line_number": 834,
+                "column_number": 6,
+                "description": "when calling `CryptoPP::Filter::AttachedTransformation` here"
+            },
+            {
+                "level": 2,
+                "filename": "filters.cpp",
+                "line_number": 35,
+                "column_number": 22,
+                "description": "when calling `CryptoPP::Filter::NewDefaultAttachment` here"
+            },
+            {
+                "level": 3,
+                "filename": "filters.cpp",
+                "line_number": 29,
+                "column_number": 13,
+                "description": "when calling `CryptoPP::MessageQueue::MessageQueue` here"
+            },
+            {
+                "level": 4,
+                "filename": "mqueue.cpp",
+                "line_number": 12,
+                "column_number": 4,
+                "description": "when calling `CryptoPP::ByteQueue::ByteQueue` here"
+            },
+            {
+                "level": 5,
+                "filename": "queue.cpp",
+                "line_number": 147,
+                "column_number": 24,
+                "description": "when calling `CryptoPP::ByteQueueNode::ByteQueueNode` here"
+            },
+            {
+                "level": 6,
+                "filename": "queue.cpp",
+                "line_number": 21,
+                "column_number": 5,
+                "description": "when calling `CryptoPP::SecBlock<unsigned char,CryptoPP::AllocatorWithCleanup<unsigned char,0>>::SecBlock` here"
+            },
+            {
+                "level": 7,
+                "filename": "secblock.h",
+                "line_number": 767,
+                "column_number": 44,
+                "description": "when calling `CryptoPP::AllocatorWithCleanup<unsigned char,0>::allocate` here"
+            },
+            {
+                "level": 8,
+                "filename": "secblock.h",
+                "line_number": 218,
+                "column_number": 36,
+                "description": "when calling `CryptoPP::UnalignedAllocate` here"
+            },
+            {
+                "level": 9,
+                "filename": "allocate.cpp",
+                "line_number": 92,
+                "column_number": 14,
+                "description": "allocated by `malloc` here"
+            },
+            {
+                "level": 0,
+                "filename": "cryptlib.cpp",
+                "line_number": 838,
+                "column_number": 1,
+                "description": "memory becomes unreachable here"
+            }
+        ],
+        "bug_trace_length": 11,
+        "bug_trace_max_depth": 9,
+        "key": "cryptlib.cpp|Attach|MEMORY_LEAK_C",
+        "node_key": "c1d780a30890a1959aa2c529d08326c6",
+        "hash": "3603bb290c802097f7a73ffb6051bb19",
+        "bug_type_hum": "Memory Leak",
+        "extras": {}
+    },
+    {
+        "bug_type": "NULLPTR_DEREFERENCE",
+        "qualifier": "`temp.operator_void_*()` could be null (from the call to `CryptoPP::SecBlock::SecBlock()` on line 69) and is dereferenced.",
+        "severity": "ERROR",
+        "category": "Null pointer dereference",
+        "line": 71,
+        "column": 3,
+        "procedure": "CryptoPP::GenerateKeyIV<a25525339342f8>",
+        "procedure_start_line": 66,
+        "file": "default.cpp",
+        "bug_trace": [
+            {
+                "level": 1,
+                "filename": "default.cpp",
+                "line_number": 66,
+                "column_number": 1,
+                "description": "parameter `saltLength` of CryptoPP::GenerateKeyIV<a25525339342f8>"
+            },
+            {
+                "level": 1,
+                "filename": "default.cpp",
+                "line_number": 66,
+                "column_number": 1,
+                "description": "parameter `passphraseLength` of CryptoPP::GenerateKeyIV<a25525339342f8>"
+            },
+            {
+                "level": 1,
+                "filename": "default.cpp",
+                "line_number": 69,
+                "column_number": 2,
+                "description": "variable `temp` declared here"
+            },
+            {
+                "level": 1,
+                "filename": "default.cpp",
+                "line_number": 69,
+                "column_number": 2,
+                "description": "struct field address `m_ptr` created"
+            },
+            {
+                "level": 1,
+                "filename": "default.cpp",
+                "line_number": 69,
+                "column_number": 15,
+                "description": "in call to `CryptoPP::SecBlock<unsigned char,CryptoPP::AllocatorWithCleanup<unsigned char,0>>::SecBlock`"
+            },
+            {
+                "level": 2,
+                "filename": "secblock.h",
+                "line_number": 766,
+                "column_number": 2,
+                "description": "parameter `size` of CryptoPP::SecBlock<unsigned char,CryptoPP::AllocatorWithCleanup<unsigned char,0>>::SecBlock"
+            },
+            {
+                "level": 2,
+                "filename": "secblock.h",
+                "line_number": 766,
+                "column_number": 2,
+                "description": "parameter `this` of CryptoPP::SecBlock<unsigned char,CryptoPP::AllocatorWithCleanup<unsigned char,0>>::SecBlock"
+            },
+            {
+                "level": 2,
+                "filename": "secblock.h",
+                "line_number": 767,
+                "column_number": 44,
+                "description": "in call to `CryptoPP::AllocatorWithCleanup<unsigned char,0>::allocate`"
+            },
+            {
+                "level": 3,
+                "filename": "secblock.h",
+                "line_number": 211,
+                "column_number": 4,
+                "description": "is assigned to the null pointer"
+            },
+            {
+                "level": 3,
+                "filename": "secblock.h",
+                "line_number": 211,
+                "column_number": 4,
+                "description": "returned"
+            },
+            {
+                "level": 2,
+                "filename": "secblock.h",
+                "line_number": 767,
+                "column_number": 44,
+                "description": "return from call to `CryptoPP::AllocatorWithCleanup<unsigned char,0>::allocate`"
+            },
+            {
+                "level": 2,
+                "filename": "secblock.h",
+                "line_number": 767,
+                "column_number": 38,
+                "description": "assigned"
+            },
+            {
+                "level": 1,
+                "filename": "default.cpp",
+                "line_number": 69,
+                "column_number": 15,
+                "description": "return from call to `CryptoPP::SecBlock<unsigned char,CryptoPP::AllocatorWithCleanup<unsigned char,0>>::SecBlock`"
+            },
+            {
+                "level": 1,
+                "filename": "default.cpp",
+                "line_number": 71,
+                "column_number": 15,
+                "description": "in call to `CryptoPP::SecBlock<unsigned char,CryptoPP::AllocatorWithCleanup<unsigned char,0>>::operator_void_*`"
+            },
+            {
+                "level": 2,
+                "filename": "secblock.h",
+                "line_number": 817,
+                "column_number": 2,
+                "description": "parameter `this` of CryptoPP::SecBlock<unsigned char,CryptoPP::AllocatorWithCleanup<unsigned char,0>>::operator_void_*"
+            },
+            {
+                "level": 2,
+                "filename": "secblock.h",
+                "line_number": 818,
+                "column_number": 4,
+                "description": "returned"
+            },
+            {
+                "level": 1,
+                "filename": "default.cpp",
+                "line_number": 71,
+                "column_number": 15,
+                "description": "return from call to `CryptoPP::SecBlock<unsigned char,CryptoPP::AllocatorWithCleanup<unsigned char,0>>::operator_void_*`"
+            },
+            {
+                "level": 1,
+                "filename": "default.cpp",
+                "line_number": 71,
+                "column_number": 3,
+                "description": "invalid access occurs here"
+            }
+        ],
+        "bug_trace_length": 18,
+        "bug_trace_max_depth": 3,
+        "key": "default.cpp|CryptoPP::GenerateKeyIV<a25525339342f8>|NULLPTR_DEREFERENCE",
+        "node_key": "7407b9b3cbfd880dffc32eea965a7b26",
+        "hash": "f927cda36b0b8960f2be5052b2bfc442",
+        "bug_type_hum": "Null Dereference",
+        "extras": {}
+    },
+    {
+        "bug_type": "INFINITE_LOOP",
+        "qualifier": "Recurring state leading to infinite execution at line 347, column 5.",
+        "severity": "ERROR",
+        "category": "No_category",
+        "line": 347,
+        "column": 5,
+        "procedure": "CryptoPP::Donna::X25519::anonymous_namespace_donna_64.cpp::curve25519_contract",
+        "procedure_start_line": 299,
+        "file": "donna_64.cpp",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "donna_64.cpp",
+                "line_number": 347,
+                "column_number": 5,
+                "description": "macro expanded here"
+            },
+            {
+                "level": 0,
+                "filename": "donna_64.cpp",
+                "line_number": 342,
+                "column_number": -1,
+                "description": "in loop"
+            }
+        ],
+        "bug_trace_length": 1,
+        "bug_trace_max_depth": 0,
+        "key": "donna_64.cpp|CryptoPP::Donna::X25519::anonymous_namespace_donna_64.cpp::curve25519_contract|INFINITE_LOOP",
+        "node_key": "89e1fea3672f8c1bda5df785b829cfa3",
+        "hash": "1b9acf353db5548106debfad4ba0fd58",
+        "bug_type_hum": "Infinite Loop",
+        "extras": {}
+    },
+    {
+        "bug_type": "INFINITE_LOOP",
+        "qualifier": "Recurring state leading to infinite execution at line 746, column 5.",
+        "severity": "ERROR",
+        "category": "No_category",
+        "line": 746,
+        "column": 5,
+        "procedure": "CryptoPP::Donna::Ed25519::anonymous_namespace_donna_64.cpp::curve25519_contract",
+        "procedure_start_line": 699,
+        "file": "donna_64.cpp",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "donna_64.cpp",
+                "line_number": 746,
+                "column_number": 5,
+                "description": "macro expanded here"
+            },
+            {
+                "level": 0,
+                "filename": "donna_64.cpp",
+                "line_number": 742,
+                "column_number": -1,
+                "description": "in loop"
+            }
+        ],
+        "bug_trace_length": 1,
+        "bug_trace_max_depth": 0,
+        "key": "donna_64.cpp|CryptoPP::Donna::Ed25519::anonymous_namespace_donna_64.cpp::curve25519_contract|INFINITE_LOOP",
+        "node_key": "89e1fea3672f8c1bda5df785b829cfa3",
+        "hash": "3175a4fa8c49028f21073fb979d72f8f",
+        "bug_type_hum": "Infinite Loop",
+        "extras": {}
+    },
+    {
+        "bug_type": "PULSE_CONST_REFABLE",
+        "qualifier": "Function parameter `v1` is passed by-value but not modified inside this function, resulting in a potential unnecessary copy at the function's callsites.",
+        "suggestion": "Change the type of the parameter to `const &`.",
+        "severity": "ERROR",
+        "category": "Perf regression",
+        "line": 65,
+        "column": 3,
+        "procedure": "CryptoPP::FHMQV_Domain<CryptoPP::DL_GroupParameters_EC<CryptoPP::ECP>,CryptoPP::EnumToType<int,2>,CryptoPP::SHA256>::FHMQV_Domain<CryptoPP::OID>",
+        "procedure_start_line": 65,
+        "file": "fhmqv.h",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "fhmqv.h",
+                "line_number": 65,
+                "column_number": 3,
+                "description": "Parameter v1 with type `CryptoPP::OID`"
+            }
+        ],
+        "bug_trace_length": 1,
+        "bug_trace_max_depth": 0,
+        "key": "fhmqv.h|FHMQV_Domain<CryptoPP::OID>|PULSE_CONST_REFABLE",
+        "node_key": "c1af9837edc853fe4afe9cf1a19e5ad8",
+        "hash": "e486761d8804d33bc13904914731a70c",
+        "bug_type_hum": "Const Refable Parameter",
+        "extras": {
+            "copy_type": "CryptoPP::OID"
+        }
+    },
+    {
+        "bug_type": "NULLPTR_DEREFERENCE",
+        "qualifier": "`this->m_owner.AttachedTransformation()` could be null (from the call to `CryptoPP::BufferedTransformation::AttachedTransformation()` on line 1008) and is dereferenced.",
+        "severity": "ERROR",
+        "category": "Null pointer dereference",
+        "line": 1008,
+        "column": 11,
+        "procedure": "CryptoPP::OutputProxy::CreatePutSpace",
+        "procedure_start_line": 1007,
+        "file": "filters.h",
+        "bug_trace": [
+            {
+                "level": 1,
+                "filename": "filters.h",
+                "line_number": 1008,
+                "column_number": 11,
+                "description": "in call to `CryptoPP::BufferedTransformation::AttachedTransformation`"
+            },
+            {
+                "level": 2,
+                "filename": "cryptlib.h",
+                "line_number": 2346,
+                "column_number": 93,
+                "description": "is assigned to the null pointer"
+            },
+            {
+                "level": 2,
+                "filename": "cryptlib.h",
+                "line_number": 2346,
+                "column_number": 93,
+                "description": "returned"
+            },
+            {
+                "level": 1,
+                "filename": "filters.h",
+                "line_number": 1008,
+                "column_number": 11,
+                "description": "return from call to `CryptoPP::BufferedTransformation::AttachedTransformation`"
+            },
+            {
+                "level": 1,
+                "filename": "filters.h",
+                "line_number": 1008,
+                "column_number": 11,
+                "description": "invalid access occurs here"
+            }
+        ],
+        "bug_trace_length": 5,
+        "bug_trace_max_depth": 2,
+        "key": "filters.h|CreatePutSpace|NULLPTR_DEREFERENCE",
+        "node_key": "6bc46d71faf2a2904a092622a30f3c43",
+        "hash": "9fe3691946ddc3bc8f1d5207744f60f5",
+        "bug_type_hum": "Null Dereference",
+        "extras": {}
+    },
+    {
+        "bug_type": "NULLPTR_DEREFERENCE",
+        "qualifier": "`this->m_owner.AttachedTransformation()` could be null (from the call to `CryptoPP::BufferedTransformation::AttachedTransformation()` on line 1010) and is dereferenced.",
+        "severity": "ERROR",
+        "category": "Null pointer dereference",
+        "line": 1010,
+        "column": 11,
+        "procedure": "CryptoPP::OutputProxy::Put2",
+        "procedure_start_line": 1009,
+        "file": "filters.h",
+        "bug_trace": [
+            {
+                "level": 1,
+                "filename": "filters.h",
+                "line_number": 1010,
+                "column_number": 11,
+                "description": "in call to `CryptoPP::BufferedTransformation::AttachedTransformation`"
+            },
+            {
+                "level": 2,
+                "filename": "cryptlib.h",
+                "line_number": 2346,
+                "column_number": 93,
+                "description": "is assigned to the null pointer"
+            },
+            {
+                "level": 2,
+                "filename": "cryptlib.h",
+                "line_number": 2346,
+                "column_number": 93,
+                "description": "returned"
+            },
+            {
+                "level": 1,
+                "filename": "filters.h",
+                "line_number": 1010,
+                "column_number": 11,
+                "description": "return from call to `CryptoPP::BufferedTransformation::AttachedTransformation`"
+            },
+            {
+                "level": 1,
+                "filename": "filters.h",
+                "line_number": 1010,
+                "column_number": 11,
+                "description": "invalid access occurs here"
+            }
+        ],
+        "bug_trace_length": 5,
+        "bug_trace_max_depth": 2,
+        "key": "filters.h|Put2|NULLPTR_DEREFERENCE",
+        "node_key": "2b8729d2f1255a3b81ecc2d9dad93be5",
+        "hash": "0df7ac78d76cfed44ecbe5c8eff322ba",
+        "bug_type_hum": "Null Dereference",
+        "extras": {}
+    },
+    {
+        "bug_type": "NULLPTR_DEREFERENCE",
+        "qualifier": "`this->m_owner.AttachedTransformation()` could be null (from the call to `CryptoPP::BufferedTransformation::AttachedTransformation()` on line 1012) and is dereferenced.",
+        "severity": "ERROR",
+        "category": "Null pointer dereference",
+        "line": 1012,
+        "column": 11,
+        "procedure": "CryptoPP::OutputProxy::PutModifiable2",
+        "procedure_start_line": 1011,
+        "file": "filters.h",
+        "bug_trace": [
+            {
+                "level": 1,
+                "filename": "filters.h",
+                "line_number": 1012,
+                "column_number": 11,
+                "description": "in call to `CryptoPP::BufferedTransformation::AttachedTransformation`"
+            },
+            {
+                "level": 2,
+                "filename": "cryptlib.h",
+                "line_number": 2346,
+                "column_number": 93,
+                "description": "is assigned to the null pointer"
+            },
+            {
+                "level": 2,
+                "filename": "cryptlib.h",
+                "line_number": 2346,
+                "column_number": 93,
+                "description": "returned"
+            },
+            {
+                "level": 1,
+                "filename": "filters.h",
+                "line_number": 1012,
+                "column_number": 11,
+                "description": "return from call to `CryptoPP::BufferedTransformation::AttachedTransformation`"
+            },
+            {
+                "level": 1,
+                "filename": "filters.h",
+                "line_number": 1012,
+                "column_number": 11,
+                "description": "invalid access occurs here"
+            }
+        ],
+        "bug_trace_length": 5,
+        "bug_trace_max_depth": 2,
+        "key": "filters.h|PutModifiable2|NULLPTR_DEREFERENCE",
+        "node_key": "2b8729d2f1255a3b81ecc2d9dad93be5",
+        "hash": "e5dfeb47ab249fb91c086f51bdc2d7e8",
+        "bug_type_hum": "Null Dereference",
+        "extras": {}
+    },
+    {
+        "bug_type": "NULLPTR_DEREFERENCE",
+        "qualifier": "`this->m_owner.AttachedTransformation()` could be null (from the call to `CryptoPP::BufferedTransformation::AttachedTransformation()` on line 1014) and is dereferenced.",
+        "severity": "ERROR",
+        "category": "Null pointer dereference",
+        "line": 1014,
+        "column": 22,
+        "procedure": "CryptoPP::OutputProxy::Initialize",
+        "procedure_start_line": 1013,
+        "file": "filters.h",
+        "bug_trace": [
+            {
+                "level": 1,
+                "filename": "filters.h",
+                "line_number": 1014,
+                "column_number": 22,
+                "description": "in call to `CryptoPP::BufferedTransformation::AttachedTransformation`"
+            },
+            {
+                "level": 2,
+                "filename": "cryptlib.h",
+                "line_number": 2346,
+                "column_number": 93,
+                "description": "is assigned to the null pointer"
+            },
+            {
+                "level": 2,
+                "filename": "cryptlib.h",
+                "line_number": 2346,
+                "column_number": 93,
+                "description": "returned"
+            },
+            {
+                "level": 1,
+                "filename": "filters.h",
+                "line_number": 1014,
+                "column_number": 22,
+                "description": "return from call to `CryptoPP::BufferedTransformation::AttachedTransformation`"
+            },
+            {
+                "level": 1,
+                "filename": "filters.h",
+                "line_number": 1014,
+                "column_number": 22,
+                "description": "invalid access occurs here"
+            }
+        ],
+        "bug_trace_length": 5,
+        "bug_trace_max_depth": 2,
+        "key": "filters.h|Initialize|NULLPTR_DEREFERENCE",
+        "node_key": "e5f1f55937240b71c9e35d007e92068c",
+        "hash": "dbf7a4bdb31ae6ef69718738ad8a47fe",
+        "bug_type_hum": "Null Dereference",
+        "extras": {}
+    },
+    {
+        "bug_type": "NULLPTR_DEREFERENCE",
+        "qualifier": "`this->m_owner.AttachedTransformation()` could be null (from the call to `CryptoPP::BufferedTransformation::AttachedTransformation()` on line 1016) and is dereferenced.",
+        "severity": "ERROR",
+        "category": "Null pointer dereference",
+        "line": 1016,
+        "column": 26,
+        "procedure": "CryptoPP::OutputProxy::Flush",
+        "procedure_start_line": 1015,
+        "file": "filters.h",
+        "bug_trace": [
+            {
+                "level": 1,
+                "filename": "filters.h",
+                "line_number": 1016,
+                "column_number": 26,
+                "description": "in call to `CryptoPP::BufferedTransformation::AttachedTransformation`"
+            },
+            {
+                "level": 2,
+                "filename": "cryptlib.h",
+                "line_number": 2346,
+                "column_number": 93,
+                "description": "is assigned to the null pointer"
+            },
+            {
+                "level": 2,
+                "filename": "cryptlib.h",
+                "line_number": 2346,
+                "column_number": 93,
+                "description": "returned"
+            },
+            {
+                "level": 1,
+                "filename": "filters.h",
+                "line_number": 1016,
+                "column_number": 26,
+                "description": "return from call to `CryptoPP::BufferedTransformation::AttachedTransformation`"
+            },
+            {
+                "level": 1,
+                "filename": "filters.h",
+                "line_number": 1016,
+                "column_number": 26,
+                "description": "invalid access occurs here"
+            }
+        ],
+        "bug_trace_length": 5,
+        "bug_trace_max_depth": 2,
+        "key": "filters.h|Flush|NULLPTR_DEREFERENCE",
+        "node_key": "762b9e3c0ed5a17a0a6e7faf9b6e67c4",
+        "hash": "cf706e4825c4d10e0998d0c504c43c2f",
+        "bug_type_hum": "Null Dereference",
+        "extras": {}
+    },
+    {
+        "bug_type": "NULLPTR_DEREFERENCE",
+        "qualifier": "`this->m_owner.AttachedTransformation()` could be null (from the call to `CryptoPP::BufferedTransformation::AttachedTransformation()` on line 1018) and is dereferenced.",
+        "severity": "ERROR",
+        "category": "Null pointer dereference",
+        "line": 1018,
+        "column": 26,
+        "procedure": "CryptoPP::OutputProxy::MessageSeriesEnd",
+        "procedure_start_line": 1017,
+        "file": "filters.h",
+        "bug_trace": [
+            {
+                "level": 1,
+                "filename": "filters.h",
+                "line_number": 1018,
+                "column_number": 26,
+                "description": "in call to `CryptoPP::BufferedTransformation::AttachedTransformation`"
+            },
+            {
+                "level": 2,
+                "filename": "cryptlib.h",
+                "line_number": 2346,
+                "column_number": 93,
+                "description": "is assigned to the null pointer"
+            },
+            {
+                "level": 2,
+                "filename": "cryptlib.h",
+                "line_number": 2346,
+                "column_number": 93,
+                "description": "returned"
+            },
+            {
+                "level": 1,
+                "filename": "filters.h",
+                "line_number": 1018,
+                "column_number": 26,
+                "description": "return from call to `CryptoPP::BufferedTransformation::AttachedTransformation`"
+            },
+            {
+                "level": 1,
+                "filename": "filters.h",
+                "line_number": 1018,
+                "column_number": 26,
+                "description": "invalid access occurs here"
+            }
+        ],
+        "bug_trace_length": 5,
+        "bug_trace_max_depth": 2,
+        "key": "filters.h|MessageSeriesEnd|NULLPTR_DEREFERENCE",
+        "node_key": "20c42ea03771fa909b90947f08697484",
+        "hash": "50c7b9cf9e93843e2200b919571e2aa1",
+        "bug_type_hum": "Null Dereference",
+        "extras": {}
+    },
+    {
+        "bug_type": "NULLPTR_DEREFERENCE",
+        "qualifier": "`this->m_owner.AttachedTransformation()` could be null (from the call to `CryptoPP::BufferedTransformation::AttachedTransformation()` on line 1021) and is dereferenced.",
+        "severity": "ERROR",
+        "category": "Null pointer dereference",
+        "line": 1021,
+        "column": 11,
+        "procedure": "CryptoPP::OutputProxy::ChannelCreatePutSpace",
+        "procedure_start_line": 1020,
+        "file": "filters.h",
+        "bug_trace": [
+            {
+                "level": 1,
+                "filename": "filters.h",
+                "line_number": 1021,
+                "column_number": 11,
+                "description": "in call to `CryptoPP::BufferedTransformation::AttachedTransformation`"
+            },
+            {
+                "level": 2,
+                "filename": "cryptlib.h",
+                "line_number": 2346,
+                "column_number": 93,
+                "description": "is assigned to the null pointer"
+            },
+            {
+                "level": 2,
+                "filename": "cryptlib.h",
+                "line_number": 2346,
+                "column_number": 93,
+                "description": "returned"
+            },
+            {
+                "level": 1,
+                "filename": "filters.h",
+                "line_number": 1021,
+                "column_number": 11,
+                "description": "return from call to `CryptoPP::BufferedTransformation::AttachedTransformation`"
+            },
+            {
+                "level": 1,
+                "filename": "filters.h",
+                "line_number": 1021,
+                "column_number": 11,
+                "description": "invalid access occurs here"
+            }
+        ],
+        "bug_trace_length": 5,
+        "bug_trace_max_depth": 2,
+        "key": "filters.h|ChannelCreatePutSpace|NULLPTR_DEREFERENCE",
+        "node_key": "d34255f3a004674240f4fb4108bbcd61",
+        "hash": "d5d91bf7053ed130d8f453d023d49137",
+        "bug_type_hum": "Null Dereference",
+        "extras": {}
+    },
+    {
+        "bug_type": "NULLPTR_DEREFERENCE",
+        "qualifier": "`this->m_owner.AttachedTransformation()` could be null (from the call to `CryptoPP::BufferedTransformation::AttachedTransformation()` on line 1023) and is dereferenced.",
+        "severity": "ERROR",
+        "category": "Null pointer dereference",
+        "line": 1023,
+        "column": 11,
+        "procedure": "CryptoPP::OutputProxy::ChannelPut2",
+        "procedure_start_line": 1022,
+        "file": "filters.h",
+        "bug_trace": [
+            {
+                "level": 1,
+                "filename": "filters.h",
+                "line_number": 1023,
+                "column_number": 11,
+                "description": "in call to `CryptoPP::BufferedTransformation::AttachedTransformation`"
+            },
+            {
+                "level": 2,
+                "filename": "cryptlib.h",
+                "line_number": 2346,
+                "column_number": 93,
+                "description": "is assigned to the null pointer"
+            },
+            {
+                "level": 2,
+                "filename": "cryptlib.h",
+                "line_number": 2346,
+                "column_number": 93,
+                "description": "returned"
+            },
+            {
+                "level": 1,
+                "filename": "filters.h",
+                "line_number": 1023,
+                "column_number": 11,
+                "description": "return from call to `CryptoPP::BufferedTransformation::AttachedTransformation`"
+            },
+            {
+                "level": 1,
+                "filename": "filters.h",
+                "line_number": 1023,
+                "column_number": 11,
+                "description": "invalid access occurs here"
+            }
+        ],
+        "bug_trace_length": 5,
+        "bug_trace_max_depth": 2,
+        "key": "filters.h|ChannelPut2|NULLPTR_DEREFERENCE",
+        "node_key": "9fdf2374f6cc4510481ac0ca115cbad8",
+        "hash": "578e0e53499ecdb6d596ec6329c0058c",
+        "bug_type_hum": "Null Dereference",
+        "extras": {}
+    },
+    {
+        "bug_type": "NULLPTR_DEREFERENCE",
+        "qualifier": "`this->m_owner.AttachedTransformation()` could be null (from the call to `CryptoPP::BufferedTransformation::AttachedTransformation()` on line 1025) and is dereferenced.",
+        "severity": "ERROR",
+        "category": "Null pointer dereference",
+        "line": 1025,
+        "column": 11,
+        "procedure": "CryptoPP::OutputProxy::ChannelPutModifiable2",
+        "procedure_start_line": 1024,
+        "file": "filters.h",
+        "bug_trace": [
+            {
+                "level": 1,
+                "filename": "filters.h",
+                "line_number": 1025,
+                "column_number": 11,
+                "description": "in call to `CryptoPP::BufferedTransformation::AttachedTransformation`"
+            },
+            {
+                "level": 2,
+                "filename": "cryptlib.h",
+                "line_number": 2346,
+                "column_number": 93,
+                "description": "is assigned to the null pointer"
+            },
+            {
+                "level": 2,
+                "filename": "cryptlib.h",
+                "line_number": 2346,
+                "column_number": 93,
+                "description": "returned"
+            },
+            {
+                "level": 1,
+                "filename": "filters.h",
+                "line_number": 1025,
+                "column_number": 11,
+                "description": "return from call to `CryptoPP::BufferedTransformation::AttachedTransformation`"
+            },
+            {
+                "level": 1,
+                "filename": "filters.h",
+                "line_number": 1025,
+                "column_number": 11,
+                "description": "invalid access occurs here"
+            }
+        ],
+        "bug_trace_length": 5,
+        "bug_trace_max_depth": 2,
+        "key": "filters.h|ChannelPutModifiable2|NULLPTR_DEREFERENCE",
+        "node_key": "9fdf2374f6cc4510481ac0ca115cbad8",
+        "hash": "0e02b34b416680bf0509bedb27d40610",
+        "bug_type_hum": "Null Dereference",
+        "extras": {}
+    },
+    {
+        "bug_type": "NULLPTR_DEREFERENCE",
+        "qualifier": "`this->m_owner.AttachedTransformation()` could be null (from the call to `CryptoPP::BufferedTransformation::AttachedTransformation()` on line 1027) and is dereferenced.",
+        "severity": "ERROR",
+        "category": "Null pointer dereference",
+        "line": 1027,
+        "column": 26,
+        "procedure": "CryptoPP::OutputProxy::ChannelFlush",
+        "procedure_start_line": 1026,
+        "file": "filters.h",
+        "bug_trace": [
+            {
+                "level": 1,
+                "filename": "filters.h",
+                "line_number": 1027,
+                "column_number": 26,
+                "description": "in call to `CryptoPP::BufferedTransformation::AttachedTransformation`"
+            },
+            {
+                "level": 2,
+                "filename": "cryptlib.h",
+                "line_number": 2346,
+                "column_number": 93,
+                "description": "is assigned to the null pointer"
+            },
+            {
+                "level": 2,
+                "filename": "cryptlib.h",
+                "line_number": 2346,
+                "column_number": 93,
+                "description": "returned"
+            },
+            {
+                "level": 1,
+                "filename": "filters.h",
+                "line_number": 1027,
+                "column_number": 26,
+                "description": "return from call to `CryptoPP::BufferedTransformation::AttachedTransformation`"
+            },
+            {
+                "level": 1,
+                "filename": "filters.h",
+                "line_number": 1027,
+                "column_number": 26,
+                "description": "invalid access occurs here"
+            }
+        ],
+        "bug_trace_length": 5,
+        "bug_trace_max_depth": 2,
+        "key": "filters.h|ChannelFlush|NULLPTR_DEREFERENCE",
+        "node_key": "0753c37f8b73fd704f093979b7c2cdb7",
+        "hash": "17489c5e177c78854ab258a3c86ac919",
+        "bug_type_hum": "Null Dereference",
+        "extras": {}
+    },
+    {
+        "bug_type": "NULLPTR_DEREFERENCE",
+        "qualifier": "`this->m_owner.AttachedTransformation()` could be null (from the call to `CryptoPP::BufferedTransformation::AttachedTransformation()` on line 1029) and is dereferenced.",
+        "severity": "ERROR",
+        "category": "Null pointer dereference",
+        "line": 1029,
+        "column": 26,
+        "procedure": "CryptoPP::OutputProxy::ChannelMessageSeriesEnd",
+        "procedure_start_line": 1028,
+        "file": "filters.h",
+        "bug_trace": [
+            {
+                "level": 1,
+                "filename": "filters.h",
+                "line_number": 1029,
+                "column_number": 26,
+                "description": "in call to `CryptoPP::BufferedTransformation::AttachedTransformation`"
+            },
+            {
+                "level": 2,
+                "filename": "cryptlib.h",
+                "line_number": 2346,
+                "column_number": 93,
+                "description": "is assigned to the null pointer"
+            },
+            {
+                "level": 2,
+                "filename": "cryptlib.h",
+                "line_number": 2346,
+                "column_number": 93,
+                "description": "returned"
+            },
+            {
+                "level": 1,
+                "filename": "filters.h",
+                "line_number": 1029,
+                "column_number": 26,
+                "description": "return from call to `CryptoPP::BufferedTransformation::AttachedTransformation`"
+            },
+            {
+                "level": 1,
+                "filename": "filters.h",
+                "line_number": 1029,
+                "column_number": 26,
+                "description": "invalid access occurs here"
+            }
+        ],
+        "bug_trace_length": 5,
+        "bug_trace_max_depth": 2,
+        "key": "filters.h|ChannelMessageSeriesEnd|NULLPTR_DEREFERENCE",
+        "node_key": "762b9e3c0ed5a17a0a6e7faf9b6e67c4",
+        "hash": "23edc9fe3a69b0ed2f6b252730e12090",
+        "bug_type_hum": "Null Dereference",
+        "extras": {}
+    },
+    {
+        "bug_type": "NULLPTR_DEREFERENCE",
+        "qualifier": "`buf.operator_unsigned_char_*()` could be null (null value originating from line 84) and is dereferenced.",
+        "severity": "ERROR",
+        "category": "Null pointer dereference",
+        "line": 87,
+        "column": 22,
+        "procedure": "CryptoPP::PolynomialMod2::Randomize",
+        "procedure_start_line": 82,
+        "file": "gf2n.cpp",
+        "bug_trace": [
+            {
+                "level": 1,
+                "filename": "gf2n.cpp",
+                "line_number": 82,
+                "column_number": 1,
+                "description": "parameter `nbits` of CryptoPP::PolynomialMod2::Randomize"
+            },
+            {
+                "level": 1,
+                "filename": "gf2n.cpp",
+                "line_number": 84,
+                "column_number": 2,
+                "description": "is assigned to the constant 8"
+            },
+            {
+                "level": 1,
+                "filename": "gf2n.cpp",
+                "line_number": 84,
+                "column_number": 2,
+                "description": "is assigned to the constant 1"
+            },
+            {
+                "level": 1,
+                "filename": "gf2n.cpp",
+                "line_number": 84,
+                "column_number": 2,
+                "description": "assigned"
+            },
+            {
+                "level": 1,
+                "filename": "gf2n.cpp",
+                "line_number": 85,
+                "column_number": 2,
+                "description": "variable `buf` declared here"
+            },
+            {
+                "level": 1,
+                "filename": "gf2n.cpp",
+                "line_number": 85,
+                "column_number": 2,
+                "description": "struct field address `m_ptr` created"
+            },
+            {
+                "level": 1,
+                "filename": "gf2n.cpp",
+                "line_number": 85,
+                "column_number": 15,
+                "description": "in call to `CryptoPP::SecBlock<unsigned char,CryptoPP::AllocatorWithCleanup<unsigned char,0>>::SecBlock`"
+            },
+            {
+                "level": 2,
+                "filename": "secblock.h",
+                "line_number": 766,
+                "column_number": 2,
+                "description": "parameter `size` of CryptoPP::SecBlock<unsigned char,CryptoPP::AllocatorWithCleanup<unsigned char,0>>::SecBlock"
+            },
+            {
+                "level": 2,
+                "filename": "secblock.h",
+                "line_number": 766,
+                "column_number": 2,
+                "description": "parameter `this` of CryptoPP::SecBlock<unsigned char,CryptoPP::AllocatorWithCleanup<unsigned char,0>>::SecBlock"
+            },
+            {
+                "level": 2,
+                "filename": "secblock.h",
+                "line_number": 767,
+                "column_number": 44,
+                "description": "in call to `CryptoPP::AllocatorWithCleanup<unsigned char,0>::allocate`"
+            },
+            {
+                "level": 3,
+                "filename": "secblock.h",
+                "line_number": 211,
+                "column_number": 4,
+                "description": "is assigned to the null pointer"
+            },
+            {
+                "level": 3,
+                "filename": "secblock.h",
+                "line_number": 211,
+                "column_number": 4,
+                "description": "returned"
+            },
+            {
+                "level": 2,
+                "filename": "secblock.h",
+                "line_number": 767,
+                "column_number": 44,
+                "description": "return from call to `CryptoPP::AllocatorWithCleanup<unsigned char,0>::allocate`"
+            },
+            {
+                "level": 2,
+                "filename": "secblock.h",
+                "line_number": 767,
+                "column_number": 38,
+                "description": "assigned"
+            },
+            {
+                "level": 1,
+                "filename": "gf2n.cpp",
+                "line_number": 85,
+                "column_number": 15,
+                "description": "return from call to `CryptoPP::SecBlock<unsigned char,CryptoPP::AllocatorWithCleanup<unsigned char,0>>::SecBlock`"
+            },
+            {
+                "level": 1,
+                "filename": "gf2n.cpp",
+                "line_number": 87,
+                "column_number": 22,
+                "description": "in call to `CryptoPP::SecBlock<unsigned char,CryptoPP::AllocatorWithCleanup<unsigned char,0>>::operator_unsigned_char_*`"
+            },
+            {
+                "level": 2,
+                "filename": "secblock.h",
+                "line_number": 829,
+                "column_number": 2,
+                "description": "parameter `this` of CryptoPP::SecBlock<unsigned char,CryptoPP::AllocatorWithCleanup<unsigned char,0>>::operator_unsigned_char_*"
+            },
+            {
+                "level": 2,
+                "filename": "secblock.h",
+                "line_number": 830,
+                "column_number": 4,
+                "description": "returned"
+            },
+            {
+                "level": 1,
+                "filename": "gf2n.cpp",
+                "line_number": 87,
+                "column_number": 22,
+                "description": "return from call to `CryptoPP::SecBlock<unsigned char,CryptoPP::AllocatorWithCleanup<unsigned char,0>>::operator_unsigned_char_*`"
+            },
+            {
+                "level": 1,
+                "filename": "gf2n.cpp",
+                "line_number": 87,
+                "column_number": 22,
+                "description": "invalid access occurs here"
+            }
+        ],
+        "bug_trace_length": 20,
+        "bug_trace_max_depth": 3,
+        "key": "gf2n.cpp|Randomize|NULLPTR_DEREFERENCE",
+        "node_key": "0b80a0bed28189a9d50d842b6cf82999",
+        "hash": "c0a3e5c0bd53f669f5f01ae658aef4b3",
+        "bug_type_hum": "Null Dereference",
+        "extras": {}
+    },
+    {
+        "bug_type": "NULLPTR_DEREFERENCE",
+        "qualifier": "`result.reg.size()` could be null (from the call to `CryptoPP::PolynomialMod2::PolynomialMod2()` on line 93) and is dereferenced.",
+        "severity": "ERROR",
+        "category": "Null pointer dereference",
+        "line": 96,
+        "column": 48,
+        "procedure": "CryptoPP::PolynomialMod2::AllOnes",
+        "procedure_start_line": 91,
+        "file": "gf2n.cpp",
+        "bug_trace": [
+            {
+                "level": 1,
+                "filename": "gf2n.cpp",
+                "line_number": 93,
+                "column_number": 2,
+                "description": "variable `result` declared here"
+            },
+            {
+                "level": 1,
+                "filename": "gf2n.cpp",
+                "line_number": 93,
+                "column_number": 17,
+                "description": "in call to `CryptoPP::PolynomialMod2::PolynomialMod2`"
+            },
+            {
+                "level": 2,
+                "filename": "gf2n.cpp",
+                "line_number": 64,
+                "column_number": 1,
+                "description": "parameter `this` of CryptoPP::PolynomialMod2::PolynomialMod2"
+            },
+            {
+                "level": 2,
+                "filename": "gf2n.cpp",
+                "line_number": 65,
+                "column_number": 8,
+                "description": "in call to `CryptoPP::BitsToWords`"
+            },
+            {
+                "level": 3,
+                "filename": "misc.h",
+                "line_number": 1165,
+                "column_number": 20,
+                "description": "in call to `__infer_globals_initializer_CryptoPP::WORD_BITS`"
+            },
+            {
+                "level": 3,
+                "filename": "misc.h",
+                "line_number": 1165,
+                "column_number": 33,
+                "description": "in call to `__infer_globals_initializer_CryptoPP::WORD_BITS`"
+            },
+            {
+                "level": 4,
+                "filename": "config_int.h",
+                "line_number": 260,
+                "column_number": 54,
+                "description": "in call to `__infer_globals_initializer_CryptoPP::WORD_SIZE`"
+            },
+            {
+                "level": 5,
+                "filename": "config_int.h",
+                "line_number": 255,
+                "column_number": 1,
+                "description": "macro expanded here"
+            },
+            {
+                "level": 5,
+                "filename": "config_misc.h",
+                "line_number": 152,
+                "column_number": -1,
+                "description": "is assigned to the constant 8"
+            },
+            {
+                "level": 5,
+                "filename": "config_int.h",
+                "line_number": 255,
+                "column_number": 1,
+                "description": "macro expanded here"
+            },
+            {
+                "level": 5,
+                "filename": "config_misc.h",
+                "line_number": 152,
+                "column_number": -1,
+                "description": "assigned"
+            },
+            {
+                "level": 4,
+                "filename": "config_int.h",
+                "line_number": 260,
+                "column_number": 54,
+                "description": "return from call to `__infer_globals_initializer_CryptoPP::WORD_SIZE`"
+            },
+            {
+                "level": 4,
+                "filename": "config_int.h",
+                "line_number": 260,
+                "column_number": 1,
+                "description": "macro expanded here"
+            },
+            {
+                "level": 4,
+                "filename": "config_misc.h",
+                "line_number": 152,
+                "column_number": -1,
+                "description": "is assigned to the constant 8"
+            },
+            {
+                "level": 4,
+                "filename": "config_int.h",
+                "line_number": 260,
+                "column_number": 1,
+                "description": "macro expanded here"
+            },
+            {
+                "level": 4,
+                "filename": "config_misc.h",
+                "line_number": 152,
+                "column_number": -1,
+                "description": "assigned"
+            },
+            {
+                "level": 3,
+                "filename": "misc.h",
+                "line_number": 1165,
+                "column_number": 33,
+                "description": "return from call to `__infer_globals_initializer_CryptoPP::WORD_BITS`"
+            },
+            {
+                "level": 3,
+                "filename": "misc.h",
+                "line_number": 1165,
+                "column_number": 2,
+                "description": "is assigned to the constant 1"
+            },
+            {
+                "level": 3,
+                "filename": "misc.h",
+                "line_number": 1165,
+                "column_number": 2,
+                "description": "returned"
+            },
+            {
+                "level": 2,
+                "filename": "gf2n.cpp",
+                "line_number": 65,
+                "column_number": 8,
+                "description": "return from call to `CryptoPP::BitsToWords`"
+            },
+            {
+                "level": 2,
+                "filename": "gf2n.cpp",
+                "line_number": 65,
+                "column_number": 4,
+                "description": "in call to `CryptoPP::SecBlock<unsigned long,CryptoPP::AllocatorWithCleanup<unsigned long,0>>::SecBlock`"
+            },
+            {
+                "level": 3,
+                "filename": "secblock.h",
+                "line_number": 766,
+                "column_number": 2,
+                "description": "parameter `this` of CryptoPP::SecBlock<unsigned long,CryptoPP::AllocatorWithCleanup<unsigned long,0>>::SecBlock"
+            },
+            {
+                "level": 3,
+                "filename": "secblock.h",
+                "line_number": 766,
+                "column_number": 2,
+                "description": "parameter `size` of CryptoPP::SecBlock<unsigned long,CryptoPP::AllocatorWithCleanup<unsigned long,0>>::SecBlock"
+            },
+            {
+                "level": 3,
+                "filename": "secblock.h",
+                "line_number": 767,
+                "column_number": 44,
+                "description": "in call to `CryptoPP::AllocatorWithCleanup<unsigned long,0>::allocate`"
+            },
+            {
+                "level": 4,
+                "filename": "secblock.h",
+                "line_number": 211,
+                "column_number": 4,
+                "description": "is assigned to the null pointer"
+            },
+            {
+                "level": 4,
+                "filename": "secblock.h",
+                "line_number": 211,
+                "column_number": 4,
+                "description": "returned"
+            },
+            {
+                "level": 3,
+                "filename": "secblock.h",
+                "line_number": 767,
+                "column_number": 44,
+                "description": "return from call to `CryptoPP::AllocatorWithCleanup<unsigned long,0>::allocate`"
+            },
+            {
+                "level": 3,
+                "filename": "secblock.h",
+                "line_number": 767,
+                "column_number": 38,
+                "description": "assigned"
+            },
+            {
+                "level": 2,
+                "filename": "gf2n.cpp",
+                "line_number": 65,
+                "column_number": 4,
+                "description": "return from call to `CryptoPP::SecBlock<unsigned long,CryptoPP::AllocatorWithCleanup<unsigned long,0>>::SecBlock`"
+            },
+            {
+                "level": 1,
+                "filename": "gf2n.cpp",
+                "line_number": 93,
+                "column_number": 17,
+                "description": "return from call to `CryptoPP::PolynomialMod2::PolynomialMod2`"
+            },
+            {
+                "level": 1,
+                "filename": "gf2n.cpp",
+                "line_number": 96,
+                "column_number": 48,
+                "description": "in call to `CryptoPP::SecBlock<unsigned long,CryptoPP::AllocatorWithCleanup<unsigned long,0>>::operator_unsigned_long_*`"
+            },
+            {
+                "level": 2,
+                "filename": "secblock.h",
+                "line_number": 829,
+                "column_number": 2,
+                "description": "parameter `this` of CryptoPP::SecBlock<unsigned long,CryptoPP::AllocatorWithCleanup<unsigned long,0>>::operator_unsigned_long_*"
+            },
+            {
+                "level": 2,
+                "filename": "secblock.h",
+                "line_number": 830,
+                "column_number": 4,
+                "description": "returned"
+            },
+            {
+                "level": 1,
+                "filename": "gf2n.cpp",
+                "line_number": 96,
+                "column_number": 48,
+                "description": "return from call to `CryptoPP::SecBlock<unsigned long,CryptoPP::AllocatorWithCleanup<unsigned long,0>>::operator_unsigned_long_*`"
+            },
+            {
+                "level": 1,
+                "filename": "gf2n.cpp",
+                "line_number": 96,
+                "column_number": 48,
+                "description": "invalid access occurs here"
+            }
+        ],
+        "bug_trace_length": 31,
+        "bug_trace_max_depth": 5,
+        "key": "gf2n.cpp|AllOnes|NULLPTR_DEREFERENCE",
+        "node_key": "98ab4bf70978b12f41bc79c5ae3eab82",
+        "hash": "db85a589961bae8a773eb3670609d7ca",
+        "bug_type_hum": "Null Dereference",
+        "extras": {}
+    },
+    {
+        "bug_type": "NULLPTR_DEREFERENCE",
+        "qualifier": "`i` could be null (from the call to `CryptoPP::PolynomialMod2::PolynomialMod2()` on line 344) and is dereferenced.",
+        "severity": "ERROR",
+        "category": "Null pointer dereference",
+        "line": 351,
+        "column": 4,
+        "procedure": "CryptoPP::PolynomialMod2::Squared",
+        "procedure_start_line": 340,
+        "file": "gf2n.cpp",
+        "bug_trace": [
+            {
+                "level": 1,
+                "filename": "gf2n.cpp",
+                "line_number": 344,
+                "column_number": 2,
+                "description": "variable `result` declared here"
+            },
+            {
+                "level": 1,
+                "filename": "gf2n.cpp",
+                "line_number": 344,
+                "column_number": 17,
+                "description": "in call to `CryptoPP::PolynomialMod2::PolynomialMod2`"
+            },
+            {
+                "level": 2,
+                "filename": "gf2n.cpp",
+                "line_number": 64,
+                "column_number": 1,
+                "description": "parameter `this` of CryptoPP::PolynomialMod2::PolynomialMod2"
+            },
+            {
+                "level": 2,
+                "filename": "gf2n.cpp",
+                "line_number": 65,
+                "column_number": 8,
+                "description": "in call to `CryptoPP::BitsToWords`"
+            },
+            {
+                "level": 3,
+                "filename": "misc.h",
+                "line_number": 1165,
+                "column_number": 20,
+                "description": "in call to `__infer_globals_initializer_CryptoPP::WORD_BITS`"
+            },
+            {
+                "level": 3,
+                "filename": "misc.h",
+                "line_number": 1165,
+                "column_number": 33,
+                "description": "in call to `__infer_globals_initializer_CryptoPP::WORD_BITS`"
+            },
+            {
+                "level": 4,
+                "filename": "config_int.h",
+                "line_number": 260,
+                "column_number": 54,
+                "description": "in call to `__infer_globals_initializer_CryptoPP::WORD_SIZE`"
+            },
+            {
+                "level": 5,
+                "filename": "config_int.h",
+                "line_number": 255,
+                "column_number": 1,
+                "description": "macro expanded here"
+            },
+            {
+                "level": 5,
+                "filename": "config_misc.h",
+                "line_number": 152,
+                "column_number": -1,
+                "description": "is assigned to the constant 8"
+            },
+            {
+                "level": 5,
+                "filename": "config_int.h",
+                "line_number": 255,
+                "column_number": 1,
+                "description": "macro expanded here"
+            },
+            {
+                "level": 5,
+                "filename": "config_misc.h",
+                "line_number": 152,
+                "column_number": -1,
+                "description": "assigned"
+            },
+            {
+                "level": 4,
+                "filename": "config_int.h",
+                "line_number": 260,
+                "column_number": 54,
+                "description": "return from call to `__infer_globals_initializer_CryptoPP::WORD_SIZE`"
+            },
+            {
+                "level": 4,
+                "filename": "config_int.h",
+                "line_number": 260,
+                "column_number": 1,
+                "description": "macro expanded here"
+            },
+            {
+                "level": 4,
+                "filename": "config_misc.h",
+                "line_number": 152,
+                "column_number": -1,
+                "description": "is assigned to the constant 8"
+            },
+            {
+                "level": 4,
+                "filename": "config_int.h",
+                "line_number": 260,
+                "column_number": 1,
+                "description": "macro expanded here"
+            },
+            {
+                "level": 4,
+                "filename": "config_misc.h",
+                "line_number": 152,
+                "column_number": -1,
+                "description": "assigned"
+            },
+            {
+                "level": 3,
+                "filename": "misc.h",
+                "line_number": 1165,
+                "column_number": 33,
+                "description": "return from call to `__infer_globals_initializer_CryptoPP::WORD_BITS`"
+            },
+            {
+                "level": 3,
+                "filename": "misc.h",
+                "line_number": 1165,
+                "column_number": 2,
+                "description": "is assigned to the constant 1"
+            },
+            {
+                "level": 3,
+                "filename": "misc.h",
+                "line_number": 1165,
+                "column_number": 2,
+                "description": "returned"
+            },
+            {
+                "level": 2,
+                "filename": "gf2n.cpp",
+                "line_number": 65,
+                "column_number": 8,
+                "description": "return from call to `CryptoPP::BitsToWords`"
+            },
+            {
+                "level": 2,
+                "filename": "gf2n.cpp",
+                "line_number": 65,
+                "column_number": 4,
+                "description": "in call to `CryptoPP::SecBlock<unsigned long,CryptoPP::AllocatorWithCleanup<unsigned long,0>>::SecBlock`"
+            },
+            {
+                "level": 3,
+                "filename": "secblock.h",
+                "line_number": 766,
+                "column_number": 2,
+                "description": "parameter `this` of CryptoPP::SecBlock<unsigned long,CryptoPP::AllocatorWithCleanup<unsigned long,0>>::SecBlock"
+            },
+            {
+                "level": 3,
+                "filename": "secblock.h",
+                "line_number": 766,
+                "column_number": 2,
+                "description": "parameter `size` of CryptoPP::SecBlock<unsigned long,CryptoPP::AllocatorWithCleanup<unsigned long,0>>::SecBlock"
+            },
+            {
+                "level": 3,
+                "filename": "secblock.h",
+                "line_number": 767,
+                "column_number": 44,
+                "description": "in call to `CryptoPP::AllocatorWithCleanup<unsigned long,0>::allocate`"
+            },
+            {
+                "level": 4,
+                "filename": "secblock.h",
+                "line_number": 211,
+                "column_number": 4,
+                "description": "is assigned to the null pointer"
+            },
+            {
+                "level": 4,
+                "filename": "secblock.h",
+                "line_number": 211,
+                "column_number": 4,
+                "description": "returned"
+            },
+            {
+                "level": 3,
+                "filename": "secblock.h",
+                "line_number": 767,
+                "column_number": 44,
+                "description": "return from call to `CryptoPP::AllocatorWithCleanup<unsigned long,0>::allocate`"
+            },
+            {
+                "level": 3,
+                "filename": "secblock.h",
+                "line_number": 767,
+                "column_number": 38,
+                "description": "assigned"
+            },
+            {
+                "level": 2,
+                "filename": "gf2n.cpp",
+                "line_number": 65,
+                "column_number": 4,
+                "description": "return from call to `CryptoPP::SecBlock<unsigned long,CryptoPP::AllocatorWithCleanup<unsigned long,0>>::SecBlock`"
+            },
+            {
+                "level": 1,
+                "filename": "gf2n.cpp",
+                "line_number": 344,
+                "column_number": 17,
+                "description": "return from call to `CryptoPP::PolynomialMod2::PolynomialMod2`"
+            },
+            {
+                "level": 1,
+                "filename": "gf2n.cpp",
+                "line_number": 351,
+                "column_number": 4,
+                "description": "in call to `CryptoPP::SecBlock<unsigned long,CryptoPP::AllocatorWithCleanup<unsigned long,0>>::operator_unsigned_long_*`"
+            },
+            {
+                "level": 2,
+                "filename": "secblock.h",
+                "line_number": 829,
+                "column_number": 2,
+                "description": "parameter `this` of CryptoPP::SecBlock<unsigned long,CryptoPP::AllocatorWithCleanup<unsigned long,0>>::operator_unsigned_long_*"
+            },
+            {
+                "level": 2,
+                "filename": "secblock.h",
+                "line_number": 830,
+                "column_number": 4,
+                "description": "returned"
+            },
+            {
+                "level": 1,
+                "filename": "gf2n.cpp",
+                "line_number": 351,
+                "column_number": 4,
+                "description": "return from call to `CryptoPP::SecBlock<unsigned long,CryptoPP::AllocatorWithCleanup<unsigned long,0>>::operator_unsigned_long_*`"
+            },
+            {
+                "level": 1,
+                "filename": "gf2n.cpp",
+                "line_number": 351,
+                "column_number": 4,
+                "description": "invalid access occurs here"
+            }
+        ],
+        "bug_trace_length": 31,
+        "bug_trace_max_depth": 5,
+        "key": "gf2n.cpp|Squared|NULLPTR_DEREFERENCE",
+        "node_key": "090a5814ca7db29eb2bc3bcf82ed03ce",
+        "hash": "22da88dc7f2efa94d5fcde4ce4c7abb6",
+        "bug_type_hum": "Null Dereference",
+        "extras": {}
+    },
+    {
+        "bug_type": "INFINITE_LOOP",
+        "qualifier": "Recurring state leading to infinite execution at line 125, column 5.",
+        "severity": "ERROR",
+        "category": "No_category",
+        "line": 125,
+        "column": 5,
+        "procedure": "CryptoPP::HIGHT::Base::UncheckedSetKey",
+        "procedure_start_line": 115,
+        "file": "hight.cpp",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "hight.cpp",
+                "line_number": 125,
+                "column_number": 5,
+                "description": "in loop"
+            }
+        ],
+        "bug_trace_length": 1,
+        "bug_trace_max_depth": 0,
+        "key": "hight.cpp|UncheckedSetKey|INFINITE_LOOP",
+        "node_key": "89e1fea3672f8c1bda5df785b829cfa3",
+        "hash": "110eb4bfb8e7b66b269c019ac062f6b1",
+        "bug_type_hum": "Infinite Loop",
+        "extras": {}
+    },
+    {
+        "bug_type": "PULSE_CONST_REFABLE",
+        "qualifier": "Function parameter `v1` is passed by-value but not modified inside this function, resulting in a potential unnecessary copy at the function's callsites.",
+        "suggestion": "Change the type of the parameter to `const &`.",
+        "severity": "ERROR",
+        "category": "Perf regression",
+        "line": 64,
+        "column": 3,
+        "procedure": "CryptoPP::HMQV_Domain<CryptoPP::DL_GroupParameters_EC<CryptoPP::ECP>,CryptoPP::EnumToType<int,2>,CryptoPP::SHA256>::HMQV_Domain<CryptoPP::OID>",
+        "procedure_start_line": 64,
+        "file": "hmqv.h",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "hmqv.h",
+                "line_number": 64,
+                "column_number": 3,
+                "description": "Parameter v1 with type `CryptoPP::OID`"
+            }
+        ],
+        "bug_trace_length": 1,
+        "bug_trace_max_depth": 0,
+        "key": "hmqv.h|HMQV_Domain<CryptoPP::OID>|PULSE_CONST_REFABLE",
+        "node_key": "c1af9837edc853fe4afe9cf1a19e5ad8",
+        "hash": "090174da7d329b62b3c68cfd55ea9778",
+        "bug_type_hum": "Const Refable Parameter",
+        "extras": {
+            "copy_type": "CryptoPP::OID"
+        }
+    },
+    {
+        "bug_type": "NULLPTR_DEREFERENCE",
+        "qualifier": "`buf.operator_unsigned_char_*()` could be null (null value originating from line 3522) and is dereferenced.",
+        "severity": "ERROR",
+        "category": "Null pointer dereference",
+        "line": 3530,
+        "column": 22,
+        "procedure": "CryptoPP::Integer::Randomize",
+        "procedure_start_line": 3520,
+        "file": "integer.cpp",
+        "bug_trace": [
+            {
+                "level": 1,
+                "filename": "integer.cpp",
+                "line_number": 3520,
+                "column_number": 1,
+                "description": "parameter `nbits` of CryptoPP::Integer::Randomize"
+            },
+            {
+                "level": 1,
+                "filename": "integer.cpp",
+                "line_number": 3522,
+                "column_number": 2,
+                "description": "is assigned to the constant 8"
+            },
+            {
+                "level": 1,
+                "filename": "integer.cpp",
+                "line_number": 3522,
+                "column_number": 2,
+                "description": "is assigned to the constant 1"
+            },
+            {
+                "level": 1,
+                "filename": "integer.cpp",
+                "line_number": 3522,
+                "column_number": 2,
+                "description": "assigned"
+            },
+            {
+                "level": 1,
+                "filename": "integer.cpp",
+                "line_number": 3523,
+                "column_number": 2,
+                "description": "variable `buf` declared here"
+            },
+            {
+                "level": 1,
+                "filename": "integer.cpp",
+                "line_number": 3523,
+                "column_number": 2,
+                "description": "struct field address `m_ptr` created"
+            },
+            {
+                "level": 1,
+                "filename": "integer.cpp",
+                "line_number": 3523,
+                "column_number": 15,
+                "description": "in call to `CryptoPP::SecBlock<unsigned char,CryptoPP::AllocatorWithCleanup<unsigned char,0>>::SecBlock`"
+            },
+            {
+                "level": 2,
+                "filename": "secblock.h",
+                "line_number": 766,
+                "column_number": 2,
+                "description": "parameter `size` of CryptoPP::SecBlock<unsigned char,CryptoPP::AllocatorWithCleanup<unsigned char,0>>::SecBlock"
+            },
+            {
+                "level": 2,
+                "filename": "secblock.h",
+                "line_number": 766,
+                "column_number": 2,
+                "description": "parameter `this` of CryptoPP::SecBlock<unsigned char,CryptoPP::AllocatorWithCleanup<unsigned char,0>>::SecBlock"
+            },
+            {
+                "level": 2,
+                "filename": "secblock.h",
+                "line_number": 767,
+                "column_number": 44,
+                "description": "in call to `CryptoPP::AllocatorWithCleanup<unsigned char,0>::allocate`"
+            },
+            {
+                "level": 3,
+                "filename": "secblock.h",
+                "line_number": 211,
+                "column_number": 4,
+                "description": "is assigned to the null pointer"
+            },
+            {
+                "level": 3,
+                "filename": "secblock.h",
+                "line_number": 211,
+                "column_number": 4,
+                "description": "returned"
+            },
+            {
+                "level": 2,
+                "filename": "secblock.h",
+                "line_number": 767,
+                "column_number": 44,
+                "description": "return from call to `CryptoPP::AllocatorWithCleanup<unsigned char,0>::allocate`"
+            },
+            {
+                "level": 2,
+                "filename": "secblock.h",
+                "line_number": 767,
+                "column_number": 38,
+                "description": "assigned"
+            },
+            {
+                "level": 1,
+                "filename": "integer.cpp",
+                "line_number": 3523,
+                "column_number": 15,
+                "description": "return from call to `CryptoPP::SecBlock<unsigned char,CryptoPP::AllocatorWithCleanup<unsigned char,0>>::SecBlock`"
+            },
+            {
+                "level": 1,
+                "filename": "integer.cpp",
+                "line_number": 3530,
+                "column_number": 22,
+                "description": "in call to `CryptoPP::SecBlock<unsigned char,CryptoPP::AllocatorWithCleanup<unsigned char,0>>::operator_unsigned_char_*`"
+            },
+            {
+                "level": 2,
+                "filename": "secblock.h",
+                "line_number": 829,
+                "column_number": 2,
+                "description": "parameter `this` of CryptoPP::SecBlock<unsigned char,CryptoPP::AllocatorWithCleanup<unsigned char,0>>::operator_unsigned_char_*"
+            },
+            {
+                "level": 2,
+                "filename": "secblock.h",
+                "line_number": 830,
+                "column_number": 4,
+                "description": "returned"
+            },
+            {
+                "level": 1,
+                "filename": "integer.cpp",
+                "line_number": 3530,
+                "column_number": 22,
+                "description": "return from call to `CryptoPP::SecBlock<unsigned char,CryptoPP::AllocatorWithCleanup<unsigned char,0>>::operator_unsigned_char_*`"
+            },
+            {
+                "level": 1,
+                "filename": "integer.cpp",
+                "line_number": 3530,
+                "column_number": 22,
+                "description": "invalid access occurs here"
+            }
+        ],
+        "bug_trace_length": 20,
+        "bug_trace_max_depth": 3,
+        "key": "integer.cpp|Randomize|NULLPTR_DEREFERENCE",
+        "node_key": "0b80a0bed28189a9d50d842b6cf82999",
+        "hash": "84e437c264e3b6cedfc3ec2b7a4e610a",
+        "bug_type_hum": "Null Dereference",
+        "extras": {}
+    },
+    {
+        "bug_type": "MEMORY_LEAK_C",
+        "qualifier": "Memory dynamically allocated by `malloc`, indirectly via call to `CryptoPP::Integer::Integer()` on line 4783 is not freed after the last access at line 4783, column 6.",
+        "severity": "ERROR",
+        "category": "Resource leak",
+        "line": 4783,
+        "column": 6,
+        "procedure": "CryptoPP::IntToString<CryptoPP::Integer>",
+        "procedure_start_line": 4770,
+        "file": "integer.cpp",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "integer.cpp",
+                "line_number": 4783,
+                "column_number": 15,
+                "description": "allocation part of the trace starts here"
+            },
+            {
+                "level": 1,
+                "filename": "integer.cpp",
+                "line_number": 4783,
+                "column_number": 15,
+                "description": "when calling `CryptoPP::Integer::Integer` here"
+            },
+            {
+                "level": 2,
+                "filename": "integer.cpp",
+                "line_number": 2986,
+                "column_number": 4,
+                "description": "when calling `CryptoPP::SecBlock<unsigned long,CryptoPP::AllocatorWithCleanup<unsigned long,1>>::SecBlock` here"
+            },
+            {
+                "level": 3,
+                "filename": "secblock.h",
+                "line_number": 767,
+                "column_number": 44,
+                "description": "when calling `CryptoPP::AllocatorWithCleanup<unsigned long,1>::allocate` here"
+            },
+            {
+                "level": 4,
+                "filename": "secblock.h",
+                "line_number": 218,
+                "column_number": 36,
+                "description": "when calling `CryptoPP::UnalignedAllocate` here"
+            },
+            {
+                "level": 5,
+                "filename": "allocate.cpp",
+                "line_number": 92,
+                "column_number": 14,
+                "description": "allocated by `malloc` here"
+            },
+            {
+                "level": 0,
+                "filename": "integer.cpp",
+                "line_number": 4783,
+                "column_number": 6,
+                "description": "memory becomes unreachable here"
+            }
+        ],
+        "bug_trace_length": 7,
+        "bug_trace_max_depth": 5,
+        "key": "integer.cpp|CryptoPP::IntToString<CryptoPP::Integer>|MEMORY_LEAK_C",
+        "node_key": "5b17e3185e9c627b267d0cf20a95f891",
+        "hash": "f8f56dbadbe53b3aaa0ab4b795dd387a",
+        "bug_type_hum": "Memory Leak",
+        "extras": {}
+    },
+    {
+        "bug_type": "INFINITE_LOOP",
+        "qualifier": "Recurring state leading to infinite execution at line 69, column 4.",
+        "severity": "ERROR",
+        "category": "No_category",
+        "line": 69,
+        "column": 4,
+        "procedure": "CryptoPP::IteratedHashBase<unsigned int,CryptoPP::HashTransformation>::Update",
+        "procedure_start_line": 13,
+        "file": "iterhash.cpp",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "iterhash.cpp",
+                "line_number": 69,
+                "column_number": 4,
+                "description": "in loop"
+            }
+        ],
+        "bug_trace_length": 1,
+        "bug_trace_max_depth": 0,
+        "key": "iterhash.cpp|Update|INFINITE_LOOP",
+        "node_key": "268f5e956ea5804610288ee6f65b5776",
+        "hash": "7fd940a59c2ede900570e9619b7934c2",
+        "bug_type_hum": "Infinite Loop",
+        "extras": {}
+    },
+    {
+        "bug_type": "INFINITE_LOOP",
+        "qualifier": "Recurring state leading to infinite execution at line 85, column 5.",
+        "severity": "ERROR",
+        "category": "No_category",
+        "line": 85,
+        "column": 5,
+        "procedure": "CryptoPP::Weak1::MD2::Update",
+        "procedure_start_line": 38,
+        "file": "md2.cpp",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "md2.cpp",
+                "line_number": 85,
+                "column_number": 5,
+                "description": "in loop"
+            }
+        ],
+        "bug_trace_length": 1,
+        "bug_trace_max_depth": 0,
+        "key": "md2.cpp|Update|INFINITE_LOOP",
+        "node_key": "8a8f1f13767dba2048f00b529bec7f15",
+        "hash": "1490ead1e3aa9521844f438624029986",
+        "bug_type_hum": "Infinite Loop",
+        "extras": {}
+    },
+    {
+        "bug_type": "PULSE_CONST_REFABLE",
+        "qualifier": "Function parameter `first` is passed by-value but not modified inside this function, resulting in a potential unnecessary copy at the function's callsites.",
+        "suggestion": "Change the type of the parameter to `const &`.",
+        "severity": "ERROR",
+        "category": "Perf regression",
+        "line": 3190,
+        "column": 1,
+        "procedure": "CryptoPP::FindIfNot<bff7c3a86bb38e74>",
+        "procedure_start_line": 3190,
+        "file": "misc.h",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "misc.h",
+                "line_number": 3190,
+                "column_number": 1,
+                "description": "Parameter first with type `std::reverse_iterator<unsigned char const *>`"
+            }
+        ],
+        "bug_trace_length": 1,
+        "bug_trace_max_depth": 0,
+        "key": "misc.h|CryptoPP::FindIfNot<bff7c3a86bb38e74>|PULSE_CONST_REFABLE",
+        "node_key": "c1d780a30890a1959aa2c529d08326c6",
+        "hash": "962629f829e841c2495e2d608cf8bd42",
+        "bug_type_hum": "Const Refable Parameter",
+        "extras": {
+            "copy_type": "std::reverse_iterator<unsigned char const *>"
+        }
+    },
+    {
+        "bug_type": "PULSE_CONST_REFABLE",
+        "qualifier": "Function parameter `last` is passed by-value but not modified inside this function, resulting in a potential unnecessary copy at the function's callsites.",
+        "suggestion": "Change the type of the parameter to `const &`.",
+        "severity": "ERROR",
+        "category": "Perf regression",
+        "line": 3190,
+        "column": 1,
+        "procedure": "CryptoPP::FindIfNot<bff7c3a86bb38e74>",
+        "procedure_start_line": 3190,
+        "file": "misc.h",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "misc.h",
+                "line_number": 3190,
+                "column_number": 1,
+                "description": "Parameter last with type `std::reverse_iterator<unsigned char const *>`"
+            }
+        ],
+        "bug_trace_length": 1,
+        "bug_trace_max_depth": 0,
+        "key": "misc.h|CryptoPP::FindIfNot<bff7c3a86bb38e74>|PULSE_CONST_REFABLE",
+        "node_key": "c1d780a30890a1959aa2c529d08326c6",
+        "hash": "78ba23d36e19429e27880028d6f6b39a",
+        "bug_type_hum": "Const Refable Parameter",
+        "extras": {
+            "copy_type": "std::reverse_iterator<unsigned char const *>"
+        }
+    },
+    {
+        "bug_type": "PULSE_UNNECESSARY_COPY_INTERMEDIATE",
+        "qualifier": "variable `first` is copied into an intermediate and is never modified.",
+        "suggestion": "To avoid the copy, call `std::move` instead or change the callee's parameter type to `const &`.",
+        "severity": "ERROR",
+        "category": "Perf regression",
+        "line": 3192,
+        "column": 25,
+        "procedure": "CryptoPP::FindIfNot<bff7c3a86bb38e74>",
+        "procedure_start_line": 3190,
+        "file": "misc.h",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "ida.cpp",
+                "line_number": 400,
+                "column_number": 18,
+                "description": "first instantiated at"
+            },
+            {
+                "level": 0,
+                "filename": "misc.h",
+                "line_number": 3192,
+                "column_number": 25,
+                "description": "copied here (with type `std::reverse_iterator<unsigned char const *>&`)"
+            }
+        ],
+        "bug_trace_length": 2,
+        "bug_trace_max_depth": 0,
+        "key": "misc.h|CryptoPP::FindIfNot<bff7c3a86bb38e74>|PULSE_UNNECESSARY_COPY_INTERMEDIATE",
+        "node_key": "c1d780a30890a1959aa2c529d08326c6",
+        "hash": "feb97cf31b87f1e4113ff4831adfab36",
+        "bug_type_hum": "Unnecessary Copy Intermediate",
+        "extras": {
+            "copy_type": "std::reverse_iterator<unsigned char const *>&"
+        }
+    },
+    {
+        "bug_type": "PULSE_UNNECESSARY_COPY_INTERMEDIATE",
+        "qualifier": "variable `last` is copied into an intermediate and is never modified.",
+        "suggestion": "To avoid the copy, call `std::move` instead or change the callee's parameter type to `const &`.",
+        "severity": "ERROR",
+        "category": "Perf regression",
+        "line": 3192,
+        "column": 32,
+        "procedure": "CryptoPP::FindIfNot<bff7c3a86bb38e74>",
+        "procedure_start_line": 3190,
+        "file": "misc.h",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "ida.cpp",
+                "line_number": 400,
+                "column_number": 18,
+                "description": "first instantiated at"
+            },
+            {
+                "level": 0,
+                "filename": "misc.h",
+                "line_number": 3192,
+                "column_number": 32,
+                "description": "copied here (with type `std::reverse_iterator<unsigned char const *>&`)"
+            }
+        ],
+        "bug_trace_length": 2,
+        "bug_trace_max_depth": 0,
+        "key": "misc.h|CryptoPP::FindIfNot<bff7c3a86bb38e74>|PULSE_UNNECESSARY_COPY_INTERMEDIATE",
+        "node_key": "c1d780a30890a1959aa2c529d08326c6",
+        "hash": "67259f0090a1d15e1281dbd9e8cb8cdf",
+        "bug_type_hum": "Unnecessary Copy Intermediate",
+        "extras": {
+            "copy_type": "std::reverse_iterator<unsigned char const *>&"
+        }
+    },
+    {
+        "bug_type": "MEMORY_LEAK_C",
+        "qualifier": "Memory dynamically allocated by `malloc`, indirectly via call to `CryptoPP::Integer::Integer()` on line 37 is not freed after the last access at line 37, column 24.",
+        "severity": "ERROR",
+        "category": "Resource leak",
+        "line": 37,
+        "column": 24,
+        "procedure": "CryptoPP::IsSmallPrime",
+        "procedure_start_line": 32,
+        "file": "nbtheory.cpp",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "nbtheory.cpp",
+                "line_number": 37,
+                "column_number": 29,
+                "description": "allocation part of the trace starts here"
+            },
+            {
+                "level": 1,
+                "filename": "nbtheory.cpp",
+                "line_number": 37,
+                "column_number": 29,
+                "description": "when calling `CryptoPP::Integer::Integer` here"
+            },
+            {
+                "level": 2,
+                "filename": "integer.cpp",
+                "line_number": 2986,
+                "column_number": 4,
+                "description": "when calling `CryptoPP::SecBlock<unsigned long,CryptoPP::AllocatorWithCleanup<unsigned long,1>>::SecBlock` here"
+            },
+            {
+                "level": 3,
+                "filename": "secblock.h",
+                "line_number": 767,
+                "column_number": 44,
+                "description": "when calling `CryptoPP::AllocatorWithCleanup<unsigned long,1>::allocate` here"
+            },
+            {
+                "level": 4,
+                "filename": "secblock.h",
+                "line_number": 218,
+                "column_number": 36,
+                "description": "when calling `CryptoPP::UnalignedAllocate` here"
+            },
+            {
+                "level": 5,
+                "filename": "allocate.cpp",
+                "line_number": 92,
+                "column_number": 14,
+                "description": "allocated by `malloc` here"
+            },
+            {
+                "level": 0,
+                "filename": "nbtheory.cpp",
+                "line_number": 37,
+                "column_number": 24,
+                "description": "memory becomes unreachable here"
+            }
+        ],
+        "bug_trace_length": 7,
+        "bug_trace_max_depth": 5,
+        "key": "nbtheory.cpp|CryptoPP::IsSmallPrime|MEMORY_LEAK_C",
+        "node_key": "fa0c051eb65fbf8d37c52865108bb194",
+        "hash": "e9054378ead0ba43f8f05d0fc3dc76f7",
+        "bug_type_hum": "Memory Leak",
+        "extras": {}
+    },
+    {
+        "bug_type": "MEMORY_LEAK_C",
+        "qualifier": "Memory dynamically allocated by `malloc`, indirectly via call to `CryptoPP::Integer::Integer()` on line 311 is not freed after the last access at line 311, column 33.",
+        "severity": "ERROR",
+        "category": "Resource leak",
+        "line": 311,
+        "column": 33,
+        "procedure": "CryptoPP::PrimeSieve::SieveSingle",
+        "procedure_start_line": 304,
+        "file": "nbtheory.cpp",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "nbtheory.cpp",
+                "line_number": 311,
+                "column_number": 57,
+                "description": "allocation part of the trace starts here"
+            },
+            {
+                "level": 1,
+                "filename": "nbtheory.cpp",
+                "line_number": 311,
+                "column_number": 57,
+                "description": "when calling `CryptoPP::Integer::Integer` here"
+            },
+            {
+                "level": 2,
+                "filename": "integer.cpp",
+                "line_number": 2986,
+                "column_number": 4,
+                "description": "when calling `CryptoPP::SecBlock<unsigned long,CryptoPP::AllocatorWithCleanup<unsigned long,1>>::SecBlock` here"
+            },
+            {
+                "level": 3,
+                "filename": "secblock.h",
+                "line_number": 767,
+                "column_number": 44,
+                "description": "when calling `CryptoPP::AllocatorWithCleanup<unsigned long,1>::allocate` here"
+            },
+            {
+                "level": 4,
+                "filename": "secblock.h",
+                "line_number": 218,
+                "column_number": 36,
+                "description": "when calling `CryptoPP::UnalignedAllocate` here"
+            },
+            {
+                "level": 5,
+                "filename": "allocate.cpp",
+                "line_number": 92,
+                "column_number": 14,
+                "description": "allocated by `malloc` here"
+            },
+            {
+                "level": 0,
+                "filename": "nbtheory.cpp",
+                "line_number": 311,
+                "column_number": 33,
+                "description": "memory becomes unreachable here"
+            }
+        ],
+        "bug_trace_length": 7,
+        "bug_trace_max_depth": 5,
+        "key": "nbtheory.cpp|SieveSingle|MEMORY_LEAK_C",
+        "node_key": "c1d780a30890a1959aa2c529d08326c6",
+        "hash": "d06ad2f19927cebfbc98a479e372cd33",
+        "bug_type_hum": "Memory Leak",
+        "extras": {}
+    },
+    {
+        "bug_type": "MEMORY_LEAK_C",
+        "qualifier": "Memory dynamically allocated by `malloc`, indirectly via call to `CryptoPP::operator-()` on line 426 is not freed after the last access at line 426, column 6.",
+        "severity": "ERROR",
+        "category": "Resource leak",
+        "line": 426,
+        "column": 6,
+        "procedure": "CryptoPP::ProvePrime",
+        "procedure_start_line": 415,
+        "file": "nbtheory.cpp",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "nbtheory.cpp",
+                "line_number": 426,
+                "column_number": 7,
+                "description": "allocation part of the trace starts here"
+            },
+            {
+                "level": 1,
+                "filename": "nbtheory.cpp",
+                "line_number": 426,
+                "column_number": 7,
+                "description": "when calling `CryptoPP::operator-` here"
+            },
+            {
+                "level": 2,
+                "filename": "integer.h",
+                "line_number": 772,
+                "column_number": 100,
+                "description": "when calling `CryptoPP::Integer::Minus` here"
+            },
+            {
+                "level": 3,
+                "filename": "integer.cpp",
+                "line_number": 4056,
+                "column_number": 9,
+                "description": "when calling `CryptoPP::Integer::Integer` here"
+            },
+            {
+                "level": 4,
+                "filename": "integer.cpp",
+                "line_number": 2973,
+                "column_number": 4,
+                "description": "when calling `CryptoPP::SecBlock<unsigned long,CryptoPP::AllocatorWithCleanup<unsigned long,1>>::SecBlock` here"
+            },
+            {
+                "level": 5,
+                "filename": "secblock.h",
+                "line_number": 767,
+                "column_number": 44,
+                "description": "when calling `CryptoPP::AllocatorWithCleanup<unsigned long,1>::allocate` here"
+            },
+            {
+                "level": 6,
+                "filename": "secblock.h",
+                "line_number": 218,
+                "column_number": 36,
+                "description": "when calling `CryptoPP::UnalignedAllocate` here"
+            },
+            {
+                "level": 7,
+                "filename": "allocate.cpp",
+                "line_number": 92,
+                "column_number": 14,
+                "description": "allocated by `malloc` here"
+            },
+            {
+                "level": 0,
+                "filename": "nbtheory.cpp",
+                "line_number": 426,
+                "column_number": 6,
+                "description": "memory becomes unreachable here"
+            }
+        ],
+        "bug_trace_length": 9,
+        "bug_trace_max_depth": 7,
+        "key": "nbtheory.cpp|CryptoPP::ProvePrime|MEMORY_LEAK_C",
+        "node_key": "10821f5eb3efc731f7f630f21a8bac12",
+        "hash": "8484180571052a69bb16937313b1c451",
+        "bug_type_hum": "Memory Leak",
+        "extras": {}
+    },
+    {
+        "bug_type": "INFINITE_LOOP",
+        "qualifier": "Recurring state leading to infinite execution at line 77, column 2.",
+        "severity": "ERROR",
+        "category": "No_category",
+        "line": 77,
+        "column": 2,
+        "procedure": "anonymous_namespace_rabbit.cpp::NextState",
+        "procedure_start_line": 56,
+        "file": "rabbit.cpp",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "rabbit.cpp",
+                "line_number": 77,
+                "column_number": 2,
+                "description": "in loop"
+            }
+        ],
+        "bug_trace_length": 1,
+        "bug_trace_max_depth": 0,
+        "key": "rabbit.cpp|anonymous_namespace_rabbit.cpp::NextState|INFINITE_LOOP",
+        "node_key": "7d8c45ed01e55aba992fbb0ffb6aa875",
+        "hash": "bc39fc5293780ec479a899f6deefade5",
+        "bug_type_hum": "Infinite Loop",
+        "extras": {}
+    },
+    {
+        "bug_type": "INFINITE_LOOP",
+        "qualifier": "Recurring state leading to infinite execution at line 281, column 3.",
+        "severity": "ERROR",
+        "category": "No_category",
+        "line": 281,
+        "column": 3,
+        "procedure": "CryptoPP::Rijndael::Base::FillEncTable",
+        "procedure_start_line": 271,
+        "file": "rijndael.cpp",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "rijndael.cpp",
+                "line_number": 281,
+                "column_number": 3,
+                "description": "in loop"
+            }
+        ],
+        "bug_trace_length": 1,
+        "bug_trace_max_depth": 0,
+        "key": "rijndael.cpp|FillEncTable|INFINITE_LOOP",
+        "node_key": "7d8c45ed01e55aba992fbb0ffb6aa875",
+        "hash": "970b35a919ff7bddd7a36fffbbadb881",
+        "bug_type_hum": "Infinite Loop",
+        "extras": {}
+    },
+    {
+        "bug_type": "INFINITE_LOOP",
+        "qualifier": "Recurring state leading to infinite execution at line 304, column 3.",
+        "severity": "ERROR",
+        "category": "No_category",
+        "line": 304,
+        "column": 3,
+        "procedure": "CryptoPP::Rijndael::Base::FillDecTable",
+        "procedure_start_line": 294,
+        "file": "rijndael.cpp",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "rijndael.cpp",
+                "line_number": 304,
+                "column_number": 3,
+                "description": "in loop"
+            }
+        ],
+        "bug_trace_length": 1,
+        "bug_trace_max_depth": 0,
+        "key": "rijndael.cpp|FillDecTable|INFINITE_LOOP",
+        "node_key": "7d8c45ed01e55aba992fbb0ffb6aa875",
+        "hash": "296a5f3829b9fbb9e8ff41b0ec481d7e",
+        "bug_type_hum": "Infinite Loop",
+        "extras": {}
+    },
+    {
+        "bug_type": "MEMORY_LEAK_C",
+        "qualifier": "Memory dynamically allocated by `malloc`, indirectly via call to `CryptoPP::operator-()` on line 228 is not freed after the last access at line 228, column 6.",
+        "severity": "ERROR",
+        "category": "Resource leak",
+        "line": 228,
+        "column": 6,
+        "procedure": "CryptoPP::InvertibleRWFunction::CalculateInverse",
+        "procedure_start_line": 195,
+        "file": "rw.cpp",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "rw.cpp",
+                "line_number": 228,
+                "column_number": 7,
+                "description": "allocation part of the trace starts here"
+            },
+            {
+                "level": 1,
+                "filename": "rw.cpp",
+                "line_number": 228,
+                "column_number": 7,
+                "description": "when calling `CryptoPP::operator-` here"
+            },
+            {
+                "level": 2,
+                "filename": "integer.h",
+                "line_number": 772,
+                "column_number": 100,
+                "description": "when calling `CryptoPP::Integer::Minus` here"
+            },
+            {
+                "level": 3,
+                "filename": "integer.cpp",
+                "line_number": 4056,
+                "column_number": 9,
+                "description": "when calling `CryptoPP::Integer::Integer` here"
+            },
+            {
+                "level": 4,
+                "filename": "integer.cpp",
+                "line_number": 2973,
+                "column_number": 4,
+                "description": "when calling `CryptoPP::SecBlock<unsigned long,CryptoPP::AllocatorWithCleanup<unsigned long,1>>::SecBlock` here"
+            },
+            {
+                "level": 5,
+                "filename": "secblock.h",
+                "line_number": 767,
+                "column_number": 44,
+                "description": "when calling `CryptoPP::AllocatorWithCleanup<unsigned long,1>::allocate` here"
+            },
+            {
+                "level": 6,
+                "filename": "secblock.h",
+                "line_number": 218,
+                "column_number": 36,
+                "description": "when calling `CryptoPP::UnalignedAllocate` here"
+            },
+            {
+                "level": 7,
+                "filename": "allocate.cpp",
+                "line_number": 92,
+                "column_number": 14,
+                "description": "allocated by `malloc` here"
+            },
+            {
+                "level": 0,
+                "filename": "rw.cpp",
+                "line_number": 228,
+                "column_number": 6,
+                "description": "memory becomes unreachable here"
+            }
+        ],
+        "bug_trace_length": 9,
+        "bug_trace_max_depth": 7,
+        "key": "rw.cpp|CalculateInverse|MEMORY_LEAK_C",
+        "node_key": "e4a8f99b4ce67a3a68c3fa2e10309c06",
+        "hash": "ca1274e039d5b9d8e2ee313d3b44c984",
+        "bug_type_hum": "Memory Leak",
+        "extras": {}
+    },
+    {
+        "bug_type": "INFINITE_LOOP",
+        "qualifier": "Recurring state leading to infinite execution at line 30, column 2.",
+        "severity": "ERROR",
+        "category": "No_category",
+        "line": 30,
+        "column": 2,
+        "procedure": "CryptoPP::SHARKTransform",
+        "procedure_start_line": 15,
+        "file": "shark.cpp",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "shark.cpp",
+                "line_number": 30,
+                "column_number": 2,
+                "description": "in loop"
+            }
+        ],
+        "bug_trace_length": 1,
+        "bug_trace_max_depth": 0,
+        "key": "shark.cpp|CryptoPP::SHARKTransform|INFINITE_LOOP",
+        "node_key": "7d8c45ed01e55aba992fbb0ffb6aa875",
+        "hash": "969705e8b9124594ea2fafeabde2d77e",
+        "bug_type_hum": "Infinite Loop",
+        "extras": {}
+    },
+    {
+        "bug_type": "MEMORY_LEAK_C",
+        "qualifier": "Memory dynamically allocated by `malloc`, indirectly via call to `CryptoPP::Unflushable::ChannelFlush()` on line 156 is not freed after the last access at line 156, column 11.",
+        "severity": "ERROR",
+        "category": "Resource leak",
+        "line": 156,
+        "column": 11,
+        "procedure": "CryptoPP::Unflushable<CryptoPP::Multichannel<CryptoPP::Filter>>::Flush",
+        "procedure_start_line": 155,
+        "file": "simple.h",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "simple.h",
+                "line_number": 156,
+                "column_number": 11,
+                "description": "allocation part of the trace starts here"
+            },
+            {
+                "level": 1,
+                "filename": "simple.h",
+                "line_number": 156,
+                "column_number": 11,
+                "description": "when calling `CryptoPP::Unflushable<CryptoPP::Multichannel<CryptoPP::Filter>>::ChannelFlush` here"
+            },
+            {
+                "level": 2,
+                "filename": "simple.h",
+                "line_number": 181,
+                "column_number": 39,
+                "description": "when calling `CryptoPP::Filter::AttachedTransformation` here"
+            },
+            {
+                "level": 3,
+                "filename": "filters.cpp",
+                "line_number": 35,
+                "column_number": 22,
+                "description": "when calling `CryptoPP::Filter::NewDefaultAttachment` here"
+            },
+            {
+                "level": 4,
+                "filename": "filters.cpp",
+                "line_number": 29,
+                "column_number": 13,
+                "description": "when calling `CryptoPP::MessageQueue::MessageQueue` here"
+            },
+            {
+                "level": 5,
+                "filename": "mqueue.cpp",
+                "line_number": 12,
+                "column_number": 4,
+                "description": "when calling `CryptoPP::ByteQueue::ByteQueue` here"
+            },
+            {
+                "level": 6,
+                "filename": "queue.cpp",
+                "line_number": 147,
+                "column_number": 24,
+                "description": "when calling `CryptoPP::ByteQueueNode::ByteQueueNode` here"
+            },
+            {
+                "level": 7,
+                "filename": "queue.cpp",
+                "line_number": 21,
+                "column_number": 5,
+                "description": "when calling `CryptoPP::SecBlock<unsigned char,CryptoPP::AllocatorWithCleanup<unsigned char,0>>::SecBlock` here"
+            },
+            {
+                "level": 8,
+                "filename": "secblock.h",
+                "line_number": 767,
+                "column_number": 44,
+                "description": "when calling `CryptoPP::AllocatorWithCleanup<unsigned char,0>::allocate` here"
+            },
+            {
+                "level": 9,
+                "filename": "secblock.h",
+                "line_number": 218,
+                "column_number": 36,
+                "description": "when calling `CryptoPP::UnalignedAllocate` here"
+            },
+            {
+                "level": 10,
+                "filename": "allocate.cpp",
+                "line_number": 92,
+                "column_number": 14,
+                "description": "allocated by `malloc` here"
+            },
+            {
+                "level": 0,
+                "filename": "simple.h",
+                "line_number": 156,
+                "column_number": 11,
+                "description": "memory becomes unreachable here"
+            }
+        ],
+        "bug_trace_length": 12,
+        "bug_trace_max_depth": 10,
+        "key": "simple.h|Flush|MEMORY_LEAK_C",
+        "node_key": "7d8c45ed01e55aba992fbb0ffb6aa875",
+        "hash": "be21f23904b2f2286e6e5a53c42d6f56",
+        "bug_type_hum": "Memory Leak",
+        "extras": {}
+    },
+    {
+        "bug_type": "INFINITE_LOOP",
+        "qualifier": "Recurring state leading to infinite execution at line 34, column 2.",
+        "severity": "ERROR",
+        "category": "No_category",
+        "line": 34,
+        "column": 2,
+        "procedure": "CryptoPP::SquareTransform",
+        "procedure_start_line": 22,
+        "file": "square.cpp",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "square.cpp",
+                "line_number": 34,
+                "column_number": 2,
+                "description": "in loop"
+            }
+        ],
+        "bug_trace_length": 1,
+        "bug_trace_max_depth": 0,
+        "key": "square.cpp|CryptoPP::SquareTransform|INFINITE_LOOP",
+        "node_key": "89e1fea3672f8c1bda5df785b829cfa3",
+        "hash": "75008295db6d706cd99854734916cb5b",
+        "bug_type_hum": "Infinite Loop",
+        "extras": {}
+    },
+    {
+        "bug_type": "INFINITE_LOOP",
+        "qualifier": "Recurring state leading to infinite execution at line 76, column 4.",
+        "severity": "ERROR",
+        "category": "No_category",
+        "line": 76,
+        "column": 4,
+        "procedure": "CryptoPP::Square::Base::UncheckedSetKey",
+        "procedure_start_line": 47,
+        "file": "square.cpp",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "square.cpp",
+                "line_number": 76,
+                "column_number": 4,
+                "description": "in loop"
+            }
+        ],
+        "bug_trace_length": 1,
+        "bug_trace_max_depth": 0,
+        "key": "square.cpp|UncheckedSetKey|INFINITE_LOOP",
+        "node_key": "c1d780a30890a1959aa2c529d08326c6",
+        "hash": "c5fb45162a45e7faf0c49c90fe8fc97d",
+        "bug_type_hum": "Infinite Loop",
+        "extras": {}
+    },
+    {
+        "bug_type": "INFINITE_LOOP",
+        "qualifier": "Recurring state leading to infinite execution at line 123, column 7.",
+        "severity": "ERROR",
+        "category": "No_category",
+        "line": 123,
+        "column": 7,
+        "procedure": "CryptoPP::NaCl::core",
+        "procedure_start_line": 102,
+        "file": "tweetnacl.cpp",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "tweetnacl.cpp",
+                "line_number": 123,
+                "column_number": 7,
+                "description": "in loop"
+            }
+        ],
+        "bug_trace_length": 1,
+        "bug_trace_max_depth": 0,
+        "key": "tweetnacl.cpp|CryptoPP::NaCl::core|INFINITE_LOOP",
+        "node_key": "c1d780a30890a1959aa2c529d08326c6",
+        "hash": "837528f1666da1ffedb1ec3bbb354071",
+        "bug_type_hum": "Infinite Loop",
+        "extras": {}
+    },
+    {
+        "bug_type": "INFINITE_LOOP",
+        "qualifier": "Recurring state leading to infinite execution at line 257, column 3.",
+        "severity": "ERROR",
+        "category": "No_category",
+        "line": 257,
+        "column": 3,
+        "procedure": "CryptoPP::NaCl::crypto_onetimeauth",
+        "procedure_start_line": 216,
+        "file": "tweetnacl.cpp",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "tweetnacl.cpp",
+                "line_number": 257,
+                "column_number": 3,
+                "description": "in loop"
+            }
+        ],
+        "bug_trace_length": 1,
+        "bug_trace_max_depth": 0,
+        "key": "tweetnacl.cpp|CryptoPP::NaCl::crypto_onetimeauth|INFINITE_LOOP",
+        "node_key": "7d8c45ed01e55aba992fbb0ffb6aa875",
+        "hash": "9b3d5e7f2bfda9ec88394243c5d553ad",
+        "bug_type_hum": "Infinite Loop",
+        "extras": {}
+    },
+    {
+        "bug_type": "INFINITE_LOOP",
+        "qualifier": "Recurring state leading to infinite execution at line 336, column 5.",
+        "severity": "ERROR",
+        "category": "No_category",
+        "line": 336,
+        "column": 5,
+        "procedure": "CryptoPP::NaCl::pack25519",
+        "procedure_start_line": 326,
+        "file": "tweetnacl.cpp",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "tweetnacl.cpp",
+                "line_number": 336,
+                "column_number": 5,
+                "description": "in loop"
+            }
+        ],
+        "bug_trace_length": 1,
+        "bug_trace_max_depth": 0,
+        "key": "tweetnacl.cpp|CryptoPP::NaCl::pack25519|INFINITE_LOOP",
+        "node_key": "89e1fea3672f8c1bda5df785b829cfa3",
+        "hash": "92d88230621977318bf41afdeaab29d4",
+        "bug_type_hum": "Infinite Loop",
+        "extras": {}
+    },
+    {
+        "bug_type": "INFINITE_LOOP",
+        "qualifier": "Recurring state leading to infinite execution at line 447, column 5.",
+        "severity": "ERROR",
+        "category": "No_category",
+        "line": 447,
+        "column": 5,
+        "procedure": "CryptoPP::NaCl::has_small_order",
+        "procedure_start_line": 426,
+        "file": "tweetnacl.cpp",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "tweetnacl.cpp",
+                "line_number": 447,
+                "column_number": 5,
+                "description": "in loop"
+            }
+        ],
+        "bug_trace_length": 1,
+        "bug_trace_max_depth": 0,
+        "key": "tweetnacl.cpp|CryptoPP::NaCl::has_small_order|INFINITE_LOOP",
+        "node_key": "7d8c45ed01e55aba992fbb0ffb6aa875",
+        "hash": "90d4e20903f25e98c3c49d145c22b01c",
+        "bug_type_hum": "Infinite Loop",
+        "extras": {}
+    },
+    {
+        "bug_type": "INFINITE_LOOP",
+        "qualifier": "Recurring state leading to infinite execution at line 637, column 3.",
+        "severity": "ERROR",
+        "category": "No_category",
+        "line": 637,
+        "column": 3,
+        "procedure": "CryptoPP::NaCl::crypto_hashblocks",
+        "procedure_start_line": 610,
+        "file": "tweetnacl.cpp",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "tweetnacl.cpp",
+                "line_number": 637,
+                "column_number": 3,
+                "description": "in loop"
+            }
+        ],
+        "bug_trace_length": 1,
+        "bug_trace_max_depth": 0,
+        "key": "tweetnacl.cpp|CryptoPP::NaCl::crypto_hashblocks|INFINITE_LOOP",
+        "node_key": "7d8c45ed01e55aba992fbb0ffb6aa875",
+        "hash": "4bdcd7da78be6833c8d2b78680b8aadc",
+        "bug_type_hum": "Infinite Loop",
+        "extras": {}
+    },
+    {
+        "bug_type": "PULSE_UNINITIALIZED_VALUE",
+        "qualifier": "`this.m_g.c1.reg.m_size` is read without initialization during the call to `CryptoPP::XTR_DH::XTR_DH()`.",
+        "severity": "ERROR",
+        "category": "Memory error",
+        "line": 229,
+        "column": 9,
+        "procedure": "CryptoPP::Test::ValidateXTR_DH",
+        "procedure_start_line": 224,
+        "file": "validat7.cpp",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "validat7.cpp",
+                "line_number": 229,
+                "column_number": 2,
+                "description": "struct field address `m_g.c1.reg.m_size` created"
+            },
+            {
+                "level": 0,
+                "filename": "validat7.cpp",
+                "line_number": 229,
+                "column_number": 9,
+                "description": "when calling `CryptoPP::XTR_DH::XTR_DH` here"
+            },
+            {
+                "level": 1,
+                "filename": "xtrcrypt.cpp",
+                "line_number": 24,
+                "column_number": 1,
+                "description": "parameter `this` of CryptoPP::XTR_DH::XTR_DH"
+            },
+            {
+                "level": 1,
+                "filename": "xtrcrypt.cpp",
+                "line_number": 29,
+                "column_number": 2,
+                "description": "when calling `CryptoPP::Integer::BERDecode` here"
+            },
+            {
+                "level": 2,
+                "filename": "integer.cpp",
+                "line_number": 3463,
+                "column_number": 1,
+                "description": "parameter `this` of CryptoPP::Integer::BERDecode"
+            },
+            {
+                "level": 2,
+                "filename": "integer.cpp",
+                "line_number": 3468,
+                "column_number": 2,
+                "description": "when calling `CryptoPP::Integer::Decode` here"
+            },
+            {
+                "level": 3,
+                "filename": "integer.cpp",
+                "line_number": 3380,
+                "column_number": 1,
+                "description": "parameter `this` of CryptoPP::Integer::Decode"
+            },
+            {
+                "level": 3,
+                "filename": "integer.cpp",
+                "line_number": 3397,
+                "column_number": 2,
+                "description": "when calling `CryptoPP::SecBlock<unsigned long,CryptoPP::AllocatorWithCleanup<unsigned long,1>>::CleanNew` here"
+            },
+            {
+                "level": 4,
+                "filename": "secblock.h",
+                "line_number": 1143,
+                "column_number": 2,
+                "description": "parameter `this` of CryptoPP::SecBlock<unsigned long,CryptoPP::AllocatorWithCleanup<unsigned long,1>>::CleanNew"
+            },
+            {
+                "level": 4,
+                "filename": "secblock.h",
+                "line_number": 1145,
+                "column_number": 3,
+                "description": "when calling `CryptoPP::SecBlock<unsigned long,CryptoPP::AllocatorWithCleanup<unsigned long,1>>::New` here"
+            },
+            {
+                "level": 5,
+                "filename": "secblock.h",
+                "line_number": 1126,
+                "column_number": 2,
+                "description": "parameter `this` of CryptoPP::SecBlock<unsigned long,CryptoPP::AllocatorWithCleanup<unsigned long,1>>::New"
+            },
+            {
+                "level": 5,
+                "filename": "secblock.h",
+                "line_number": 1128,
+                "column_number": 37,
+                "description": "read to uninitialized value occurs here"
+            }
+        ],
+        "bug_trace_length": 12,
+        "bug_trace_max_depth": 5,
+        "key": "validat7.cpp|CryptoPP::Test::ValidateXTR_DH|PULSE_UNINITIALIZED_VALUE",
+        "node_key": "5dc38e50f902eb9675da339073bca7e9",
+        "hash": "25b050bfa155e5d969fc821cf5f247c0",
+        "bug_type_hum": "Uninitialized Value",
+        "extras": {}
+    },
+    {
+        "bug_type": "INFINITE_LOOP",
+        "qualifier": "Recurring state leading to infinite execution at line 55, column 9.",
+        "severity": "ERROR",
+        "category": "No_category",
+        "line": 55,
+        "column": 9,
+        "procedure": "anonymous_namespace_xed25519.cpp::HasSmallOrder",
+        "procedure_start_line": 50,
+        "file": "xed25519.cpp",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "xed25519.cpp",
+                "line_number": 55,
+                "column_number": 9,
+                "description": "in loop"
+            }
+        ],
+        "bug_trace_length": 1,
+        "bug_trace_max_depth": 0,
+        "key": "xed25519.cpp|anonymous_namespace_xed25519.cpp::HasSmallOrder|INFINITE_LOOP",
+        "node_key": "7d8c45ed01e55aba992fbb0ffb6aa875",
+        "hash": "2ab0d81e19e525f0070f1a26ec6a7264",
+        "bug_type_hum": "Infinite Loop",
+        "extras": {}
+    },
+    {
+        "bug_type": "PULSE_UNNECESSARY_COPY_ASSIGNMENT",
+        "qualifier": "`&oid` is copy assigned into field `m_oid` but is not modified afterwards.",
+        "suggestion": "Rather than copying into the field, move into it instead.",
+        "severity": "ERROR",
+        "category": "Perf regression",
+        "line": 335,
+        "column": 9,
+        "procedure": "CryptoPP::x25519::AssignFrom",
+        "procedure_start_line": 319,
+        "file": "xed25519.cpp",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "xed25519.cpp",
+                "line_number": 335,
+                "column_number": 9,
+                "description": "copy assigned here (with type `CryptoPP::OID&`)"
+            }
+        ],
+        "bug_trace_length": 1,
+        "bug_trace_max_depth": 0,
+        "key": "xed25519.cpp|AssignFrom|PULSE_UNNECESSARY_COPY_ASSIGNMENT",
+        "node_key": "c6fa565f3b7c7ccae1833e95de7ade09",
+        "hash": "b43a4cfcea6b67beaf0432999a3d7c9e",
+        "bug_type_hum": "Unnecessary Copy Assignment",
+        "extras": {
+            "copy_type": "CryptoPP::OID&"
+        },
+        "autofix": {
+            "original": "m_oid = oid;",
+            "replacement": "m_oid = std::move(oid);"
+        }
+    },
+    {
+        "bug_type": "PULSE_UNNECESSARY_COPY_ASSIGNMENT",
+        "qualifier": "`&oid` is copy assigned into field `m_oid` but is not modified afterwards.",
+        "suggestion": "Rather than copying into the field, move into it instead.",
+        "severity": "ERROR",
+        "category": "Perf regression",
+        "line": 745,
+        "column": 9,
+        "procedure": "CryptoPP::ed25519PublicKey::AssignFrom",
+        "procedure_start_line": 734,
+        "file": "xed25519.cpp",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "xed25519.cpp",
+                "line_number": 745,
+                "column_number": 9,
+                "description": "copy assigned here (with type `CryptoPP::OID&`)"
+            }
+        ],
+        "bug_trace_length": 1,
+        "bug_trace_max_depth": 0,
+        "key": "xed25519.cpp|AssignFrom|PULSE_UNNECESSARY_COPY_ASSIGNMENT",
+        "node_key": "c6fa565f3b7c7ccae1833e95de7ade09",
+        "hash": "4ed2073653441b14744441637add46dd",
+        "bug_type_hum": "Unnecessary Copy Assignment",
+        "extras": {
+            "copy_type": "CryptoPP::OID&"
+        },
+        "autofix": {
+            "original": "m_oid = oid;",
+            "replacement": "m_oid = std::move(oid);"
+        }
+    },
+    {
+        "bug_type": "MEMORY_LEAK_C",
+        "qualifier": "Memory dynamically allocated by `malloc`, indirectly via call to `CryptoPP::GFP2Element::GFP2Element()` on line 86 is not freed after the last access at line 114, column 9.",
+        "severity": "ERROR",
+        "category": "Resource leak",
+        "line": 114,
+        "column": 9,
+        "procedure": "CryptoPP::XTR_Exponentiate",
+        "procedure_start_line": 73,
+        "file": "xtr.cpp",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "xtr.cpp",
+                "line_number": 86,
+                "column_number": 44,
+                "description": "allocation part of the trace starts here"
+            },
+            {
+                "level": 1,
+                "filename": "xtr.cpp",
+                "line_number": 86,
+                "column_number": 44,
+                "description": "when calling `CryptoPP::GFP2Element::GFP2Element` here"
+            },
+            {
+                "level": 2,
+                "filename": "xtr.h",
+                "line_number": 16,
+                "column_number": 7,
+                "description": "when calling `CryptoPP::Integer::Integer` here"
+            },
+            {
+                "level": 3,
+                "filename": "integer.cpp",
+                "line_number": 2973,
+                "column_number": 4,
+                "description": "when calling `CryptoPP::SecBlock<unsigned long,CryptoPP::AllocatorWithCleanup<unsigned long,1>>::SecBlock` here"
+            },
+            {
+                "level": 4,
+                "filename": "secblock.h",
+                "line_number": 767,
+                "column_number": 44,
+                "description": "when calling `CryptoPP::AllocatorWithCleanup<unsigned long,1>::allocate` here"
+            },
+            {
+                "level": 5,
+                "filename": "secblock.h",
+                "line_number": 218,
+                "column_number": 36,
+                "description": "when calling `CryptoPP::UnalignedAllocate` here"
+            },
+            {
+                "level": 6,
+                "filename": "allocate.cpp",
+                "line_number": 92,
+                "column_number": 14,
+                "description": "allocated by `malloc` here"
+            },
+            {
+                "level": 0,
+                "filename": "xtr.cpp",
+                "line_number": 114,
+                "column_number": 9,
+                "description": "memory becomes unreachable here"
+            }
+        ],
+        "bug_trace_length": 8,
+        "bug_trace_max_depth": 6,
+        "key": "xtr.cpp|CryptoPP::XTR_Exponentiate|MEMORY_LEAK_C",
+        "node_key": "5b17e3185e9c627b267d0cf20a95f891",
+        "hash": "4f55337e7edc67e91b13ecdb5400ebd3",
+        "bug_type_hum": "Memory Leak",
+        "extras": {}
+    },
+    {
+        "bug_type": "PULSE_UNNECESSARY_COPY",
+        "qualifier": "copied variable `b` is not modified after it is copied from `this.PthPower()` on line 165.",
+        "suggestion": "To avoid the copy, use reference `&`. If this copy was intentional, call `folly::copy` to make it explicit and hence suppress the warning.",
+        "severity": "ERROR",
+        "category": "Perf regression",
+        "line": 165,
+        "column": 15,
+        "procedure": "CryptoPP::GFP2_ONB<CryptoPP::ModularArithmetic>::Exponentiate",
+        "procedure_start_line": 161,
+        "file": "xtr.h",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "xtr.cpp",
+                "line_number": 52,
+                "column_number": 30,
+                "description": "first instantiated at"
+            },
+            {
+                "level": 0,
+                "filename": "xtr.h",
+                "line_number": 165,
+                "column_number": 15,
+                "description": "copied here (with type `CryptoPP::GFP2Element const &`)"
+            }
+        ],
+        "bug_trace_length": 2,
+        "bug_trace_max_depth": 0,
+        "key": "xtr.h|Exponentiate|PULSE_UNNECESSARY_COPY",
+        "node_key": "64cdab5817c2c53ae531bf01a107abe5",
+        "hash": "b451ff7e309885e376848f5699469f71",
+        "bug_type_hum": "Unnecessary Copy",
+        "extras": {
+            "copy_type": "CryptoPP::GFP2Element const &"
+        }
+    },
+    {
+        "bug_type": "MEMORY_LEAK_C",
+        "qualifier": "Memory dynamically allocated by `malloc`, indirectly via call to `CryptoPP::GetValueHelperClass::Assignable()` on line 74 is not freed after the last access at line 79, column 1.",
+        "severity": "ERROR",
+        "category": "Resource leak",
+        "line": 79,
+        "column": 1,
+        "procedure": "CryptoPP::XTR_DH::GetVoidValue",
+        "procedure_start_line": 72,
+        "file": "xtrcrypt.cpp",
+        "bug_trace": [
+            {
+                "level": 0,
+                "filename": "xtrcrypt.cpp",
+                "line_number": 74,
+                "column_number": 9,
+                "description": "allocation part of the trace starts here"
+            },
+            {
+                "level": 1,
+                "filename": "xtrcrypt.cpp",
+                "line_number": 74,
+                "column_number": 9,
+                "description": "when calling `CryptoPP::GetValueHelperClass<CryptoPP::XTR_DH,CryptoPP::XTR_DH>::Assignable` here"
+            },
+            {
+                "level": 2,
+                "filename": "algparam.h",
+                "line_number": 201,
+                "column_number": 4,
+                "description": "when calling `CryptoPP::XTR_DH::operator=` here"
+            },
+            {
+                "level": 3,
+                "filename": "xtrcrypt.h",
+                "line_number": 15,
+                "column_number": 7,
+                "description": "when calling `CryptoPP::GFP2Element::operator=` here"
+            },
+            {
+                "level": 4,
+                "filename": "xtr.h",
+                "line_number": 16,
+                "column_number": 7,
+                "description": "when calling `CryptoPP::Integer::operator=` here"
+            },
+            {
+                "level": 5,
+                "filename": "integer.cpp",
+                "line_number": 3104,
+                "column_number": 4,
+                "description": "when calling `CryptoPP::SecBlock<unsigned long,CryptoPP::AllocatorWithCleanup<unsigned long,1>>::New` here"
+            },
+            {
+                "level": 6,
+                "filename": "secblock.h",
+                "line_number": 1128,
+                "column_number": 11,
+                "description": "when calling `CryptoPP::AllocatorWithCleanup<unsigned long,1>::reallocate` here"
+            },
+            {
+                "level": 7,
+                "filename": "secblock.h",
+                "line_number": 262,
+                "column_number": 10,
+                "description": "when calling `CryptoPP::StandardReallocate<e5e503765a2ecff5>` here"
+            },
+            {
+                "level": 8,
+                "filename": "secblock.h",
+                "line_number": 174,
+                "column_number": 10,
+                "description": "when calling `CryptoPP::AllocatorWithCleanup<unsigned long,1>::allocate` here"
+            },
+            {
+                "level": 9,
+                "filename": "secblock.h",
+                "line_number": 218,
+                "column_number": 36,
+                "description": "when calling `CryptoPP::UnalignedAllocate` here"
+            },
+            {
+                "level": 10,
+                "filename": "allocate.cpp",
+                "line_number": 92,
+                "column_number": 14,
+                "description": "allocated by `malloc` here"
+            },
+            {
+                "level": 0,
+                "filename": "xtrcrypt.cpp",
+                "line_number": 79,
+                "column_number": 1,
+                "description": "memory becomes unreachable here"
+            }
+        ],
+        "bug_trace_length": 12,
+        "bug_trace_max_depth": 10,
+        "key": "xtrcrypt.cpp|GetVoidValue|MEMORY_LEAK_C",
+        "node_key": "7d8c45ed01e55aba992fbb0ffb6aa875",
+        "hash": "46b4164b86936f9ce42f68ed7085d544",
+        "bug_type_hum": "Memory Leak",
+        "extras": {}
+    }
+]
