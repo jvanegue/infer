@@ -17,7 +17,7 @@ git clone https://github.com/bloomberg/blazingmq
 git clone https://github.com/weidai11/cryptopp/
 git clone https://github.com/gpac/gpac/
 git clone https://github.com/GNOME/libxml2
-git clone https://github.com/open5gs/
+git clone https://github.com/open5gs/open5gs
 git clone https://github.com/PCRE2Project/pcre2
 git clone https://github.com/proftpd/proftpd
 git clone https://github.com/sqlite/sqlite
@@ -46,10 +46,10 @@ cp ../analysis-scripts/termination-run-open5gs.sh open5gs/termination-run.sh
 cp ../analysis-scripts/termination-run-pcre2.sh pcre2/termination-run.sh
 cp ../analysis-scripts/termination-run-proftpd.sh proftpd/termination-run.sh
 cp ../analysis-scripts/termination-run-sqlite.sh sqlite/termination-run.sh
+cp ../analysis-scripts/termination-run-lua.sh lua/termination-run.sh
 
 # These are under src/ subfolder
 cp ../analysis-scripts/termination-run-exim.sh exim/src/termination-run.sh
-cp ../analysis-scripts/termination-run-lua.sh lua/src/termination-run.sh
 
 # This is under expat/ subfolder
 cp ../analysis-scripts/termination-run-libexpat.sh libexpat/expat/termination-run.sh
