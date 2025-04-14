@@ -2,7 +2,6 @@
 
 export INFER_HOME=/huge/jvanegue/PUBLIC_GITHUB/infer
 
-make clean
 time $INFER_HOME/infer/bin/infer run --pulse-only --debug-level 0 -- make -j30 2> infer-run-lua.log
 python3 -m json.tool infer-out/report.json > report-indented.json
 

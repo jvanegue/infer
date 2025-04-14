@@ -12,7 +12,6 @@ do
     cd ..
 done
 
-
 # These are under src/ subfolder for EXIM
 echo RUNNING PULSE-INF on TARGET exim
 cd exim/src

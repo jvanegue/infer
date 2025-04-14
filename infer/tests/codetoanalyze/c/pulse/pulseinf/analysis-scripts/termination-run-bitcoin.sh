@@ -3,7 +3,6 @@
 INFER_HOME=/huge/jvanegue/PUBLIC_GITHUB/infer
 
 # Generate the compilation database -- one off
-make clean
 bear -- cmake --build build
 
 time $INFER_HOME/infer/bin/infer --debug-level 0 --pulse-widen-threshold=3 --pulse-only --compilation-database compile_commands.json --keep-going 2> infer-run-bitcoin.log

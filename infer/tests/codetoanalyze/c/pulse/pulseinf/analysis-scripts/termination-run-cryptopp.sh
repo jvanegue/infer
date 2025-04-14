@@ -2,7 +2,6 @@
 
 INFER_HOME=/huge/jvanegue/PUBLIC_GITHUB/infer
 
-make clean
 time $INFER_HOME/infer/bin/infer run --debug-level 0 --pulse-only --pulse-widen-threshold=3 -- make -j30 2> infer-run-cryptopp.log
 python3 -m json.tool infer-out/report.json > report-indented.json
 
