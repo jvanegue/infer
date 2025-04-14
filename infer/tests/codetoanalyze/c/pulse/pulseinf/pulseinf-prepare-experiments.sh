@@ -3,6 +3,7 @@
 # Download all source code on which analysis is performed
 mkdir projects
 cd projects
+git clone https://github.com/bloomberg/bde-tools.git
 git clone https://github.com/bloomberg/bde
 git clone https://github.com/bitcoin/bitcoin/
 git clone https://github.com/bloomberg/comdb2
@@ -38,7 +39,7 @@ cp ../analysis-scripts/termination-run-mbedtls.sh mbedtls/termination-run.sh
 cp ../analysis-scripts/termination-run-openssl.sh openssl/termination-run.sh
 cp ../analysis-scripts/termination-run-zlib.sh zlib/termination-run.sh
 cp ../analysis-scripts/termination-run-bind.sh bind9/termination-run.sh
-cp ../analysis-scripts/termination-run-bmq.sh blazingmq/termination-run.sh
+cp ../analysis-scripts/termination-run-blazingmq.sh blazingmq/termination-run.sh
 cp ../analysis-scripts/termination-run-cryptopp.sh cryptopp/termination-run.sh
 cp ../analysis-scripts/termination-run-gpac.sh gpac/termination-run.sh
 cp ../analysis-scripts/termination-run-libxml2.sh libxml2/termination-run.sh
@@ -62,9 +63,6 @@ cp ../analysis-scripts/termination-run-libgit2.sh libgit2/build/termination-run.
 mkdir wireshark/build
 cp ../analysis-scripts/termination-run-wireshark.sh wireshark/build/termination-run.sh
 
-# Prepare Linux Kernel experiment
-cp analysis-scripts/termination-run-linux_kernel.sh /usr/src/linux-5.19.1/
-
 echo Finished preparing experiment.
-echo Now execute run-all-experiments.sh to analyze all targets (may take a while)
-echo Or enter individual repositories and execute the termination-run.sh script
+echo Now execute run-all-experiments.sh to analyze all targets. This may take a while.
+echo Or enter individual projects and execute the termination-run.sh script

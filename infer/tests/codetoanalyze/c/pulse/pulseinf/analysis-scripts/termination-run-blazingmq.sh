@@ -2,10 +2,9 @@
 
 INFER_HOME=/huge/jvanegue/PUBLIC_GITHUB/infer
 
-mkdir build
+mkdir -p build
 cd build
-cmake ..
-bear -- ./bin/build-ubuntu.sh
+bear -- ../bin/build-ubuntu.sh
 time $INFER_HOME/infer/bin/infer --pulse-only --compilation-database compile_commands.json --keep-going 2> infer-run-bmq.log
 
 python3 -m json.tool infer-out/report.json > report-indented.json

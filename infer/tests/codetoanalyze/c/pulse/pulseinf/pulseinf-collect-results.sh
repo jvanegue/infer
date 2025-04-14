@@ -1,5 +1,7 @@
 #!/bin/bash
 
+mkdir -p results
+
 for i in bde bitcoin comdb2 FreeImage libpng libxpm mbedtls openssl zlib bind9 blazingmq cryptopp gpac libxml2 open5gs pcre2 proftpd sqlite lua
 do
     cp projects/$i/infer-log*.log ./results/

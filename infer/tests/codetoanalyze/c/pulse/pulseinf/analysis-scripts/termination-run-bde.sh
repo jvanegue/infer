@@ -1,7 +1,5 @@
 #!/bin/bash
 
-INFER_HOME=/huge/jvanegue/PUBLIC_GITHUB/infer
-
 # See https://bloomberg.github.io/bde/library_information/build.html for BDE build instrs
 eval `bbs_build_env -u opt_64_cpp17`
 bbs_build configure

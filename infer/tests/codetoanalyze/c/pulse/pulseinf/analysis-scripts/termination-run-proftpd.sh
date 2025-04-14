@@ -1,7 +1,5 @@
 #!/bin/bash
 
-INFER_HOME=/huge/jvanegue/PUBLIC_GITHUB/infer
-
 ./configure
 bear -- make -j30
 time $INFER_HOME/infer/bin/infer --pulse-only --compilation-database compile_commands.json 2> infer-run-proftpd.log
