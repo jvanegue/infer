@@ -17,8 +17,6 @@ export BDE_CMAKE_BUILD_DIR=$PWD/_build
 ./termination-run.sh 2>&1 > infer-log-bde.log
 cd ..
 
-exit
-
 # These are under build/ subfolder for COMDB2
 echo RUNNING PULSE-INF on TARGET comdb2
 mkdir -p comdb2/build
@@ -73,10 +71,10 @@ cd ../..
 
 # These are under src/ subfolder for EXIM
 echo RUNNING PULSE-INF on TARGET exim
+cp exim-resources/Makefile exim/src/Local/Makefile
 cd exim/src
 chmod +x ./termination-run.sh
 make clean > /dev/null || echo Failed to make clean: non fatal error. continuing
-./configure > /dev/null || echo Failed to configure: non fatal error. continuing
 ./termination-run.sh 2>&1 > infer-log-exim.log
 cd ../..
 
