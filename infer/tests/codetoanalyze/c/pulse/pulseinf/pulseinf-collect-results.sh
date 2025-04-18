@@ -2,7 +2,7 @@
 
 mkdir -p results
 
-for i in bde bitcoin FreeImage libpng libxpm mbedtls openssl zlib bind9 blazingmq cryptopp gpac libxml2 open5gs pcre2 proftpd sqlite lua
+for i in bde bitcoin FreeImage libpng libxpm mbedtls openssl zlib bind9 blazingmq cryptopp libxml2 open5gs pcre2 proftpd sqlite lua gpac
 do
     cp projects/$i/infer-log*.log ./results/
     cp projects/$i/report-indented.json ./results/pulseinf-report-$i.json

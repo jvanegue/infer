@@ -84,6 +84,7 @@ do
     echo RUNNING PULSE-INF on TARGET $i
     cd $i
     chmod +x ./termination-run.sh
+    ./autogen.sh || echo Failed to autogen: non fatal error. continuing
     ./configure || echo Failed to configure: non fatal error. continuing
     make clean || echo Failed to make clean: non fatal error. continuing
     ./termination-run.sh 2>&1 > infer-log-$i.log
