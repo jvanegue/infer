@@ -124,13 +124,11 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
 
   (* L.debug Analysis Quiet "PULSEINF: Entered EXECDOM BACK-EDGE NUMITER %u \n" num_iters; *)
 
-  let has_infinite_state = has_infinite_state next in
-  if has_infinite_state then (
+  if has_infinite_state next then (
     (* L.debug Analysis Quiet "PULSEINF: POST already had an infinite state - not adding more \n"; *)
     ([],-1)
   )
   else
-
   
   let _ = num_iters in
   
@@ -138,27 +136,19 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
   
   let same = phys_equal prev next in
   
-  let rec detect_elem e lst curi : bool * int =
-    match lst with
-    | [] -> false,-1
-    | hd::tl -> if (leq ~lhs:hd ~rhs:e) then (true,curi) else (detect_elem e tl (curi + 1))
-  in
-  
   let rec compute_workset prev next newset nextit : (t * int) list =
     match next with
     | [] -> newset
     | hd::tl ->
-       let res,idx = detect_elem hd prev 0 in
-        let recidx = (match idx with | -1 -> nextit | _ -> idx)
-       in
-       if (res)
-       then (compute_workset prev tl newset (nextit + 1))
-       else [(hd,recidx)] @ (compute_workset prev tl newset (nextit + 1))
+       match List.findi prev ~f:(fun _i prevstate -> leq ~lhs:prevstate ~rhs:hd) with
+       | None -> (hd,nextit)::compute_workset prev tl newset (nextit + 1)
+       | Some _ -> compute_workset prev tl newset (nextit + 1)
+       
   in
   let workset = (compute_workset prev next [] 0) in
   let prevlen = List.length(prev) in
   let nextlen = List.length(next) in
-  let worklen = List.length(workset) in
+  (* let worklen = List.length(workset) in *)
 
   (* L.debug Analysis Quiet "PULSEINF: BACKEDGE prevlen %d nextlen %d diff %d worklen %d NUMITER %u \n" prevlen nextlen (nextlen - prevlen) worklen num_iters; *)
   
@@ -195,14 +185,14 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
   
   let extract_pathcond hd : Formula.t =
    match hd with
-    | AbortProgram summary -> AbductiveDomain.Summary.get_path_condition summary
-    | ExitProgram summary -> AbductiveDomain.Summary.get_path_condition summary
-    | LatentAbortProgram a -> AbductiveDomain.Summary.get_path_condition a.astate
-    | LatentInvalidAccess a -> AbductiveDomain.Summary.get_path_condition a.astate
-    | InfiniteLoop astate -> AbductiveDomain.get_path_condition astate
-    | ExceptionRaised astate -> AbductiveDomain.get_path_condition astate
-    | ContinueProgram astate -> AbductiveDomain.get_path_condition astate                             
-    | LatentSpecializedTypeIssue {astate; _} -> AbductiveDomain.Summary.get_path_condition astate
+    | AbortProgram astate
+    | ExitProgram astate
+    | LatentAbortProgram {astate}
+    | LatentInvalidAccess {astate}
+    | LatentSpecializedTypeIssue {astate} -> AbductiveDomain.Summary.get_path_condition astate
+    | InfiniteLoop astate
+    | ExceptionRaised astate
+    | ContinueProgram astate -> AbductiveDomain.get_path_condition astate
   in
 
   (* Used when the workset is not empty *)
@@ -210,9 +200,8 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
 
     (* This brings 30% less false positives but also remove 10-15% of real bugs involving goto *)
     (* This should stay enabled in the upstream version to minimize FP *)
-    let cmp_four (a,b,c,d) (e,f,g,h) =
-      if (phys_equal a e) && (phys_equal b f) && (phys_equal c g) && (phys_equal d h)
-      then true else false
+    let phys_equal4 (a,b,c,d) (e,f,g,h) =
+      (phys_equal a e) && (phys_equal b f) && (phys_equal c g) && (phys_equal d h)
     in
     (* end 30% FP diminish *)
     (* let cmp_four _ _ = false in *)    
@@ -235,12 +224,12 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
              | None ->
                 (* L.debug Analysis Quiet "PULSEINF: Recorded pathcond NOT in htable (ADDING) idx %d numiter %u \n" idx num_iters; *)
                 let _ = add_widenstate key in
-                record_pathcond tl (kl @ [key])
+                record_pathcond tl ([key] @ kl)
              | Some _ ->
                 match (Formula.set_is_empty termcond),(Formula.map_is_empty pathcond),(Formula.termset_is_empty termcond2) with 
                 | true,true,true -> idx (* -2 *)
                 | _ ->
-                   let test = (List.mem ~equal:cmp_four kl key) in
+                   let test = (List.mem ~equal:phys_equal4 kl key) in
                    if test then 
                      (
                      (* (L.debug Analysis Quiet "PULSEINF: Recorded pathcond ALREADY in htable (SAME ITER NO BUG) idx %d numiter %u \n" idx num_iters; *) -2)
@@ -253,7 +242,7 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
   
   let _ = print_workset workset in
   let (repeated_wsidx:int) =
-    if (phys_equal same true) then (-1)
+    if (Bool.equal same true) then (-1)
     else record_pathcond workset []
   in
   
@@ -270,8 +259,7 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
     | LatentSpecializedTypeIssue astate -> LatentSpecializedTypeIssue astate
   in
 
-  let create_infinite_state_and_print (state_set: t list) (idx:int) (case:int) =
-    let _ = case in
+  let create_infinite_state_and_print (state_set: t list) (idx:int) (_case:int) =
     (* L.debug Analysis Quiet "PULSEINF: BUG FOUND - DETECTED REPEATED STATE IDX %d CASE %d numiter %d \n" idx case num_iters; *)
     Metadata.record_alert_node cfgnode;
     let nth = (List.nth state_set idx) in 
@@ -284,7 +272,7 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
        [(create_infinite_state state idx)],idx
   in
   
-  let nextempty = (phys_equal (List.length next) 0) in 
+  let nextempty = List.is_empty next in 
   
   (* Identify which state in the post is repeated and generate a new infinite state for it *)
   let rec is_repeated e lst : bool = 
@@ -302,13 +290,13 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
   in  
 
   (* we have a trivial lasso because prev = next - this should trigger an alert *)
-  if same && (phys_equal nextempty false) then
+  if same && (Bool.equal nextempty false) then
     (
       (* L.debug Analysis Quiet "PULSEINF: same && nextempty is true - returning (no bug) \n"; *)
     create_infinite_state_and_print next (find_duplicate_state next 0 (-1)) 1)
   
   (* We have one or more newly created equivalent states in the post, trigger an alert *)
-  else if (phys_equal worklen 0) && (nextlen - prevlen) > 0 then
+  else if (List.is_empty workset) && (nextlen - prevlen) > 0 then
     create_infinite_state_and_print next (find_duplicate_state next 0 (-1)) 2
 
   (* We have a new post state whose path condition is equivalent to an existing state, trigger an alert *)
