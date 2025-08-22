@@ -117,20 +117,14 @@ let add_widenstate key = Utils.with_dls widenstate ~f:(fun widenstate ->
                              | None -> widenstate
                              | Some state -> Stdlib.Hashtbl.add state key (); widenstate)
 
-
-let rec find_infinite_state (lst: t list) : bool =
-  match lst with
-  | hd::tl ->
-     (match hd with
-     | InfiniteLoop _ -> true
-     | _ -> find_infinite_state tl)
-  | _ -> false
-                       
+let has_infinite_state (lst: t list) : bool =
+  List.exists ~f:(fun x -> match x with (InfiniteLoop _) -> true | _ -> false) lst
+       
 let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
 
   (* L.debug Analysis Quiet "PULSEINF: Entered EXECDOM BACK-EDGE NUMITER %u \n" num_iters; *)
 
-  let has_infinite_state = find_infinite_state next in
+  let has_infinite_state = has_infinite_state next in
   if has_infinite_state then (
     (* L.debug Analysis Quiet "PULSEINF: POST already had an infinite state - not adding more \n"; *)
     ([],-1)
