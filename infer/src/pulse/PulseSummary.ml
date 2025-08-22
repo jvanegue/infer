@@ -98,8 +98,8 @@ let exec_summary_of_post_common ({InterproceduralAnalysis.proc_desc} as analysis
     | Ok summary ->
        let r = exec_domain_of_summary summary in
        (match r with
-        | InfiniteProgram _ ->
-           (* L.debug Analysis Quiet "PULSEINF: Reach summarize with InfiniteProgram detected \n"; *)
+        | InfiniteLoop _ ->
+           (* L.debug Analysis Quiet "PULSEINF: Reach summarize with InfiniteLoop detected \n"; *)
            let curnode = Metadata.get_alert_node in
            let curloc = (Procdesc.Node.get_loc(curnode())) in 
            let error = ReportableError {astate=astate; diagnostic=(InfiniteLoopError {location=curloc})} in
@@ -190,8 +190,8 @@ let exec_summary_of_post_common ({InterproceduralAnalysis.proc_desc} as analysis
   | ContinueProgram astate ->
       summarize astate ~exec_domain_of_summary:continue_program ~is_exceptional_state:false
   (* already a summary but need to reconstruct the variants to make the type system happy :( *)
-  | InfiniteProgram astate ->
-     (* L.debug Analysis Quiet "PULSEINF: calling summarize for InfiniteProgram \n"; *)
+  | InfiniteLoop astate ->
+     (* L.debug Analysis Quiet "PULSEINF: calling summarize for InfiniteLoop \n"; *)
      summarize astate ~exec_domain_of_summary:infinite_raised ~is_exceptional_state:false
   | AbortProgram astate ->
       Sat (AbortProgram astate)
@@ -234,7 +234,7 @@ let of_posts ({InterproceduralAnalysis.proc_desc} as analysis_data) specializati
         exec_summary_of_post_common analysis_data specialization path location exec_state
           ~continue_program:(fun astate -> ContinueProgram astate)
           ~exception_raised:(fun astate -> ExceptionRaised astate)
-          ~infinite_raised:(fun  astate -> InfiniteProgram astate)
+          ~infinite_raised:(fun  astate -> InfiniteLoop astate)
         |> SatUnsat.sat )
   in
   { pre_post_list

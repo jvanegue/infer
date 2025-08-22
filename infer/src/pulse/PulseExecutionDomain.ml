@@ -23,7 +23,7 @@ module Metadata = AbstractInterpreter.DisjunctiveMetadata
    normalized them and don't need to normalize them again. *)
 type 'abductive_domain_t base_t =
   | ContinueProgram of 'abductive_domain_t
-  | InfiniteProgram of 'abductive_domain_t 
+  | InfiniteLoop of 'abductive_domain_t 
   | ExceptionRaised of 'abductive_domain_t
   | ExitProgram of AbductiveDomain.Summary.t
   | AbortProgram of AbductiveDomain.Summary.t
@@ -50,7 +50,7 @@ let leq ~lhs ~rhs =
   | AbortProgram astate1, AbortProgram astate2 | ExitProgram astate1, ExitProgram astate2 ->
       AbductiveDomain.Summary.leq ~lhs:astate1 ~rhs:astate2
   | ExceptionRaised astate1, ExceptionRaised astate2
-  | InfiniteProgram astate1, InfiniteProgram astate2
+  | InfiniteLoop astate1, InfiniteLoop astate2
   | ContinueProgram astate1, ContinueProgram astate2 ->
       AbductiveDomain.leq ~lhs:astate1 ~rhs:astate2
   | ( LatentAbortProgram {astate= astate1; latent_issue= issue1}
@@ -71,12 +71,12 @@ let to_astate = function
   | LatentInvalidAccess {astate= summary}
   | LatentSpecializedTypeIssue {astate= summary} ->
       (summary :> AbductiveDomain.t)
-  | ExceptionRaised astate | ContinueProgram astate | InfiniteProgram astate ->
+  | ExceptionRaised astate | ContinueProgram astate | InfiniteLoop astate ->
       astate
 
 let pp_header kind fmt = function
-  | InfiniteProgram _ ->
-     Pp.with_color kind Red F.pp_print_string fmt "InfiniteProgram"
+  | InfiniteLoop _ ->
+     Pp.with_color kind Red F.pp_print_string fmt "InfiniteLoop"
   | AbortProgram _ ->
       Pp.with_color kind Red F.pp_print_string fmt "AbortProgram"
   | ContinueProgram _ ->
@@ -122,7 +122,7 @@ let rec find_infinite_state (lst: t list) : bool =
   match lst with
   | hd::tl ->
      (match hd with
-     | InfiniteProgram _ -> true
+     | InfiniteLoop _ -> true
      | _ -> find_infinite_state tl)
   | _ -> false
                        
@@ -205,7 +205,7 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
     | ExitProgram summary -> AbductiveDomain.Summary.get_path_condition summary
     | LatentAbortProgram a -> AbductiveDomain.Summary.get_path_condition a.astate
     | LatentInvalidAccess a -> AbductiveDomain.Summary.get_path_condition a.astate
-    | InfiniteProgram astate -> AbductiveDomain.get_path_condition astate
+    | InfiniteLoop astate -> AbductiveDomain.get_path_condition astate
     | ExceptionRaised astate -> AbductiveDomain.get_path_condition astate
     | ContinueProgram astate -> AbductiveDomain.get_path_condition astate                             
     | LatentSpecializedTypeIssue {astate; _} -> AbductiveDomain.Summary.get_path_condition astate
@@ -266,13 +266,13 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
   let create_infinite_state (hd:t) (cnt:int) : t =
     (* Only create infinite state from a non-error state that is not already an infinite state *)
     match hd with
-    | ExceptionRaised astate -> print_warning "Exception" cnt hd; InfiniteProgram astate
-    | ContinueProgram astate -> print_warning "Continue" cnt hd; InfiniteProgram astate
+    | ExceptionRaised astate -> print_warning "Exception" cnt hd; InfiniteLoop astate
+    | ContinueProgram astate -> print_warning "Continue" cnt hd; InfiniteLoop astate
     | AbortProgram astate -> AbortProgram astate 
     | ExitProgram astate -> ExitProgram astate
     | LatentAbortProgram a -> LatentAbortProgram a
     | LatentInvalidAccess a -> LatentInvalidAccess a
-    | InfiniteProgram astate -> InfiniteProgram astate                                                      
+    | InfiniteLoop astate -> InfiniteLoop astate                                                      
     | LatentSpecializedTypeIssue astate -> LatentSpecializedTypeIssue astate
   in
 

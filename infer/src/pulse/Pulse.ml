@@ -283,7 +283,7 @@ let pp_space_specialization fmt =
     | LatentAbortProgram _
     | LatentInvalidAccess _
     | LatentSpecializedTypeIssue _ 
-    | InfiniteProgram _ -> 
+    | InfiniteLoop _ -> 
         Sat (Ok exec_state)
 
   let topl_small_step tenv loc procname arguments (return, return_type) exec_state_res =
@@ -309,7 +309,7 @@ let pp_space_specialization fmt =
       | LatentAbortProgram _
       | ExitProgram _
       | ExceptionRaised _
-      | InfiniteProgram _
+      | InfiniteLoop _
       | LatentInvalidAccess _ 
       | LatentSpecializedTypeIssue _ ->
           exec_state
@@ -994,7 +994,7 @@ let pp_space_specialization fmt =
             L.d_printfln "clearing builder attributes on exception" ;
             let astate = AbductiveDomain.finalize_all_hack_builders astate in
             Ok (ExceptionRaised astate)
-        | InfiniteProgram _
+        | InfiniteLoop _
         | ( ExitProgram _
 
           | AbortProgram _
@@ -1111,7 +1111,7 @@ let pp_space_specialization fmt =
               match astate with
               | AbortProgram _
               | ExceptionRaised _
-              | InfiniteProgram _
+              | InfiniteLoop _
               | ExitProgram _
               | LatentAbortProgram _
               | LatentInvalidAccess _
@@ -1166,7 +1166,7 @@ let pp_space_specialization fmt =
           match astate with
           | AbortProgram _
           | ExceptionRaised _
-          | InfiniteProgram _
+          | InfiniteLoop _
           | ExitProgram _
           | LatentAbortProgram _
           | LatentInvalidAccess _
@@ -1201,7 +1201,7 @@ let pp_space_specialization fmt =
         | LatentAbortProgram _
         | LatentInvalidAccess _
         | LatentSpecializedTypeIssue _
-        | InfiniteProgram _ ->
+        | InfiniteLoop _ ->
             Some exec_state
         | ContinueProgram astate -> (
           match PulseOperations.remove_vars vars location astate with
@@ -1352,7 +1352,7 @@ let pp_space_specialization fmt =
       (astate_n : NonDisjDomain.t) ({InterproceduralAnalysis.tenv; proc_desc} as analysis_data)
       cfg_node (instr : Sil.instr) : ExecutionDomain.t list * PathContext.t * NonDisjDomain.t =
     match astate with
-    | AbortProgram _ | LatentAbortProgram _ | LatentInvalidAccess _ | InfiniteProgram _
+    | AbortProgram _ | LatentAbortProgram _ | LatentInvalidAccess _ | InfiniteLoop _
     | LatentSpecializedTypeIssue _
       ->
         ([astate], path, astate_n)
@@ -1810,7 +1810,7 @@ let exit_function limit analysis_data location posts non_disj_astate =
         | AbortProgram _
         | ExitProgram _
         | ExceptionRaised _
-        | InfiniteProgram _
+        | InfiniteLoop _
         | LatentAbortProgram _
         | LatentInvalidAccess _
         | LatentSpecializedTypeIssue _ ->

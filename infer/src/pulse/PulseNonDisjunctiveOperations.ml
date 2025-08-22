@@ -239,7 +239,7 @@ let continue_bind exec_state ~f =
   | ContinueProgram astate ->
       f astate
   | ExceptionRaised _
-  | InfiniteProgram _
+  | InfiniteLoop _
   | AbortProgram _
   | ExitProgram _
   | LatentAbortProgram _

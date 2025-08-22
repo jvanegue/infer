@@ -339,7 +339,7 @@ module Basic = struct
                   addrs_to_invalidate astate
                 |> ok_continue
             | ExceptionRaised _
-            | InfiniteProgram _
+            | InfiniteLoop _
             | ExitProgram _
             | AbortProgram _
             | LatentAbortProgram _
