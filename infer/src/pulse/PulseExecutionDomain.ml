@@ -12,8 +12,8 @@ open PulseBasicInterface
 module AbductiveDomain = PulseAbductiveDomain
 module DecompilerExpr = PulseDecompilerExpr
 module Diagnostic = PulseDiagnostic
-module LatentIssue = PulseLatentIssue
 module Formula = PulseFormula
+module LatentIssue = PulseLatentIssue
 module L = Logging 
 module Metadata = AbstractInterpreter.DisjunctiveMetadata
          

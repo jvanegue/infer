@@ -189,14 +189,13 @@ let pp_space_specialization fmt =
     let plist,rplist = List.unzip prev in
     let nlist,rnlist = List.unzip next in    
     let dbe,cnt      = (ExecutionDomain.back_edge plist nlist num_iters) in
-    let _,_       = (PathContext.back_edge rplist rnlist num_iters) in    
     let (pathctx: PathContext.t option) = (List.nth rnlist cnt) in
     let used,pts =
       match (pathctx) with
       | Some p -> 1, p
-      | _ ->
-         L.debug Analysis Quiet "PULSEINF: PATHCTX DEBUG: not finding back pathctx at provided index  - this should never happen \n"; 
-         0, PathContext.initial (* pathctx is None *)
+      | None ->
+         L.debug Analysis Quiet "PULSEINF: PATHCTX DEBUG: not finding back pathctx at provided index  - this should never happen \n";
+         0, PathContext.initial
             
     in
     let res = if (used > 0 && cnt >= 0) then List.zip_exn (plist @ dbe) (rplist @ [pts]) else prev

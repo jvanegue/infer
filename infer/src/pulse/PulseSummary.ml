@@ -102,7 +102,7 @@ let exec_summary_of_post_common ({InterproceduralAnalysis.proc_desc} as analysis
            (* L.debug Analysis Quiet "PULSEINF: Reach summarize with InfiniteProgram detected \n"; *)
            let curnode = Metadata.get_alert_node in
            let curloc = (Procdesc.Node.get_loc(curnode())) in 
-           let error = ReportableError {astate=astate; diagnostic=(InfiniteError {location=curloc})} in
+           let error = ReportableError {astate=astate; diagnostic=(InfiniteLoopError {location=curloc})} in
            PulseReport.report_summary_error analysis_data path (error, summary) |> Option.value ~default:r
         | _ -> r)
     | Error (`MemoryLeak (summary, astate, allocator, allocation_trace, location)) ->
