@@ -783,3 +783,11 @@ void goto_cross_loop_bad()
     }
 }
 
+/* Constant involved, on bug */
+#define defined_const 8
+int constant_loop_ok(int i, int j)
+{
+  for (i = 0; i < defined_const; i++)
+    j++;
+  return (j);
+}
