@@ -28,34 +28,50 @@ module ActiveProcedures : sig
 
   val mem : active -> bool
 
-  val add : active -> unit
+  val add : Procdesc.t -> Specialization.t option -> unit
 
   val remove : active -> unit
 
   val get_all : unit -> active list
+
+  val size : unit -> int
 
   val get_cycle_start : active -> active * int * active
   (** given a target where we detected a recursive call, i.e. that already belongs to the queue,
       return a triple of where the cycle starts, the length of the cycle, and the first procedure we
       started to analyze *)
 end = struct
-  type active = SpecializedProcname.t
+  type active = SpecializedProcname.t [@@deriving compare, sexp, hash]
 
-  module AnalysisTargets = Hash_queue.Make (SpecializedProcname)
+  module Elt = struct
+    type t = {arity: int [@ignore]; active: active} [@@deriving compare, sexp, hash]
+
+    let compare_using_arity_first elt1 elt2 =
+      let compare_arity = Int.compare elt1.arity elt2.arity in
+      if Int.equal compare_arity 0 then compare elt1 elt2 else compare_arity
+  end
+
+  module AnalysisTargets = Hash_queue.Make (Elt)
 
   let currently_analyzed = DLS.new_key (fun () -> AnalysisTargets.create ())
 
   let pp_actives fmt =
     DLS.get currently_analyzed
     |> AnalysisTargets.iteri ~f:(fun ~key:target ~data:_ ->
-           F.fprintf fmt "%a,@," SpecializedProcname.pp target )
+           F.fprintf fmt "%a,@," SpecializedProcname.pp target.Elt.active )
 
 
-  let mem analysis_target = AnalysisTargets.mem (DLS.get currently_analyzed) analysis_target
+  let mem active =
+    let elt = {Elt.active; arity= 0} in
+    AnalysisTargets.mem (DLS.get currently_analyzed) elt
 
-  let add analysis_target =
-    if Config.trace_ondemand then L.progress "add %a@." SpecializedProcname.pp analysis_target ;
-    AnalysisTargets.enqueue_back_exn (DLS.get currently_analyzed) analysis_target ()
+
+  let add proc_decl specialization =
+    let proc_name = Procdesc.get_proc_name proc_decl in
+    let arity = Procdesc.get_formals proc_decl |> List.length in
+    let active : SpecializedProcname.t = {proc_name; specialization} in
+    if Config.trace_ondemand then L.progress "add %a@." SpecializedProcname.pp active ;
+    AnalysisTargets.enqueue_back_exn (DLS.get currently_analyzed) {Elt.arity; active} ()
 
 
   let remove analysis_target =
@@ -63,26 +79,34 @@ end = struct
     let popped_target, () =
       AnalysisTargets.dequeue_back_with_key_exn (DLS.get currently_analyzed)
     in
-    if not (SpecializedProcname.equal popped_target analysis_target) then
+    if not (SpecializedProcname.equal popped_target.active analysis_target) then
       L.die InternalError
         "Queue structure for ondemand violated: expected to pop %a but got %a instead@\n\
          Active procedures: %t@\n"
-        SpecializedProcname.pp analysis_target SpecializedProcname.pp popped_target pp_actives
+        SpecializedProcname.pp analysis_target SpecializedProcname.pp popped_target.active
+        pp_actives
 
 
-  let get_all () = AnalysisTargets.keys @@ DLS.get currently_analyzed
+  let get_all_with_registered_arity () = AnalysisTargets.keys @@ DLS.get currently_analyzed
+
+  let get_all () = get_all_with_registered_arity () |> List.map ~f:(fun {Elt.active} -> active)
+
+  let size () = AnalysisTargets.length @@ DLS.get currently_analyzed
 
   let get_cycle_start recursive =
-    let all = get_all () in
+    let all = get_all_with_registered_arity () in
     (* there is always one target in the queue since [recursive] is in the queue *)
     let first_active = List.hd_exn all in
     let cycle =
-      List.drop_while all ~f:(fun target -> not (SpecializedProcname.equal target recursive))
+      List.drop_while all ~f:(fun target ->
+          not (SpecializedProcname.equal target.Elt.active recursive) )
     in
     let cycle_length = List.length cycle in
     (* there is always one target in the cycle which is the previous call to [recursive] *)
-    let cycle_start = List.min_elt ~compare:SpecializedProcname.compare cycle |> Option.value_exn in
-    (cycle_start, cycle_length, first_active)
+    let cycle_start =
+      List.min_elt ~compare:Elt.compare_using_arity_first cycle |> Option.value_exn
+    in
+    (cycle_start.active, cycle_length, first_active.active)
 end
 
 (** an alternative mean of "cutting" recursion cycles used when replaying a previous analysis: times
@@ -103,7 +127,11 @@ let detect_mutual_recursion_cycle ~caller_summary ~callee specialization =
       in
       if is_replay_recursive_callee then `ReplayCycleCut else `NotInMutualRecursionCycle
   | None, _ | _, None ->
-      if ActiveProcedures.mem {proc_name= callee; specialization} then `InMutualRecursionCycle
+      if ActiveProcedures.mem {proc_name= callee; specialization} then (
+        if Config.trace_mutual_recursion_cycle_checker then
+          L.progress "@\n{%a; %a} is already in the current callstack !!!" Procname.pp callee
+            (Pp.option Specialization.pp) specialization ;
+        `InMutualRecursionCycle )
       else `NotInMutualRecursionCycle
 
 
@@ -220,7 +248,7 @@ let run_proc_analysis tenv analysis_req specialization_context ?caller_pname cal
       | Some (current_summary, _) ->
           current_summary
     in
-    ActiveProcedures.add {proc_name= callee_pname; specialization} ;
+    ActiveProcedures.add callee_pdesc specialization ;
     initial_callee_summary
   in
   let postprocess summary =
@@ -250,15 +278,22 @@ let run_proc_analysis tenv analysis_req specialization_context ?caller_pname cal
   in
   let initial_callee_summary = preprocess () in
   try
-    let callee_summary =
-      if callee_attributes.ProcAttributes.is_defined then
-        analyze analysis_req specialization initial_callee_summary callee_pdesc
-      else initial_callee_summary
-    in
-    let final_callee_summary = postprocess callee_summary in
-    (* don't forget to reset this so we output messages for future errors too *)
-    DLS.set logged_error false ;
-    final_callee_summary
+    if
+      Option.exists Config.ondemand_callchain_limit ~f:(fun limit ->
+          ActiveProcedures.size () >= limit )
+    then (
+      Stats.incr_ondemand_callchain_limit_hit () ;
+      postprocess initial_callee_summary )
+    else
+      let callee_summary =
+        if callee_attributes.ProcAttributes.is_defined then
+          analyze analysis_req specialization initial_callee_summary callee_pdesc
+        else initial_callee_summary
+      in
+      let final_callee_summary = postprocess callee_summary in
+      (* don't forget to reset this so we output messages for future errors too *)
+      DLS.set logged_error false ;
+      final_callee_summary
   with exn ->
     let backtrace = Printexc.get_backtrace () in
     IExn.reraise_if exn ~f:(fun () ->
@@ -309,7 +344,8 @@ let dump_duplicate_procs source_file procs =
             ; loc }
           when (* defined in another file *)
                (not (SourceFile.equal source_file translation_unit))
-               && (* really defined in that file and not in an include *)
+               &&
+               (* really defined in that file and not in an include *)
                SourceFile.equal translation_unit loc.file ->
             Some (pname, translation_unit)
         | _ ->
@@ -421,6 +457,9 @@ let rec analyze_callee_can_raise_recursion ~lazy_payloads (analysis_req : Analys
         register_callee ~cycle_detected:true ?caller_summary callee_pname ;
         if Config.trace_ondemand then
           L.progress "Closed the cycle finishing in recursive call to %a@." Procname.pp callee_pname ;
+        if Config.trace_mutual_recursion_cycle_checker then
+          L.progress "@\nClosed the cycle finishing in recursive call to %a" Procname.pp
+            callee_pname ;
         if
           DLS.get number_of_recursion_restarts >= Config.ondemand_recursion_restart_limit
           && not (SpecializedProcname.equal cycle_start target)
@@ -433,6 +472,12 @@ let rec analyze_callee_can_raise_recursion ~lazy_payloads (analysis_req : Analys
             cycle_start.proc_name
             (Pp.seq ~sep:"," SpecializedProcname.pp)
             (ActiveProcedures.get_all ()) ;
+        if Config.trace_mutual_recursion_cycle_checker then
+          L.progress "@\nFound cycle at %a, first_active= %a; restarting from %a@\nactives: %a"
+            Procname.pp callee_pname Procname.pp first_active.proc_name Procname.pp
+            cycle_start.proc_name
+            (Pp.seq ~sep:"," SpecializedProcname.pp)
+            (ActiveProcedures.get_all ()) ;
         (* we want the exception to pop back up to the beginning of the cycle, so we set [ttl= cycle_length] *)
         Utils.with_dls number_of_recursion_restarts ~f:(( + ) 1) ;
         raise (RecursiveCycleException.RecursiveCycle {recursive= cycle_start; ttl= cycle_length}) )
@@ -440,6 +485,8 @@ let rec analyze_callee_can_raise_recursion ~lazy_payloads (analysis_req : Analys
       register_callee ~cycle_detected:true ?caller_summary callee_pname ;
       if Config.trace_ondemand then
         L.progress "Closed the cycle finishing in recursive call to %a@." Procname.pp callee_pname ;
+      if Config.trace_mutual_recursion_cycle_checker then
+        L.progress "@\nClosed the cycle finishing in recursive call to %a" Procname.pp callee_pname ;
       Error MutualRecursionCycle
   | `NotInMutualRecursionCycle -> (
       register_callee ~cycle_detected:false ?caller_summary callee_pname ;
@@ -509,8 +556,13 @@ let rec analyze_callee_can_raise_recursion ~lazy_payloads (analysis_req : Analys
 
 and on_recursive_cycle ~lazy_payloads analysis_req ?caller_summary:_ ?from_file_analysis ~ttl
     (cycle_start : SpecializedProcname.t) callee_pname =
-  if ttl > 0 then
-    raise (RecursiveCycleException.RecursiveCycle {recursive= cycle_start; ttl= ttl - 1}) ;
+  if ttl > 0 then (
+    if Config.trace_mutual_recursion_cycle_checker then
+      L.progress "@]@\nDONE with analysing of %a (because exception raised, |callstack|=%d)"
+        SpecializedProcname.pp cycle_start ttl ;
+    raise (RecursiveCycleException.RecursiveCycle {recursive= cycle_start; ttl= ttl - 1}) ) ;
+  if Config.trace_mutual_recursion_cycle_checker then
+    L.progress "@\nNOW we rerun analysis_callee with %a" SpecializedProcname.pp cycle_start ;
   analyze_callee ~lazy_payloads analysis_req ~specialization:cycle_start.specialization
     ?from_file_analysis cycle_start.proc_name
   |> ignore ;
@@ -529,12 +581,22 @@ and analyze_callee ~lazy_payloads analysis_req ~specialization ?caller_summary ?
 
 let analyze_callee ~lazy_payloads analysis_req ~specialization ?caller_summary ?from_file_analysis
     callee_pname =
+  if Config.trace_mutual_recursion_cycle_checker then
+    L.progress "@\n@[<v 4>analysing %a with specialization %a..." Procname.pp callee_pname
+      (Pp.option Specialization.pp) specialization ;
   (* If [caller_summary] is set then we are analyzing a dependency of another procedure, so we
      should keep counting restarts within that dependency chain (or cycle). If it's not set then
      this is a "toplevel" analysis of [callee_pname] so we start fresh. *)
   if Option.is_none caller_summary then DLS.set number_of_recursion_restarts 0 ;
-  analyze_callee ~lazy_payloads analysis_req ~specialization ?caller_summary ?from_file_analysis
-    callee_pname
+  let res =
+    analyze_callee ~lazy_payloads analysis_req ~specialization ?caller_summary ?from_file_analysis
+      callee_pname
+  in
+  if Config.trace_mutual_recursion_cycle_checker then
+    L.progress "@]@\nDONE with analysing %a with specialization %a%s" Procname.pp callee_pname
+      (Pp.option Specialization.pp) specialization
+      (if Result.is_error res then "(with an error)" else "") ;
+  res
 
 
 let analyze_proc_name analysis_req ?specialization ~caller_summary callee_pname =

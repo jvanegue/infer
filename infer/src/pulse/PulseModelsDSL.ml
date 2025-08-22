@@ -167,7 +167,7 @@ module Syntax = struct
             | ExecutionDomain.ContinueProgram astate ->
                 ContinueProgram ((), astate)
             | exec ->
-                Other exec ) )
+                Other exec ))
     , non_disj )
 
 
@@ -180,7 +180,7 @@ module Syntax = struct
             | ContinueProgram ((), astate) ->
                 ExecutionDomain.ContinueProgram astate
             | Other exec ->
-                exec ) )
+                exec ))
     , non_disj )
 
 
@@ -384,8 +384,25 @@ module Syntax = struct
     PulseOperations.add_dict_contain_const_keys addr |> exec_command
 
 
+  let abduce_must_be_awaited (addr, _) : unit model_monad =
+    PulseOperations.abduce_must_be_awaited addr |> exec_command
+
+
   let is_dict_contain_const_keys (addr, _) : bool model_monad =
     AddressAttributes.is_dict_contain_const_keys addr |> exec_pure_operation
+
+
+  let propagate_taint_attribute (source_addr, _) (dest_addr, dest_hist) : aval model_monad =
+    let* {path; location} = get_data in
+    let* taints, _ =
+      AddressAttributes.get_taint_sources_and_sanitizers source_addr |> exec_pure_operation
+    in
+    if Attribute.TaintedSet.is_empty taints then ret (dest_addr, dest_hist)
+    else
+      let propagation_event = ValueHistory.TaintPropagated (location, path.timestamp) in
+      let* () = AddressAttributes.add_tainted dest_addr taints |> exec_command in
+      let new_hist = ValueHistory.sequence propagation_event dest_hist in
+      ret (dest_addr, new_hist)
 
 
   let find_decompiler_expr addr : DecompilerExpr.t model_monad =
@@ -480,6 +497,11 @@ module Syntax = struct
   let report_assert_error : unit model_monad =
     let* {location} = get_data in
     report (AssertionError {location})
+
+
+  let report_unawaited_awaitable allocation_trace : unit model_monad =
+    let* {location} = get_data in
+    report (ResourceLeak {resource= Awaitable; allocation_trace; location})
 
 
   let and_dynamic_type_is (v, _) t : unit model_monad =
@@ -599,6 +621,15 @@ module Syntax = struct
 
   let is_allocated (addr, _) : bool model_monad =
     PulseOperations.is_allocated addr |> exec_pure_operation
+
+
+  let get_unawaited_awaitable (addr, _) : Trace.t option model_monad =
+    PulseOperations.get_unawaited_awaitable addr |> exec_pure_operation
+
+
+  let is_unawaited_awaitable aval =
+    let* opt_trace = get_unawaited_awaitable aval in
+    ret (Option.is_some opt_trace)
 
 
   let fresh_ var_type ?more () : aval model_monad =
@@ -892,8 +923,10 @@ module Syntax = struct
         TextualSil.hack_mixed_type_name
     | Python ->
         TextualSil.python_mixed_type_name
-    | Java | C ->
-        L.die InternalError "DSL.call not supported on Java"
+    | Java | C | Swift ->
+        L.die InternalError "DSL.call not supported on Java/C/Swift"
+    | Rust ->
+        L.die InternalError "<NOT YET SUPPORTED>"
 
 
   let call lang proc_name named_args =
@@ -901,7 +934,7 @@ module Syntax = struct
     let typ = Typ.mk_ptr (Typ.mk_struct mixed_type_name) in
     let ret_id = Ident.create_none () in
     let call_args =
-      List.map named_args ~f:(fun (str, arg) : ValueOrigin.t ProcnameDispatcher.Call.FuncArg.t ->
+      List.map named_args ~f:(fun (str, arg) : ValueOrigin.t FuncArg.t ->
           let pvar = Pvar.mk (Mangled.from_string str) proc_name in
           let exp = Exp.Lvar pvar in
           let arg_payload = ValueOrigin.OnStack {var= Var.of_pvar pvar; addr_hist= arg} in

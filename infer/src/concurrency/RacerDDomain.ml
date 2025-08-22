@@ -41,6 +41,10 @@ let pp_exp fmt exp =
       L.die InternalError "Hack not supported"
   | Python ->
       L.die InternalError "Python not supported"
+  | Rust ->
+      L.die InternalError "Rust not supported"
+  | Swift ->
+      L.die InternalError "Swift not supported"
 
 
 let rec should_keep_exp formals (exp : AccessExpression.t) =
@@ -214,7 +218,11 @@ module ThreadsDomain = struct
   let integrate_summary ~caller_astate ~callee_astate =
     (* if we know the callee runs on the main thread, assume the caller does too. otherwise, keep
        the caller's thread context *)
-    match callee_astate with AnyThreadButSelf -> callee_astate | _ -> caller_astate
+    match callee_astate with
+    | AnyThreadButSelf ->
+        callee_astate
+    | _ ->
+        caller_astate
 
 
   let update_for_lock_use = function AnyThreadButSelf -> AnyThreadButSelf | _ -> AnyThread

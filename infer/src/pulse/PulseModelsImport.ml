@@ -19,7 +19,7 @@ type model_data =
       -> PathContext.t
       -> Ident.t * Typ.t
       -> Exp.t
-      -> ValueOrigin.t ProcnameDispatcher.Call.FuncArg.t list
+      -> ValueOrigin.t FuncArg.t list
       -> Location.t
       -> CallFlags.t
       -> AbductiveDomain.t
@@ -91,8 +91,11 @@ module Basic = struct
     ContinueProgram astate
 
 
-  let shallow_copy_value path location event ret_id dest_pointer_hist src_value_hist astate =
-    let<*> astate, obj_copy = PulseOperations.shallow_copy path location src_value_hist astate in
+  let shallow_copy_value ?(ask_specialization = false) path location event ret_id dest_pointer_hist
+      src_value_hist astate =
+    let<*> astate, obj_copy =
+      PulseOperations.shallow_copy ~ask_specialization path location src_value_hist astate
+    in
     let<+> astate =
       PulseOperations.write_deref path location ~ref:dest_pointer_hist
         ~obj:(fst obj_copy, Hist.add_event event (snd obj_copy))
@@ -101,11 +104,12 @@ module Basic = struct
     PulseOperations.havoc_id ret_id (Hist.single_event event) astate
 
 
-  let shallow_copy path location event ret_id dest_pointer_hist src_pointer_hist astate =
+  let shallow_copy ?(ask_specialization = false) path location event ret_id dest_pointer_hist
+      src_pointer_hist astate =
     let<*> astate, obj =
       PulseOperations.eval_access path Read location src_pointer_hist Dereference astate
     in
-    shallow_copy_value path location event ret_id dest_pointer_hist obj astate
+    shallow_copy_value ~ask_specialization path location event ret_id dest_pointer_hist obj astate
 
 
   let shallow_copy_model model_desc dest_pointer_hist src_pointer_hist : model_no_non_disj =
@@ -204,10 +208,7 @@ module Basic = struct
 
 
   let unknown_call ?(force_pure = false) skip_reason args : model_no_non_disj =
-    let actuals =
-      List.map args ~f:(fun {ProcnameDispatcher.Call.FuncArg.arg_payload= actual; typ} ->
-          (actual, typ) )
-    in
+    let actuals = List.map args ~f:(fun {FuncArg.arg_payload= actual; typ} -> (actual, typ)) in
     unknown_call_without_formals ~force_pure skip_reason actuals
 
 
@@ -216,12 +217,12 @@ module Basic = struct
     match args with
     | _ :: arg :: _
       when Procname.is_objc_instance_method callee_procname || Procname.is_java callee_procname ->
-        let arg_value, arg_history = arg.ProcnameDispatcher.Call.FuncArg.arg_payload in
+        let arg_value, arg_history = arg.FuncArg.arg_payload in
         let ret_value = (arg_value, Hist.add_call path location desc arg_history) in
         PulseOperations.write_id ret_id ret_value astate |> ok_continue
     | arg :: _ when Procname.is_c callee_procname || Procname.is_objc_class_method callee_procname
       ->
-        let arg_value, arg_history = arg.ProcnameDispatcher.Call.FuncArg.arg_payload in
+        let arg_value, arg_history = arg.FuncArg.arg_payload in
         let ret_value = (arg_value, Hist.add_call path location desc arg_history) in
         PulseOperations.write_id ret_id ret_value astate |> ok_continue
     | _ ->
@@ -233,7 +234,7 @@ module Basic = struct
     match args with
     | arg :: _
       when Procname.is_objc_instance_method callee_procname || Procname.is_java callee_procname ->
-        let arg_value, arg_history = arg.ProcnameDispatcher.Call.FuncArg.arg_payload in
+        let arg_value, arg_history = arg.FuncArg.arg_payload in
         let ret_value = (arg_value, Hist.add_call path location desc arg_history) in
         PulseOperations.write_id ret_id ret_value astate |> ok_continue
     | _ ->
@@ -253,9 +254,9 @@ module Basic = struct
     PulseOperations.write_id ret_id ret_value astate |> ok_continue
 
 
-  let call_destructor ({ProcnameDispatcher.Call.FuncArg.arg_payload= _; exp; typ} as deleted_arg) :
-      model =
-   fun ({analysis_data; dispatch_call_eval_args; path; location; ret} : model_data) astate non_disj ->
+  let call_destructor ({FuncArg.arg_payload= _; exp; typ} as deleted_arg) : model =
+   fun ({analysis_data; dispatch_call_eval_args; path; location; ret} : model_data) astate
+       non_disj ->
     (* TODO: lookup dynamic type; currently not set in C++, should update model of [new] *)
     match typ.Typ.desc with
     | Typ.Tptr ({desc= Tstruct class_name}, _) -> (
@@ -303,7 +304,7 @@ module Basic = struct
 
 
   let free_or_delete operation invalidation
-      ({ProcnameDispatcher.Call.FuncArg.arg_payload= deleted_access_path} as deleted_arg) : model =
+      ({FuncArg.arg_payload= deleted_access_path} as deleted_arg) : model =
    fun ({path; location} as model_data) astate non_disj ->
     let ((deleted_addr, deleted_hist) as deleted_access) =
       ValueOrigin.addr_hist deleted_access_path
@@ -420,7 +421,7 @@ module Basic = struct
       {PulseOperations.prune} that works better if we know the SIL expression. This just means we're
       discarding some abstract values that were potentially created to evaluate [exp] when the model
       was called. *)
-  let assert_ {ProcnameDispatcher.Call.FuncArg.exp= condition} : model_no_non_disj =
+  let assert_ {FuncArg.exp= condition} : model_no_non_disj =
    fun {analysis_data= {proc_desc}; path; location} astate ->
     let<++> astate, _ = PulseOperations.prune proc_desc path location ~condition astate in
     astate

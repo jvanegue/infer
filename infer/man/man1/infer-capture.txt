@@ -74,7 +74,7 @@ OPTIONS
            Proceed as if the first argument after -- was command. Possible
            values: ant, buck, buck2, gradle, gradlew, java, javac, kotlinc,
            cc, clang, gcc, clang++, c++, g++, hackc, make, configure, cmake,
-           waf, mvn, mvnw, ndk-build, python3, rebar3, swiftc, erlc,
+           waf, mvn, mvnw, ndk-build, python3, rebar3, rustc, swiftc, erlc,
            xcodebuild.
 
        --help
@@ -92,6 +92,13 @@ OPTIONS
        --keep-going
            Activates: Keep going when the analysis or capture encounter a
            failure (Conversely: --no-keep-going)
+
+       --llvm-bitcode-file string
+           [EXPERIMENTAL] Use llvm frontend to directly capture the give
+           bitcode file
+
+       --llvm-bitcode-source +string
+           [EXPERIMENTAL] Specify source files for llvm bitcode capture
 
        --mark-unchanged-procs
            Activates: Check structural identity of newly-captured procedures
@@ -130,6 +137,10 @@ OPTIONS
            A file containing a list of newline-separated Python files to
            capture. Compatible with infer capture -- python3 file1.py
            file2.py but not with --pyc-file.
+
+       --python-skip-capture-imports-threshold int
+           Maximum number of imports allowed in a file (we skip capture
+           otherwise).
 
        --results-dir,-o dir
            Write results and internal files in the specified directory
@@ -205,6 +216,16 @@ BUCK OPTIONS
        --buck-python
            Activates: Buck integration for Python. (Conversely:
            --no-buck-python)
+
+       --buck-swift
+           Activates: When using the BXL Clang integration, pass --swift
+           <bool> to control capture of Swift files. (Conversely:
+           --no-buck-swift)
+
+       --buck-swift-keep-going
+           Activates: When using the BXL Clang integration, pass
+           --swift-keep-going <bool>. (Conversely:
+           --no-buck-swift-keep-going)
 
        --buck-targets-block-list +regex
            Skip capture of buck targets matched by the specified regular

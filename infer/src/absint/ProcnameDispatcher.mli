@@ -160,17 +160,6 @@ module TypName :
   NameCommon with type ('context, 'f, 'arg_payload) dispatcher = 'context -> Typ.name -> 'f option
 
 module Call : sig
-  (** Little abstraction over arguments: currently actual args, we'll want formal args later *)
-  module FuncArg : sig
-    type 'arg_payload t = {exp: Exp.t; typ: Typ.t; arg_payload: 'arg_payload}
-
-    val map_payload : f:('arg_payload -> 'arg_payload') -> 'arg_payload t -> 'arg_payload' t
-
-    val arg_payload : 'payload t -> 'payload
-
-    val exp : _ t -> Exp.t
-  end
-
   include
     Common
       with type ('context, 'f, 'arg_payload) dispatcher =
@@ -350,7 +339,8 @@ module Call : sig
        ('context, 'f_in, 'f_out, 'arg_payload) name_matcher
     -> 'f_in
     -> ('context, 'f_out, 'arg_payload) matcher
-  (** After a name, accepts NO template arguments, accepts NO function arguments, binds the function *)
+  (** After a name, accepts NO template arguments, accepts NO function arguments, binds the function
+  *)
 
   val ( &--> ) :
        ('context, 'f_in, 'f_out, 'arg_payload) name_matcher

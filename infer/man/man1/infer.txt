@@ -225,6 +225,18 @@ OPTIONS
            --no-buck-python)
            See also infer-capture(1).
 
+       --buck-swift
+           Activates: When using the BXL Clang integration, pass --swift
+           <bool> to control capture of Swift files. (Conversely:
+           --no-buck-swift)
+           See also infer-capture(1).
+
+       --buck-swift-keep-going
+           Activates: When using the BXL Clang integration, pass
+           --swift-keep-going <bool>. (Conversely:
+           --no-buck-swift-keep-going)
+           See also infer-capture(1).
+
        --buck-targets-block-list +regex
            Skip capture of buck targets matched by the specified regular
            expression.
@@ -799,7 +811,7 @@ OPTIONS
            Proceed as if the first argument after -- was command. Possible
            values: ant, buck, buck2, gradle, gradlew, java, javac, kotlinc,
            cc, clang, gcc, clang++, c++, g++, hackc, make, configure, cmake,
-           waf, mvn, mvnw, ndk-build, python3, rebar3, swiftc, erlc,
+           waf, mvn, mvnw, ndk-build, python3, rebar3, rustc, swiftc, erlc,
            xcodebuild.
            See also infer-capture(1) and infer-run(1).
 
@@ -1129,6 +1141,15 @@ OPTIONS
            (Conversely: --no-liveness-only)
            See also infer-analyze(1).
 
+       --llvm-bitcode-file string
+           [EXPERIMENTAL] Use llvm frontend to directly capture the give
+           bitcode file
+           See also infer-capture(1).
+
+       --llvm-bitcode-source +string
+           [EXPERIMENTAL] Specify source files for llvm bitcode capture
+           See also infer-capture(1).
+
        --lock-model json
            Specify custom lock models for starvation analysis.
            Example for pthreads (already included in infer):
@@ -1249,6 +1270,11 @@ OPTIONS
            dealloc methods of Objective-C classes corresponding to what the
            compiler does. (Conversely: --no-objc-synthesize-dealloc)
            See also infer-capture(1).
+
+       --ondemand-callchain-limit int
+           If enabled, the number of consecutive recursive ondemand call is
+           bounded
+           See also infer-analyze(1).
 
        --ondemand-recursion-restart-limit int
            In order to make the analysis of mutual recursion cycles
@@ -1604,6 +1630,11 @@ OPTIONS
            track of for a given address.
            See also infer-analyze(1).
 
+       --pulse-report-assert
+           Activates: Reports Assertion Error in a failed assertion. Used in
+           C code. (Conversely: --no-pulse-report-assert)
+           See also infer-report(1).
+
        --pulse-report-flows-from-taint-source procname
            Report data flows which originate at taint source procname
            See also infer-report(1).
@@ -1611,6 +1642,13 @@ OPTIONS
        --pulse-report-flows-to-taint-sink procname
            Report data flows which pass through taint sink procname
            See also infer-report(1).
+
+       --pulse-retain-cycle-blocklist-pattern string
+           Skip reporting retain cycles which include an expression that
+           matches this pattern. It is useful when developers use naming
+           conventions to signal that certain variables are expected to be
+           part of a retain cycle.
+           See also infer-analyze(1).
 
        --pulse-skip-procedures regex
            Regex of procedures that should not be analyzed by Pulse.
@@ -1755,6 +1793,8 @@ OPTIONS
            specified values
              - "allocation": (for taint sources only)
                  match allocations of the exact class name supplied
+             - "builtin": match a substring of the builtin name (currently
+           only for Hack)
              - "block_passed_to": (for taint sources only)
                 match a substring of the procedure name that the block is
            passed to
@@ -1817,6 +1857,21 @@ OPTIONS
            (Conversely: --no-purity-only)
            See also infer-analyze(1).
 
+       --python-async-function-naming-convention-regex +string
+           Consider any function call that matches as returning an unawaited
+           value
+           See also infer-analyze(1).
+
+       --python-async-method-naming-convention-regex +string
+           Consider any method call that matches as returning an unawaited
+           value
+           See also infer-analyze(1).
+
+       --python-decorator-modelled-as-await-async +string
+           Any decorator that should be modelled as the await_async
+           decorator.
+           See also infer-analyze(1).
+
        --python-exe path
            A filepath to a python interpreter. It will bypass the interpreter
            set by PYTHON variable
@@ -1826,6 +1881,11 @@ OPTIONS
            A file containing a list of newline-separated Python files to
            capture. Compatible with infer capture -- python3 file1.py
            file2.py but not with --pyc-file.
+           See also infer-capture(1).
+
+       --python-skip-capture-imports-threshold int
+           Maximum number of imports allowed in a file (we skip capture
+           otherwise).
            See also infer-capture(1).
 
        --qualified-cpp-name-block-list +string

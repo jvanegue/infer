@@ -86,6 +86,8 @@ let dump_textual_file ~version pyc module_ =
   TextualSil.dump_module ~show_location:true ~filename module_
 
 
+type process_file_output = CapturedTenv of Tenv.t | CapturedSkipDb | NotCapturedTooManyImports
+
 let process_file ~is_binary file =
   let open IResult.Let_syntax in
   let project_root_prefix =
@@ -107,33 +109,54 @@ let process_file ~is_binary file =
   let* pyir =
     PyIR.mk ~debug:false ~path_prefix:project_root_prefix code |> Result.map_error ~f:Error.ir
   in
-  let textual = PyIR2Textual.mk_module pyir in
-  if Config.debug_mode then dump_textual_file ~version:0 file textual ;
-  let* verified_textual =
-    let f = Error.textual_verification sourcefile in
-    TextualVerification.verify textual |> Result.map_error ~f
-  in
-  if Config.debug_mode then dump_textual_file ~version:1 file verified_textual ;
-  let transformed_textual, decls = TextualTransform.run Python verified_textual in
-  let {PyIR.Module.name= module_name} = pyir in
-  let transformed_textual =
-    PyIRTypeInference.gen_module_default_type pyir
-    |> Option.value_map ~default:transformed_textual ~f:(fun pyir_type ->
-           PyIR2Textual.add_pyir_type pyir_type ~module_name transformed_textual )
-  in
-  if Config.debug_mode then dump_textual_file ~version:2 file transformed_textual ;
-  let* cfg, tenv =
-    let f = Error.textual_transformation sourcefile in
-    TextualSil.module_to_sil Python transformed_textual decls |> Result.map_error ~f
-  in
-  let sil = {TextualParser.TextualFile.sourcefile; cfg; tenv} in
-  if Config.python_skip_db then Ok None
-  else (
-    TextualParser.TextualFile.capture ~use_global_tenv:true sil ;
-    Ok (Some tenv) )
+  if
+    Option.is_some Config.python_skip_capture_imports_threshold
+    && pyir.PyIR.Module.stats.count_imported_modules
+       > Option.value_exn Config.python_skip_capture_imports_threshold
+  then Ok NotCapturedTooManyImports
+  else
+    let textual = PyIR2Textual.mk_module pyir in
+    if Config.debug_mode then dump_textual_file ~version:0 file textual ;
+    let* verified_textual =
+      let f = Error.textual_verification sourcefile in
+      TextualVerification.verify_strict textual |> Result.map_error ~f
+    in
+    if Config.debug_mode then dump_textual_file ~version:1 file verified_textual ;
+    let transformed_textual, decls = TextualTransform.run Python verified_textual in
+    let {PyIR.Module.name= module_name} = pyir in
+    let transformed_textual =
+      PyIRTypeInference.gen_module_default_type pyir
+      |> Option.value_map ~default:transformed_textual ~f:(fun pyir_type ->
+             PyIR2Textual.add_pyir_type pyir_type ~module_name transformed_textual )
+    in
+    if Config.debug_mode then dump_textual_file ~version:2 file transformed_textual ;
+    let* cfg, tenv =
+      let f = Error.textual_transformation sourcefile in
+      TextualSil.module_to_sil Python transformed_textual decls |> Result.map_error ~f
+    in
+    let sil = {TextualParser.TextualFile.sourcefile; cfg; tenv} in
+    if Config.python_skip_db then Ok CapturedSkipDb
+    else (
+      TextualParser.TextualFile.capture ~use_global_tenv:true sil ;
+      Ok (CapturedTenv tenv) )
+
+
+let is_file_block_listed file =
+  Option.exists Config.python_skip_capture_path_regex ~f:(fun regexp ->
+      Str.string_match regexp file 0 )
 
 
 let capture_file ~is_binary file = process_file ~is_binary file
+
+let write_infer_deps out_dirs =
+  ResultsDir.get_path CaptureDependencies
+  |> Utils.with_file_out ~f:(fun out_channel ->
+         Array.iter out_dirs ~f:(fun out_dir_opt ->
+             Option.iter out_dir_opt ~f:(fun out_dir ->
+                 Out_channel.output_string out_channel (Printf.sprintf "-\t-\t%s\n" out_dir) ) ) )
+
+
+type not_captured_reason = SkippedBlocked | SkippedTooManyImports | Error
 
 let capture_files ~is_binary files =
   let n_files = List.length files in
@@ -141,63 +164,83 @@ let capture_files ~is_binary files =
   let child_action, child_prologue, child_epilogue =
     let child_tenv = Tenv.create () in
     let child_action file =
-      let t0 = Mtime_clock.now () in
-      !WorkerPoolState.update_status (Some t0) file ;
-      match capture_file ~is_binary file with
-      | Ok file_tenv ->
-          Option.iter file_tenv ~f:(fun file_tenv -> Tenv.merge ~src:file_tenv ~dst:child_tenv) ;
-          None
-      | Error err ->
-          Error.format_error file err ;
-          Some ()
+      if is_file_block_listed file then Some SkippedBlocked
+      else
+        let t0 = Mtime_clock.now () in
+        !WorkerPoolState.update_status (Some t0) file ;
+        match capture_file ~is_binary file with
+        | Ok (CapturedTenv file_tenv) ->
+            Tenv.merge ~src:file_tenv ~dst:child_tenv ;
+            None
+        | Ok CapturedSkipDb ->
+            None
+        | Ok NotCapturedTooManyImports ->
+            Some SkippedTooManyImports
+        | Error err ->
+            Error.format_error file err ;
+            Some Error
     in
-    let child_prologue _ = Py.initialize ~interpreter () in
+    let worker_out_dir_name id = Format.asprintf "worker-%a-out" ProcessPool.Worker.pp_id id in
+    let child_prologue id =
+      let worker_out_dir_abspath = ResultsDir.get_path Temporary ^/ worker_out_dir_name id in
+      Utils.create_dir worker_out_dir_abspath ;
+      let capture_db_abspath =
+        ResultsDirEntryName.get_path ~results_dir:worker_out_dir_abspath CaptureDB
+      in
+      let capture_db = Database.Secondary capture_db_abspath in
+      DBWriterProcess.override_use_daemon false ;
+      Database.create_db capture_db CaptureDatabase ;
+      Database.new_database_connection capture_db CaptureDatabase ;
+      Py.initialize ~interpreter ()
+    in
     let child_epilogue worker_id =
-      let tenv_path = ResultsDir.get_path Temporary ^/ "child.tenv" |> DB.filename_from_string in
-      let tenv_path = DB.filename_add_suffix tenv_path (ProcessPool.Worker.show_id worker_id) in
+      let worker_out_dir_abspath = ResultsDir.get_path Temporary ^/ worker_out_dir_name worker_id in
+      let tenv_path =
+        ResultsDirEntryName.get_path ~results_dir:worker_out_dir_abspath GlobalTypeEnvironment
+      in
       L.debug Capture Quiet "Epilogue: writing child %a tenv to %s@\n" ProcessPool.Worker.pp_id
-        worker_id (DB.filename_to_string tenv_path) ;
-      Tenv.write child_tenv tenv_path ;
+        worker_id tenv_path ;
+      Tenv.write child_tenv (DB.filename_from_string tenv_path) ;
       Py.finalize () ;
-      tenv_path
+      worker_out_dir_abspath
     in
     (child_action, child_prologue, child_epilogue)
   in
   L.progress "Expecting to capture %d files@\n" n_files ;
   (* TODO(vsiles) keep track of the number of success / failures like Hack *)
-  let n_captured, n_error = (ref 0, ref 0) in
+  let n_captured, n_error, n_skipped_blocked, n_skipped_too_many_imports =
+    (ref 0, ref 0, ref 0, ref 0)
+  in
   let tasks () =
     TaskGenerator.of_list files ~finish:(fun result _ ->
         match result with
-        | Some () ->
+        | Some Error ->
             incr n_error ;
+            None
+        | Some SkippedBlocked ->
+            incr n_skipped_blocked ;
+            None
+        | Some SkippedTooManyImports ->
+            incr n_skipped_too_many_imports ;
             None
         | None ->
             incr n_captured ;
             None )
   in
-  let jobs =
-    let per_worker = 100 in
-    min ((per_worker + n_files) / per_worker) Config.jobs
-  in
+  let jobs = min n_files Config.jobs in
   L.debug Capture Quiet "Preparing to capture with %d workers@\n" jobs ;
-  let runner = ProcessPool.create ~jobs ~child_prologue ~f:child_action ~child_epilogue ~tasks () in
-  let child_tenv_paths = ProcessPool.run runner in
+  let runner =
+    ProcessPool.create ~with_primary_db:false ~jobs ~child_prologue ~f:child_action ~child_epilogue
+      ~tasks ()
+  in
+  let child_out_dirs = ProcessPool.run runner in
+  write_infer_deps child_out_dirs ;
   L.progress "Success: %d files@\n" !n_captured ;
+  L.progress "Skipped: %d blocked files@\n" !n_skipped_blocked ;
+  L.progress "Skipped: %d files with too many imports@\n" !n_skipped_too_many_imports ;
   L.progress "Failure: %d files@\n" !n_error ;
   L.progress "Merging type environments...@\n%!" ;
-  (* Merge worker tenvs into a global tenv *)
-  let child_tenv_paths =
-    Array.foldi child_tenv_paths ~init:[] ~f:(fun child_num acc tenv_path ->
-        match tenv_path with
-        | Some tenv_path ->
-            tenv_path :: acc
-        | None ->
-            Error.log L.ExternalError "Child %d did't return a path to its tenv" child_num ;
-            acc )
-  in
-  if not Config.python_skip_db then MergeCapture.merge_global_tenv ~normalize:true child_tenv_paths ;
-  List.iter child_tenv_paths ~f:(fun filename -> DB.filename_to_string filename |> Unix.unlink)
+  if not Config.python_skip_db then MergeCapture.merge_captured_targets ~root:Config.results_dir
 
 
 let capture input =

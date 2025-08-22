@@ -525,10 +525,10 @@ let write_id id addr_hist astate = Stack.add (Var.of_id id) (ValueOrigin.unknown
 
 let read_id id astate = Stack.find_opt (Var.of_id id) astate |> Option.map ~f:ValueOrigin.addr_hist
 
-let add_static_type_objc_class tenv typ address location astate =
+let add_static_type_objc_swift_class tenv typ address location astate =
   match typ with
-  | {Typ.desc= Typ.Tptr ({Typ.desc= Tstruct (ObjcClass class_name)}, _)} ->
-      AddressAttributes.add_static_type tenv (ObjcClass class_name) address location astate
+  | {Typ.desc= Typ.Tptr ({Typ.desc= Tstruct ((ObjcClass _ | SwiftClass _) as class_typ)}, _)} ->
+      AddressAttributes.add_static_type tenv class_typ address location astate
   | _ ->
       astate
 
@@ -591,6 +591,8 @@ let allocate allocator location addr astate =
 
 let is_allocated addr astate = AddressAttributes.get_allocation_attr addr astate |> Option.is_some
 
+let get_unawaited_awaitable addr astate = AddressAttributes.get_unawaited_awaitable addr astate
+
 let java_resource_release ~recursive address astate =
   let if_valid_access_then_eval addr access astate =
     Option.map (Memory.find_edge_opt addr access astate) ~f:fst
@@ -643,6 +645,10 @@ let csharp_resource_release ~recursive address astate =
 
 let add_dict_contain_const_keys address astate =
   AddressAttributes.add_dict_contain_const_keys address astate
+
+
+let abduce_must_be_awaited address astate =
+  AddressAttributes.abduce_one address MustBeAwaited astate
 
 
 let remove_dict_contain_const_keys address astate =
@@ -741,10 +747,19 @@ let invalidate_array_elements path location cause addr_trace astate =
           astate )
 
 
-let shallow_copy path location addr_hist astate =
+let ask_dynamic_type_specialization astate (addr, _) =
+  if PulseArithmetic.get_dynamic_type addr astate |> Option.is_none then
+    AbductiveDomain.add_need_dynamic_type_specialization addr astate
+  else astate
+
+
+let shallow_copy ?(ask_specialization = false) path location addr_hist astate =
   let+ astate = check_addr_access path Read location addr_hist astate in
   let cell_opt = AbductiveDomain.find_post_cell_opt (fst addr_hist) astate in
   let copy = (AbstractValue.mk_fresh (), snd addr_hist) in
+  let astate =
+    if ask_specialization then ask_dynamic_type_specialization astate addr_hist else astate
+  in
   ( Option.value_map cell_opt ~default:astate ~f:(fun cell ->
         let astate = AbductiveDomain.set_post_cell path copy cell location astate in
         PulseArithmetic.copy_type_constraints (fst addr_hist) (fst copy) astate )

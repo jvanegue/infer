@@ -51,7 +51,8 @@ GENERATED_FROM_AUTOCONF = dune.common ../dune-workspace base/Version.ml
 dune-workspace: ../dune-workspace
 
 GENERATED_DUNES += \
-  dune clang/dune integration/dune java/dune llvm/dune opensource/dune python/unit/dune sledge/dune unit/dune
+  dune clang/dune integration/dune integration/unit/dune java/dune llvm/dune opensource/dune \
+  python/unit/dune sledge/dune unit/dune
 
 SRC_BUILD_COMMON = $(GENERATED_FROM_AUTOCONF) $(GENERATED_DUNES) $(OCAML_SOURCES)
 ifeq ($(BUILD_C_ANALYZERS),yes)
@@ -70,20 +71,20 @@ endif
 
 .PHONY: fmt_dune
 fmt_dune:
-	BYTE_MODE=true $(DUNE_BUILD) @fmt --auto-promote
+	$(DUNE_BUILD) @fmt --auto-promote
 
 .PHONY: runtest
 runtest: $(SRC_BUILD_COMMON) $(MAKEFILE_LIST)
-	BYTE_MODE=true LD_LIBRARY_PATH=$(LDPATH) $(DUNE_BUILD) @runtest --auto-promote
+	LD_LIBRARY_PATH=$(LDPATH) $(DUNE_BUILD) @runtest --auto-promote
 
 # we want dune to format test files *after* having promoted them
 .PHONY: runtest_formatted
 runtest_formatted: $(SRC_BUILD_COMMON) $(MAKEFILE_LIST) runtest
-	BYTE_MODE=true $(DUNE_BUILD) @fmt --auto-promote
+	$(DUNE_BUILD) @fmt --auto-promote
 
 .PHONY: test
 test: $(SRC_BUILD_COMMON) $(MAKEFILE_LIST) runtest_formatted
-	BYTE_MODE=true $(DUNE_BUILD) \
+	$(DUNE_BUILD) \
 	  $(INFER_MAIN).bc.exe scripts/$(CHECKCOPYRIGHT_MAIN).bc.exe $(INFERUNIT_MAIN).bc.exe $(INFERTOP_MAIN).bc.exe
 
 .PHONY: unit
@@ -93,7 +94,7 @@ unit: runtest test
 
 .PHONY: build_all
 build_all: $(SRC_BUILD_COMMON)
-	BYTE_MODE=true $(DUNE_BUILD) @all
+	$(DUNE_BUILD) @all
 
 .PHONY: doc
 doc: $(SRC_BUILD_COMMON) $(MAKEFILE_LIST)
@@ -121,11 +122,11 @@ $(INFER_BIN).exe: $(SRC_BUILD_COMMON) $(MAKEFILE_LIST)
 
 .PHONY: $(INFER_BIN).bc.exe
 $(INFER_BIN).bc.exe: $(SRC_BUILD_COMMON) $(MAKEFILE_LIST)
-	$(QUIET)BYTE_MODE=true $(DUNE_BUILD) $(INFER_MAIN).bc.exe
+	$(QUIET)$(DUNE_BUILD) $(INFER_MAIN).bc.exe
 
 .PHONY: $(INFERTOP_BIN) toplevel
 $(INFERTOP_BIN): $(SRC_BUILD_COMMON) $(MAKEFILE_LIST)
-	BYTE_MODE=true $(DUNE_BUILD) $(INFERTOP_MAIN).bc.exe
+	$(DUNE_BUILD) $(INFERTOP_MAIN).bc.exe
 toplevel: $(INFERTOP_BIN)
 
 .PHONY: $(CHECKCOPYRIGHT_BIN) checkCopyright
@@ -208,19 +209,13 @@ $(CLANG_BINIOU_DICT): $(CLANG_ATDGEN_STUB_ATD)
 	  | sort | uniq  \
 	  > $@
 
-LLVM_OCAML_SRC:=$(shell git ls-files -- $(ROOT_DIR)/sledge/vendor/llvm-dune)
-
-# file to use as a sentinel indicating llvm ocaml bindings are up-to-date
-LLVM_OCAML_SENTINEL=sledge/vendor/llvm-dune/src/llvm/common/dune
-
-$(LLVM_OCAML_SENTINEL): $(LLVM_OCAML_SRC) $(MAKEFILE_LIST)
-	cd sledge/vendor/llvm-dune; EXTRA_LDFLAGS='$(LLVM_LDFLAGS)' ./setup.sh $(LLVM_CONFIG)
-
 # Generate an empty file if we don't need to link against LLVM
 sledge/llvm-config_ldflags.sexp: $(MAKEFILE_LIST)
 	printf "(" > $@
 ifeq ($(BUILD_SWIFT_ANALYZERS),yes)
-	$(LLVM_CONFIG) --ldflags | xargs -n 1 printf "-ccopt '%s' " >> $@
+#	some versions of printf don't like when the format string starts with - so make it start
+#	with "-ccopt" instead
+	$(LLVM_CONFIG) --ldflags | xargs -n 1 printf "\"-ccopt\" '%s' " >> $@
 endif
 	printf ")\n" >> $@
 
@@ -248,12 +243,14 @@ $(GENERATED_FROM_AUTOCONF): $(MAKEFILE_LIST)
 	  -e "s|@BUILD_JAVA_ANALYZERS[@]|$(BUILD_JAVA_ANALYZERS)|g" \
 	  -e "s|@BUILD_PYTHON_ANALYZERS[@]|$(BUILD_PYTHON_ANALYZERS)|g" \
 	  -e "s|@BUILD_PLATFORM[@]|$(BUILD_PLATFORM)|g" \
+	  -e "s|@BUILD_RUST_ANALYZERS[@]|$(BUILD_RUST_ANALYZERS)|g" \
 	  -e "s|@BUILD_SWIFT_ANALYZERS[@]|$(BUILD_SWIFT_ANALYZERS)|g" \
 	  -e "s|@OPAMSWITCH[@]|$(OPAMSWITCH)|g" \
 	  -e "s|@XCODE_SELECT[@]|$(XCODE_SELECT)|g" \
 	  -e "s|@INFER_MAN_LAST_MODIFIED[@]|$(INFER_MAN_LAST_MODIFIED)|g" \
 	  -e "s|@PYTHON[@]|$(PYTHON)|g" \
 	  -e "s|@PYTHONNEXT[@]|$(PYTHONNEXT)|g" \
+	  -e "s|@WINDOWS_BUILD[@]|$(WINDOWS_BUILD)|g" \
 	  $@.in > "$$TMPFILE"; \
 	cat "$$TMPFILE" > $@; \
 	echo -e "\n;;" >> $@; \
@@ -268,6 +265,7 @@ $(GENERATED_DUNES): dune.common
 dune: dune.in
 clang/dune: clang/dune.in
 integration/dune: integration/dune.in
+integration/unit/dune: integration/unit/dune.in
 java/dune: java/dune.in
 llvm/dune: llvm/dune.in
 opensource/dune: opensource/dune.in
@@ -291,7 +289,6 @@ clean:
 	$(REMOVE) atd/*_{j,t,v}.ml{,i} atd/clang_ast_*
 	$(REMOVE) mod_dep.dot
 	$(REMOVE) mod_dep.pdf
-	$(REMOVE_DIR) sledge/vendor/llvm-dune/{src,llvm_*.opam}
 	cd .. && dune clean
 
 .PHONY: fmt

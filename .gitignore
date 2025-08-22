@@ -67,6 +67,7 @@ infer/tests/codetoanalyze/objcpp/fb-pulse/issues.exp
 /_release
 /infer-source
 META-INF
+/dependencies/llvm/src
 /facebook/dependencies/kotlin/lib
 /facebook/dependencies/bin/kotlinc
 
@@ -189,6 +190,7 @@ rebar3.crashdump
 /infer/src/al/dune
 /infer/src/clang/dune
 /infer/src/integration/dune
+/infer/src/integration/unit/dune
 /infer/src/java/dune
 /infer/src/llvm/dune
 /infer/src/opensource/dune

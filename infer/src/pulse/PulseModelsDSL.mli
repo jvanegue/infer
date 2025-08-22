@@ -47,6 +47,8 @@ module Syntax : sig
 
   val report_assert_error : unit model_monad
 
+  val report_unawaited_awaitable : Trace.t -> unit model_monad
+
   val list_fold :
     'a list -> init:'accum -> f:('accum -> 'a -> 'accum model_monad) -> 'accum model_monad
 
@@ -77,10 +79,7 @@ module Syntax : sig
     -> 'a model_monad
 
   val dispatch_call :
-       Ident.t * Typ.t
-    -> Procname.t
-    -> ValueOrigin.t ProcnameDispatcher.Call.FuncArg.t list
-    -> unit model_monad
+    Ident.t * Typ.t -> Procname.t -> ValueOrigin.t FuncArg.t list -> unit model_monad
 
   val python_call : Procname.t -> (string * aval) list -> aval model_monad
 
@@ -117,15 +116,23 @@ module Syntax : sig
 
   val is_allocated : aval -> bool model_monad
 
+  val is_unawaited_awaitable : aval -> bool model_monad
+
+  val get_unawaited_awaitable : aval -> Trace.t option model_monad
+
   val data_dependency : ValueOrigin.t -> ValueOrigin.t list -> unit model_monad
 
   val data_dependency_to_ret : ValueOrigin.t list -> unit model_monad
 
   val add_dict_read_const_key : aval -> Fieldname.t -> unit model_monad
 
+  val abduce_must_be_awaited : aval -> unit model_monad
+
   val is_dict_contain_const_keys : aval -> bool model_monad
 
   val remove_dict_contain_const_keys : aval -> unit model_monad
+
+  val propagate_taint_attribute : aval -> aval -> aval model_monad
 
   val is_hack_constinit_called : aval -> bool model_monad
 
@@ -162,6 +169,8 @@ module Syntax : sig
 
   val load : aval -> aval model_monad
   (** read the Dereference access from the value *)
+
+  val load_exp : Exp.t -> aval model_monad
 
   val and_dynamic_type_is : aval -> Typ.t -> unit model_monad
 
@@ -275,7 +284,8 @@ module Syntax : sig
 
   (** {2 Escape Hatches}
 
-      if necessary you can convert an operation outside of this module with the following operators *)
+      if necessary you can convert an operation outside of this module with the following operators
+  *)
 
   val exec_command : (astate -> astate) -> unit model_monad
 
@@ -294,7 +304,7 @@ module Syntax : sig
     val return_alloc_not_null :
       Attribute.allocator -> Exp.t option -> initialize:bool -> unit model_monad
 
-    val free : Invalidation.t -> ValueOrigin.t ProcnameDispatcher.Call.FuncArg.t -> unit model_monad
+    val free : Invalidation.t -> ValueOrigin.t FuncArg.t -> unit model_monad
 
     val early_exit : model
   end

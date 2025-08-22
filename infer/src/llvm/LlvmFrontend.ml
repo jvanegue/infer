@@ -54,16 +54,14 @@ let dump_textual_file source_file module_ =
 let should_dump_textual () = Config.debug_mode || Config.dump_textual || Config.frontend_tests
 
 let to_module source_file llair_program =
-  let sourcefile = Textual.SourceFile.create source_file in
-  let module_ = Llair2Textual.translate sourcefile llair_program in
+  let module_ = Llair2Textual.translate ~source_file llair_program in
   module_
 
 
 let language_of_source_file source_file =
   if String.is_suffix source_file ~suffix:".c" then Textual.Lang.C
-    (* TODO: add language for Swift *)
-  else if String.is_suffix source_file ~suffix:".swift" then Textual.Lang.C
-  else L.die UserError "Currently the llvm frontend is only enabled for C programs@."
+  else if String.is_suffix source_file ~suffix:".swift" then Textual.Lang.Swift
+  else L.die UserError "Currently the llvm frontend is only enabled for C and Swift programs@."
 
 
 let capture_llair source_file llair_program =
@@ -73,9 +71,13 @@ let capture_llair source_file llair_program =
     let textual = to_module source_file llair_program lang in
     if should_dump_textual () then dump_textual_file ~show_location:true source_file textual ;
     let textual_source_file = Textual.SourceFile.create source_file in
-    let* verified_textual =
-      let f = Error.textual_verification textual_source_file in
-      TextualVerification.verify textual |> Result.map_error ~f
+    let map_errors = Error.textual_verification textual_source_file in
+    let* verified_textual, warnings =
+      match TextualVerification.verify_keep_going textual with
+      | Ok (textual, errors) ->
+          Ok (textual, map_errors errors)
+      | Error errors ->
+          Error (map_errors errors)
     in
     let transformed_textual, decls = TextualTransform.run lang verified_textual in
     let* cfg, tenv =
@@ -84,14 +86,13 @@ let capture_llair source_file llair_program =
     in
     let sil = {TextualParser.TextualFile.sourcefile= textual_source_file; cfg; tenv} in
     TextualParser.TextualFile.capture ~use_global_tenv:false sil ;
-    Ok ()
+    Ok warnings
   in
   match result with
-  | Ok () ->
-      ()
+  | Ok warnings ->
+      Error.format_error warnings
   | Error err ->
-      Error.format_error err ;
-      ()
+      Error.format_error err
 
 
 let dump_llair_text llair_program source_file =
@@ -116,9 +117,10 @@ let dump_llair llair_program source_file =
   marshal llair_program output_file
 
 
-let capture source_file llvm_bitcode_in =
+let capture ~sources llvm_bitcode_in =
   let llvm_program = In_channel.input_all llvm_bitcode_in in
   let llair_program = LlvmSledgeFrontend.translate llvm_program in
-  if Config.dump_llair then dump_llair llair_program source_file ;
-  if Config.dump_llair_text then dump_llair_text llair_program source_file ;
-  capture_llair source_file llair_program
+  List.iter sources ~f:(fun source_file ->
+      if Config.dump_llair then dump_llair llair_program source_file ;
+      if Config.dump_llair_text then dump_llair_text llair_program source_file ;
+      capture_llair source_file llair_program )

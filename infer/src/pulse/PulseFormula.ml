@@ -420,7 +420,8 @@ module Tableau = struct
       Invariants:
 
       - all variables in the tableau are {e restricted}
-      - the tableau is {e feasible}: each equality [u = c + q1·v1 + ... + qN·vN] is such that [c>0] *)
+      - the tableau is {e feasible}: each equality [u = c + q1·v1 + ... + qN·vN] is such that [c>0]
+  *)
   type t = LinArith.t Var.Map.t [@@deriving compare, equal]
 
   let pp pp_var fmt tableau = pp_var_map ~arrow:" = " (LinArith.pp pp_var) pp_var fmt tableau
@@ -2028,7 +2029,8 @@ module AtomMapOccurrences = MakeOccurrences (struct
 end)
 
 module InstanceOf = struct
-  (** Domain for tracking dynamic type of variables via positive and negative instanceof constraints *)
+  (** Domain for tracking dynamic type of variables via positive and negative instanceof constraints
+  *)
 
   (* *Intended* invariant is that these all be normalised wrt alias expansion *)
   type dynamic_type_data = {typ: Typ.t; source_file: (SourceFile.t[@yojson.opaque]) option}
@@ -2128,7 +2130,8 @@ module Formula = struct
   type intervals = CItv.t Var.Map.t [@@deriving compare, equal]
 
   module Unsafe : sig
-    (** opaque because we need to normalize variables in the co-domain of term equalities on the fly *)
+    (** opaque because we need to normalize variables in the co-domain of term equalities on the fly
+    *)
     type term_eqs
 
     type t = private
@@ -2610,7 +2613,8 @@ module Formula = struct
                  Note that once we know the value is zero, we shouldn't care
                  any more what type_constraints says about it, so we don't
                  bother to update, or do any further checks
-              *) (phi, true)
+              *)
+              (phi, true)
             else if
               InstanceOf.is_concrete_or_abstract t
               && List.exists below ~f:(fun t' ->
@@ -3066,7 +3070,8 @@ module Formula = struct
     || Atom.Set.mem (Equal (IsInt (Var repr), Term.one)) atoms
 
 
-  (** module that breaks invariants more often that the rest, with an interface that is safer to use *)
+  (** module that breaks invariants more often that the rest, with an interface that is safer to use
+  *)
   module Normalizer : sig
     val and_var_linarith : Var.t -> LinArith.t -> t * new_eqs -> (t * new_eqs) SatUnsat.t
 
@@ -5133,8 +5138,7 @@ let join_conditions conditions_lhs conditions_rhs =
     Atom.Map.merge
       (fun _atom depth1 depth2 ->
         (* keep only atoms present on both sides, with the min of their call depths *)
-        Option.both depth1 depth2 |> Option.map ~f:(fun (depth1, depth2) -> Int.min depth1 depth2)
-        )
+        Option.both depth1 depth2 |> Option.map ~f:(fun (depth1, depth2) -> Int.min depth1 depth2) )
       conditions_lhs conditions_rhs
   in
   let atoms_not_in ~not_in:atoms_not_in atoms =

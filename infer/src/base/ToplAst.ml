@@ -26,8 +26,15 @@ type value =
   | FieldAccess of {value: value; class_name: class_name; field_name: field_name}
 [@@deriving show]
 
-type binop = (* all return booleans *)
-  | LeadsTo | OpEq | OpNe | OpGe | OpGt | OpLe | OpLt
+type binop =
+  (* all return booleans *)
+  | LeadsTo
+  | OpEq
+  | OpNe
+  | OpGe
+  | OpGt
+  | OpLe
+  | OpLt
 [@@deriving show]
 
 type predicate = Binop of binop * value * value | Value of (* bool *) value [@@deriving show]
@@ -72,6 +79,8 @@ type transition =
 [@@deriving show]
 
 (* TODO(rgrigore): Check that registers are read only after being initialized *)
-type t =
+type ast =
   {name: property_name; message: string option; prefixes: string list; transitions: transition list}
 [@@deriving show]
+
+type t = Ast of ast | Ignored of {ignored_file: string; ignored_reason: string} [@@deriving show]

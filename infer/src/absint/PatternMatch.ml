@@ -230,7 +230,8 @@ module ObjectiveC = struct
     fun ~protocol tenv typename ->
       let is_protocol s = String.equal protocol (Typ.Name.name s) in
       protocol_exists tenv is_protocol (Typ.Name.Objc.from_string typename)
-      || (* Corresponds to the case where we look inside protocols in
+      ||
+      (* Corresponds to the case where we look inside protocols in
             ObjCClass<P1,P2...Pn> *)
       Str.string_match protocol_reg typename 0
       &&
@@ -297,7 +298,9 @@ let override_find ?(check_current_type = true) f tenv proc_name =
   let find_super_type super_class_name =
     Tenv.find_map_supers tenv super_class_name ~f:(fun _name struct_opt ->
         Option.bind struct_opt ~f:(fun {Struct.methods} ->
-            List.find ~f:(fun pname -> is_override pname && f pname) methods ) )
+            List.find
+              ~f:(fun (pname : Struct.tenv_method) -> is_override pname.name && f pname.name)
+              methods ) )
   in
   let find_super_type type_name =
     List.find_map ~f:find_super_type (type_get_direct_supertypes tenv (Typ.mk (Tstruct type_name)))
@@ -306,9 +309,11 @@ let override_find ?(check_current_type = true) f tenv proc_name =
   else
     match proc_name with
     | Procname.Java proc_name_java ->
-        find_super_type (Procname.Java.get_class_type_name proc_name_java)
+        let tenv_method = find_super_type (Procname.Java.get_class_type_name proc_name_java) in
+        Option.map ~f:Struct.name_of_tenv_method tenv_method
     | Procname.ObjC_Cpp proc_name_cpp ->
-        find_super_type (Procname.ObjC_Cpp.get_class_type_name proc_name_cpp)
+        let tenv_method = find_super_type (Procname.ObjC_Cpp.get_class_type_name proc_name_cpp) in
+        Option.map ~f:Struct.name_of_tenv_method tenv_method
     | _ ->
         None
 

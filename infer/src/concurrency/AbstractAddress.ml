@@ -59,6 +59,10 @@ let pp_with_base pp_base fmt (base, accesses) =
         L.internal_error "Hack not supported@\n"
     | _, Python ->
         L.internal_error "Python not supported@\n"
+    | _, Rust ->
+        L.internal_error "Rust not supported@\n"
+    | _, Swift ->
+        L.internal_error "Swift not supported@\n"
     | [], _ ->
         pp_base fmt base
     | ArrayAccess _ :: rest, _ ->
@@ -78,6 +82,10 @@ let pp_with_base pp_base fmt (base, accesses) =
               L.die InternalError "Hack not supported"
           | Python ->
               L.die InternalError "Python not supported"
+          | Rust ->
+              L.die InternalError "Rust not supported"
+          | Swift ->
+              L.die InternalError "Swift not supported"
         in
         F.fprintf fmt "%a%s%a" pp_rev_accesses rest op Fieldname.pp field_name
     | FieldAccess field_name :: rest, _ ->
@@ -155,7 +163,8 @@ type t =
   | Global of {path: raw_path}  (** root var is included in comparison *)
   | Class of {typename: Typ.Name.t}  (** Java-only class object identified by typename *)
   | Parameter of {index: int; path: unrooted_path}
-      (** method parameter represented by its 0-indexed position, root var is not used in comparison *)
+      (** method parameter represented by its 0-indexed position, root var is not used in comparison
+      *)
 [@@deriving compare, equal]
 
 let get_typ tenv = function

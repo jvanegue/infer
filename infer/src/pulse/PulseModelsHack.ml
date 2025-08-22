@@ -32,6 +32,10 @@ let read_string_value address astate = PulseArithmetic.as_constant_string astate
 
 let replace_backslash_with_colon s = String.tr s ~target:'\\' ~replacement:':'
 
+let hh_this_rootname = "HH\\\\this"
+
+let this_localvar_name = "$this"
+
 let read_string_value_dsl aval : string option DSL.model_monad =
   let open PulseModelsDSL.Syntax in
   let* inner_val = load_access aval (FieldAccess string_val_field) in
@@ -273,7 +277,8 @@ module Vec = struct
         let* new_vec = new_vec_dsl [v_snd; value] in
         let* size = load_access vec (FieldAccess size_field) in
         store_field ~ref:new_vec size_field size
-        @@> (* overwrite default size of 2 *)
+        @@>
+        (* overwrite default size of 2 *)
         assign_ret new_vec
     | _ ->
         L.d_printfln "vec hack array cow set argument error" ;
@@ -400,7 +405,11 @@ let get_static_companion_var type_name =
 let get_static_companion ~model_desc path location type_name astate =
   let pvar = get_static_companion_var type_name in
   let var = Var.of_pvar pvar in
-  let hist = Hist.single_call path location model_desc in
+  let {PathContext.timestamp} = path in
+  let hist =
+    Hist.single_call path location model_desc
+    |> Hist.add_event (ClassObjectInitialization (type_name, location, timestamp))
+  in
   let astate, vo = AbductiveDomain.Stack.eval hist var astate in
   let static_type_name = Typ.Name.Hack.static_companion type_name in
   let typ = Typ.mk_struct static_type_name in
@@ -839,7 +848,8 @@ let hack_array_get this args : model =
       ~default
   in
   let* value = list_fold args ~init:this ~f:hack_array_get_one_dim in
-  assign_ret value
+  let* value_with_taint = propagate_taint_attribute this value in
+  assign_ret value_with_taint
 
 
 let hack_array_idx this key default_val : model =
@@ -1005,14 +1015,16 @@ let hhbc_cmp_same x y : model =
               L.d_printfln "hhbc_cmp_same: not a known primitive type" ;
               disj
                 [ prune_eq x y
-                  @@> (* CAUTION: Note that the pruning on a pointer may result in incorrect semantics
+                  @@>
+                  (* CAUTION: Note that the pruning on a pointer may result in incorrect semantics
                          if the pointer is given as a parameter. In that case, the pruning may work as
                          a value assignment to the pointer. *)
                   make_hack_bool true
                 ; prune_ne x y
-                  @@> (* TODO(dpichardie) cover the comparisons of vec, keyset, dict and
+                  @@>
+                  (* TODO(dpichardie) cover the comparisons of vec, keyset, dict and
                          shape, taking into account the difference between == and ===. *)
-                      (* TODO(dpichardie) cover the specificities of == that compare objects properties
+                  (* TODO(dpichardie) cover the specificities of == that compare objects properties
                          (structural equality). *)
                   make_hack_random_bool () ] )
         | Some {Formula.typ= x_typ}, Some {Formula.typ= y_typ} when not (Typ.equal x_typ y_typ) ->
@@ -1418,6 +1430,44 @@ let read_access_from_ts tdict =
   as_constant_string type_prop_name_string_val
 
 
+(* We handle two cases:
+   (1) rootname is HH\this, in this case it returns this object
+   (2) rootname is something else, in this case returns None *)
+let get_cls_obj (rootname, _) : DSL.aval option DSL.model_monad =
+  let open DSL.Syntax in
+  let* opt_str_rootname = exec_pure_operation (read_string_value rootname) in
+  match opt_str_rootname with
+  | Some rootname when String.equal rootname hh_this_rootname ->
+      let* {analysis_data= {proc_desc}} = get_data in
+      let proc_name = Procdesc.get_proc_name proc_desc in
+      let this_var = Pvar.mk_local (Mangled.from_string this_localvar_name) proc_name in
+      let* this_v = load_exp (Exp.Lvar this_var) in
+      ret (Some this_v)
+  | _ ->
+      ret None
+
+
+let hack_get_class_from_type rootname constname : model =
+  let open DSL.Syntax in
+  start_model
+  @@ fun () ->
+  let* clsobj = get_cls_obj rootname in
+  match clsobj with
+  | None ->
+      ret ()
+  | Some clsobj -> (
+      constinit_existing_class_object clsobj
+      @@>
+      let* tdict = internal_hack_field_get clsobj constname in
+      let* classname = read_string_field_from_ts "classname" tdict in
+      match classname with
+      | Some classname ->
+          let* ret = make_hack_string classname in
+          assign_ret ret
+      | None ->
+          ret () )
+
+
 (* returns a fresh value equated to the SIL result of the comparison *)
 let check_against_type_struct v tdict : DSL.aval DSL.model_monad =
   let open DSL.Syntax in
@@ -1555,19 +1605,28 @@ let hhbc_cast_string arg : model =
   start_model
   @@ fun () ->
   let* dynamic_type_data = get_dynamic_type ~ask_specialization:true arg in
-  match dynamic_type_data with
-  | Some {Formula.typ= {Typ.desc= Tstruct typ_name}}
-    when Typ.Name.equal typ_name hack_string_type_name ->
-      assign_ret arg
-  | Some _ ->
-      (* note: we do not model precisely the value returned by __toString() *)
-      let* rv = make_hack_string "__infer_hack_generated_from_cast_string" in
-      (* note: we do not model the case where __toString() is not implemented *)
-      assign_ret rv
-  | _ ->
-      (* hopefully we will come back later with a dynamic type thanks to specialization *)
-      let* rv = fresh () in
-      assign_ret rv
+  let* res =
+    match dynamic_type_data with
+    | Some {Formula.typ= {Typ.desc= Tstruct typ_name}}
+      when Typ.Name.equal typ_name hack_string_type_name ->
+        ret arg
+    | Some _ ->
+        (* note: we do not model precisely the value returned by __toString() *)
+        make_hack_string "__infer_hack_generated_from_cast_string"
+        (* note: we do not model the case where __toString() is not implemented *)
+    | _ ->
+        (* hopefully we will come back later with a dynamic type thanks to specialization *)
+        fresh ()
+  in
+  let source_addr, source_hist = arg in
+  let dest_addr, _ = res in
+  let taints_attr = [Attribute.{v= source_addr; history= source_hist}] in
+  let* () =
+    AbductiveDomain.AddressAttributes.add_one dest_addr
+      (PropagateTaintFrom (InternalModel, taints_attr))
+    |> exec_command
+  in
+  assign_ret res
 
 
 let hhbc_concat arg1 arg2 : model =
@@ -1655,6 +1714,8 @@ let matchers : matcher list =
     $--> hack_await_static
   ; -"$root" &:: "HH::type_structure" <>$ any_arg $+ capt_arg_payload $+ capt_arg_payload
     $--> hh_type_structure
+  ; -"$builtins" &:: "hack_get_class_from_type" <>$ capt_arg_payload $+ capt_arg_payload
+    $--> hack_get_class_from_type
   ; -"$builtins" &:: "hhbc_iter_base" <>$ capt_arg_payload $--> hhbc_iter_base
   ; -"$builtins" &:: "hhbc_iter_init" <>$ capt_arg_payload $+ capt_arg_payload $--> hhbc_iter_init
   ; -"$builtins" &:: "hhbc_iter_get_key" <>$ capt_arg_payload $+ capt_arg_payload

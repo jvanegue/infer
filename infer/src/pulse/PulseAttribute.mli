@@ -27,6 +27,7 @@ type allocator =
   | JavaResource of JavaClassName.t
   | CSharpResource of CSharpClassName.t
   | ObjCAlloc
+  | SwiftAlloc
   | HackBuilderResource of HackClassName.t
   | Awaitable (* used for Hack and Python *)
   | FileDescriptor
@@ -148,6 +149,7 @@ type t =
   | Initialized
   | Invalid of Invalidation.t * Trace.t
   | LastLookup of AbstractValue.t
+  | MustBeAwaited
   | MustBeInitialized of Timestamp.t * Trace.t
   | MustBeValid of Timestamp.t * Trace.t * Invalidation.must_be_valid_reason option
   | MustNotBeTainted of TaintSink.t TaintSinkMap.t
@@ -248,6 +250,8 @@ module Attributes : sig
   val get_taint_sanitized : t -> TaintSanitizedSet.t
 
   val remove_taint_sanitized : t -> t
+
+  val is_must_be_awaited : t -> bool
 
   val get_must_be_valid :
     t -> (Timestamp.t * Trace.t * Invalidation.must_be_valid_reason option) option

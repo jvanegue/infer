@@ -469,7 +469,8 @@ module Comparison = struct
         comparison is always true, and when [y] is, the comparison is always false. Otherwise it is
         unknown.
 
-        Reference: {:https://www.erlang.org/doc/reference_manual/expressions.html#term-comparisons}. *)
+        Reference: {:https://www.erlang.org/doc/reference_manual/expressions.html#term-comparisons}.
+    *)
     let incompatible_lt (x, ty_x) (y, ty_y) tenv location path : value_maker =
      fun astate ->
       match (ty_x, ty_y) with
@@ -890,9 +891,9 @@ module Tuples = struct
     (astate, addr_tuple)
 
 
-  let make (args : 'a ProcnameDispatcher.Call.FuncArg.t list) : model_no_non_disj =
+  let make (args : 'a FuncArg.t list) : model_no_non_disj =
    fun {location; path; ret= ret_id, _} astate ->
-    let get_payload (arg : 'a ProcnameDispatcher.Call.FuncArg.t) = arg.arg_payload in
+    let get_payload (arg : 'a FuncArg.t) = arg.arg_payload in
     let arg_payloads = List.map ~f:get_payload args in
     let<+> astate, ret = make_raw location path arg_payloads astate in
     PulseOperations.write_id ret_id ret astate
@@ -908,7 +909,7 @@ module Maps = struct
 
   let is_empty_field = mk_field "__infer_model_backing_map_is_empty"
 
-  let make (args : 'a ProcnameDispatcher.Call.FuncArg.t list) : model_no_non_disj =
+  let make (args : 'a FuncArg.t list) : model_no_non_disj =
    fun {location; path; ret= ret_id, _} astate ->
     let hist = Hist.single_alloc path location "#{}" in
     let addr_map = (AbstractValue.mk_fresh (), hist) in
@@ -1097,7 +1098,8 @@ module Strings = struct
     |> value_die "'of_const_string' failed evaluation"
 
 
-  (** recurse character by character of the string and build suitable heap allocated data structure *)
+  (** recurse character by character of the string and build suitable heap allocated data structure
+  *)
   let rec handle_string_content location path value str_lst : sat_maker =
    fun astate ->
     match str_lst with
@@ -1508,9 +1510,7 @@ module Custom = struct
 
   let arguments_return_model args (summaries : arguments_return list) : model_no_non_disj =
    fun {location; path; ret= ret_id, _} astate ->
-    let get_payload (arg : 'a ProcnameDispatcher.Call.FuncArg.t) =
-      arg.arg_payload |> ValueOrigin.addr_hist
-    in
+    let get_payload (arg : 'a FuncArg.t) = arg.arg_payload |> ValueOrigin.addr_hist in
     let actual_arguments = args |> List.map ~f:get_payload in
     let one_summary {arguments; return} =
       let one_arg astate (actual_arg, pre_arg) =

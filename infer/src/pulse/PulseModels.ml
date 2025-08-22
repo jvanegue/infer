@@ -17,8 +17,8 @@ module ProcNameDispatcher = struct
       @ PulseModelsAndroid.matchers @ PulseModelsC.matchers @ PulseModelsCpp.matchers
       @ PulseModelsErlang.matchers @ PulseModelsGenericArrayBackedCollection.matchers
       @ PulseModelsHack.matchers @ PulseModelsJava.matchers @ PulseModelsObjC.matchers
-      @ PulseModelsPython.matchers @ PulseModelsOptional.matchers
-      @ PulseModelsSmartPointers.matchers @ PulseModelsLocks.matchers @ Basic.matchers )
+      @ PulseModelsSwift.matchers @ PulseModelsOptional.matchers @ PulseModelsSmartPointers.matchers
+      @ PulseModelsLocks.matchers @ Basic.matchers )
 end
 
 let dispatch tenv proc_name args =
@@ -27,3 +27,14 @@ let dispatch tenv proc_name args =
       PulseModelsErlang.get_model_from_db proc_name args |> Option.map ~f:lift_model
   | m ->
       m
+
+
+let dispatch_builtins proc_name args =
+  match proc_name with
+  | Procname.Python (PythonProcname.Builtin builtin) ->
+      let args =
+        List.map ~f:(fun func_arg -> FuncArg.arg_payload func_arg |> ValueOrigin.addr_hist) args
+      in
+      Some (PulseModelsPython.builtins_matcher builtin args)
+  | _ ->
+      None

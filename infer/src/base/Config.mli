@@ -28,6 +28,7 @@ type build_system =
   | BNdk
   | BPython
   | BRebar3
+  | BRust
   | BSwiftc
   | BXcode
 
@@ -168,6 +169,10 @@ val buck_dependency_depth : int option
 val buck_mode : BuckMode.t option
 
 val buck_out_gen : string
+
+val buck_swift : bool
+
+val buck_swift_keep_going : bool
 
 val buck_targets_block_list : string list
 
@@ -471,6 +476,10 @@ val liveness_ignored_constant : string list
 
 val llair_source_file : string option
 
+val llvm_bitcode_file : string option
+
+val llvm_bitcode_sources : string list
+
 val lock_model : Yojson.Safe.t
 
 val log_pulse_disjunct_increase_after_model_call : bool
@@ -512,6 +521,8 @@ val no_translate_libs : bool
 val objc_block_execution_macro : string option
 
 val objc_synthesize_dealloc : bool
+
+val ondemand_callchain_limit : int option
 
 val ondemand_recursion_restart_limit : int
 
@@ -566,6 +577,8 @@ val project_root : string
 val pulse_balanced_disjuncts_strategy : bool
 
 val pulse_cut_to_one_path_procedures_pattern : Str.regexp option
+
+val pulse_final_types_are_exact : bool
 
 val pulse_force_continue : bool
 
@@ -639,6 +652,8 @@ val pulse_prevent_non_disj_top : bool
 
 val pulse_recency_limit : int
 
+val pulse_report_assert : bool
+
 val pulse_report_flows_from_taint_source : string option
 
 val pulse_report_flows_to_taint_sink : string option
@@ -646,6 +661,8 @@ val pulse_report_flows_to_taint_sink : string option
 val pulse_report_issues_for_tests : bool
 
 val pulse_report_latent_issues : bool
+
+val pulse_retain_cycle_blocklist_pattern : Str.regexp option
 
 val pulse_sanity_checks : bool
 
@@ -689,9 +706,19 @@ val pure_by_default : bool
 
 val pyc_file : string list
 
+val python_async_function_naming_convention_regex : Str.regexp option
+
+val python_async_method_naming_convention_regex : Str.regexp option
+
+val python_decorator_modelled_as_await_async : IString.PairSet.t
+
 val python_files_index : string option
 
 val python_trim_source_paths : bool
+
+val python_skip_capture_imports_threshold : int option
+
+val python_skip_capture_path_regex : Str.regexp option
 
 val python_skip_db : bool
 
@@ -864,6 +891,8 @@ val topl_properties : ToplAst.t list
 val topl_report_latent_issues : bool
 
 val trace_events : bool
+
+val trace_mutual_recursion_cycle_checker : bool
 
 val trace_ondemand : bool
 

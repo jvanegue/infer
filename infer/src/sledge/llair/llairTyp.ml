@@ -46,7 +46,9 @@ let rec pp fs typ =
       pf "[%i x %a]" len pp elt
   | Tuple {elts} ->
       pf "{ @[%a@] }" pp_flds elts
-  | Struct {name} | Opaque {name} ->
+  | Struct {name} ->
+      pf "%%%s" name
+  | Opaque {name} ->
       pf "%%%s" name
 
 
@@ -71,6 +73,8 @@ let is_sized = function
   | Integer _ | Float _ | Pointer _ | Array _ | Tuple _ | Struct _ ->
       true
 
+
+let is_tuple = function Tuple _ -> true | _ -> false
 
 let is_int t = match t with Integer _ -> true | _ -> false
 

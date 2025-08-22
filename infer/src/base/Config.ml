@@ -32,6 +32,7 @@ type build_system =
   | BNdk
   | BPython
   | BRebar3
+  | BRust
   | BSwiftc
   | BXcode
 [@@deriving compare, equal]
@@ -90,6 +91,7 @@ let build_system_exe_assoc =
   ; (BNdk, "ndk-build")
   ; (BPython, "python3")
   ; (BRebar3, "rebar3")
+  ; (BRust, "rustc")
   ; (BSwiftc, "swiftc")
   ; (BErlc, "erlc")
   ; (BXcode, "xcodebuild") ]
@@ -107,7 +109,8 @@ let build_system_of_exe_name name =
        If this is an alias for another build system that infer supports, you can use@\n\
        `--force-integration <command>` where <command> is one of the following supported build \
        systems:@\n\
-       @[<v2>  %a@]" name
+       @[<v2>  %a@]"
+      name
       (Pp.seq ~print_env:Pp.text_break ~sep:"" F.pp_print_string)
       ( List.map ~f:fst build_system_exe_assoc
       |> List.map ~f:string_of_build_system
@@ -953,6 +956,19 @@ and buck_mode =
     ~f:(set_mode `Python) "Buck integration for Python."
   |> ignore ;
   buck_mode
+
+
+and buck_swift =
+  CLOpt.mk_bool ~long:"buck-swift" ~default:false
+    ~in_help:InferCommand.[(Capture, manual_buck)]
+    "When using the BXL Clang integration, pass $(b, --swift <bool>) to control capture of Swift \
+     files."
+
+
+and buck_swift_keep_going =
+  CLOpt.mk_bool ~long:"buck-swift-keep-going" ~default:false
+    ~in_help:InferCommand.[(Capture, manual_buck)]
+    "When using the BXL Clang integration, pass $(b, --swift-keep-going <bool>)."
 
 
 and buck_targets_block_list =
@@ -1939,6 +1955,18 @@ and llair_source_file =
      $(b,--capture-llair)."
 
 
+and llvm_bitcode_file =
+  CLOpt.mk_string_opt ~long:"llvm-bitcode-file"
+    "[EXPERIMENTAL] Use llvm frontend to directly capture the give bitcode file"
+    ~in_help:InferCommand.[(Capture, manual_generic)]
+
+
+and llvm_bitcode_sources =
+  CLOpt.mk_string_list ~long:"llvm-bitcode-source"
+    "[EXPERIMENTAL] Specify source files for llvm bitcode capture"
+    ~in_help:InferCommand.[(Capture, manual_generic)]
+
+
 and lock_model =
   CLOpt.mk_json ~long:"lock-model"
     ~in_help:InferCommand.[(Analyze, manual_clang)]
@@ -2033,7 +2061,8 @@ and merge_summaries =
 
 and minor_heap_size_mb =
   CLOpt.mk_int ~long:"minor-heap-size-mb" ~default:8
-    "Set minor heap size (in Mb) for each process/domain. Defaults to 8"
+    "Set minor heap size (in Mb) for each process/domain. Defaults to 8, unless in multicore mode \
+     where it defaults to 64."
 
 
 and _method_decls_info =
@@ -2093,6 +2122,12 @@ and objc_synthesize_dealloc =
     ~default:false
     "If enabled, the capture tries to synthesize code in the dealloc methods of Objective-C \
      classes corresponding to what the compiler does."
+
+
+and ondemand_callchain_limit =
+  CLOpt.mk_int_opt ~long:"ondemand-callchain-limit"
+    ~in_help:InferCommand.[(Analyze, manual_generic)]
+    "If enabled, the number of consecutive recursive ondemand call is bounded"
 
 
 and ondemand_recursion_restart_limit =
@@ -2275,6 +2310,12 @@ and pulse_cut_to_one_path_procedures_pattern =
     ~in_help:InferCommand.[(Analyze, manual_pulse)]
     "Regex of methods for which pulse will only explore one path. Can be used on pathologically \
      large procedures to prevent too-big states from being produced."
+
+
+and pulse_final_types_are_exact =
+  CLOpt.mk_bool ~long:"pulse-final-types-are-exact" ~default:true
+    "Make Pulse understand that final types are exact (i.e. static type is equal to the exact \
+     runtime type)."
 
 
 and pulse_force_continue =
@@ -2578,6 +2619,12 @@ and pulse_recency_limit =
     "Maximum number of array elements and structure fields to keep track of for a given address."
 
 
+and pulse_report_assert =
+  CLOpt.mk_bool ~long:"pulse-report-assert" ~default:false
+    ~in_help:InferCommand.[(Report, manual_pulse)]
+    "Reports Assertion Error in a failed assertion. Used in C code."
+
+
 and pulse_report_flows_from_taint_source =
   CLOpt.mk_string_opt ~long:"pulse-report-flows-from-taint-source"
     ~in_help:InferCommand.[(Report, manual_pulse)]
@@ -2599,6 +2646,14 @@ and pulse_report_latent_issues =
   CLOpt.mk_bool ~long:"pulse-report-latent-issues" ~default:true
     "Report latent issues instead of waiting for them to become manifest, when the latent issue \
      itself is enabled."
+
+
+and pulse_retain_cycle_blocklist_pattern =
+  CLOpt.mk_string_opt ~long:"pulse-retain-cycle-blocklist-pattern"
+    ~in_help:InferCommand.[(Analyze, manual_pulse)]
+    "Skip reporting retain cycles which include an expression that matches this pattern. It is \
+     useful when developers use naming conventions to signal that certain variables are expected \
+     to be part of a retain cycle."
 
 
 and pulse_sanity_checks =
@@ -2754,6 +2809,7 @@ and pulse_taint_sources =
       match all fields marked by specified annotation with specified values
   - "allocation": $(i,\(for taint sources only\))
       match allocations of the exact class name supplied
+  - "builtin": match a substring of the builtin name (currently only for Hack)
   - "block_passed_to": $(i,\(for taint sources only\))
      match a substring of the procedure name that the block is passed to
   - "block_passed_to_regex": $(i,\(for taint sources only\))
@@ -2830,6 +2886,26 @@ and pure_by_default =
 
 and pyc_file = CLOpt.mk_path_list ~long:"pyc-file" "Collection of compiled Python files (byte-code)"
 
+and python_async_function_naming_convention_regex =
+  CLOpt.mk_string_list ~long:"python-async-function-naming-convention-regex"
+    ~default:[".*::_async_.*"; ".*::async_.*"]
+    ~in_help:InferCommand.[(Analyze, manual_pulse)]
+    "Consider any function call that matches as returning an unawaited value"
+
+
+and python_async_method_naming_convention_regex =
+  CLOpt.mk_string_list ~long:"python-async-method-naming-convention-regex"
+    ~default:["^async_.*"; "^_async_.*"]
+    ~in_help:InferCommand.[(Analyze, manual_pulse)]
+    "Consider any method call that matches as returning an unawaited value"
+
+
+and python_decorator_modelled_as_await_async =
+  CLOpt.mk_string_list ~long:"python-decorator-modelled-as-await-async"
+    ~in_help:InferCommand.[(Analyze, manual_pulse)]
+    "Any decorator that should be modelled as the await_async decorator."
+
+
 and python_files_index =
   CLOpt.mk_path_opt ~long:"python-files-index" ~meta:"path"
     ~in_help:InferCommand.[(Capture, manual_generic)]
@@ -2841,6 +2917,17 @@ and python_trim_source_paths =
   CLOpt.mk_bool ~long:"python-trim-source-paths" ~default:false
     "Remove any prefix calculated from the relative difference between $(b,--buck2-root) and \
      $(b,--project-root) from captured source paths."
+
+
+and python_skip_capture_imports_threshold =
+  CLOpt.mk_int_opt ~long:"python-skip-capture-imports-threshold"
+    ~in_help:InferCommand.[(Capture, manual_generic)]
+    "Maximum number of imports allowed in a file (we skip capture otherwise)."
+
+
+and python_skip_capture_path_regex_list =
+  CLOpt.mk_string_list ~long:"python-skip-capture-path-regex-list" ~meta:"path_regex"
+    "Do not capture files whose path matches any of these regex."
 
 
 and python_skip_db =
@@ -3458,6 +3545,11 @@ and trace_events =
        (ResultsDirEntryName.get_path ~results_dir:"infer-out" PerfEvents) )
 
 
+and trace_mutual_recursion_cycle_checker =
+  CLOpt.mk_bool ~long:"trace-mutual-recursion-cycle-checker"
+    "Emit debug information for the mutual recursion cycle checker."
+
+
 and trace_ondemand =
   CLOpt.mk_bool ~long:"trace-ondemand" "Emit debug information for the ondemand analysis scheduler."
 
@@ -3586,11 +3678,12 @@ let inferconfig_file =
 
 
 let set_gc_params () =
+  let minor_heap_size_mb = if !multicore then min 64 !minor_heap_size_mb else !minor_heap_size_mb in
   let ctrl = Gc.get () in
   let words_of_Mb nMb = nMb * 1024 * 1024 * 8 / Sys.word_size_in_bits in
   let new_size nMb = max ctrl.minor_heap_size (words_of_Mb nMb) in
   (* increase the minor heap size *)
-  let minor_heap_size = new_size !minor_heap_size_mb in
+  let minor_heap_size = new_size minor_heap_size_mb in
   Gc.set {ctrl with minor_heap_size}
 
 
@@ -3805,6 +3898,10 @@ and buck_mode : BuckMode.t option =
   | `Python, _ ->
       Some Python
 
+
+and buck_swift = !buck_swift
+
+and buck_swift_keep_going = !buck_swift_keep_going
 
 and buck_targets_block_list = RevList.to_list !buck_targets_block_list
 
@@ -4060,7 +4157,8 @@ and help_checker =
           L.die UserError
             "Wrong argument for --help-checker: '%s' is not a known checker identifier.@\n\
              @\n\
-             See --list-checkers for the list of all checkers." checker_string )
+             See --list-checkers for the list of all checkers."
+            checker_string )
 
 
 and help_issue_type =
@@ -4072,7 +4170,8 @@ and help_issue_type =
           L.die UserError
             "Wrong argument for --help-issue-type: '%s' is not a known issue type identifier.@\n\
              @\n\
-             See --list-issue-types for the list of all known issue types." id )
+             See --list-issue-types for the list of all known issue types."
+            id )
 
 
 and hoisting_report_only_expensive = !hoisting_report_only_expensive
@@ -4173,6 +4272,10 @@ and liveness_ignored_constant = RevList.to_list !liveness_ignored_constant
 
 and llair_source_file = !llair_source_file
 
+and llvm_bitcode_file = !llvm_bitcode_file
+
+and llvm_bitcode_sources = RevList.to_list !llvm_bitcode_sources
+
 and lock_model = !lock_model
 
 and log_pulse_disjunct_increase_after_model_call = !log_pulse_disjunct_increase_after_model_call
@@ -4214,6 +4317,8 @@ and no_translate_libs = not !headers
 and objc_block_execution_macro = !objc_block_execution_macro
 
 and objc_synthesize_dealloc = !objc_synthesize_dealloc
+
+and ondemand_callchain_limit = !ondemand_callchain_limit
 
 and ondemand_recursion_restart_limit = !ondemand_recursion_restart_limit
 
@@ -4296,6 +4401,8 @@ and pulse_balanced_disjuncts_strategy = !pulse_balanced_disjuncts_strategy
 and pulse_cut_to_one_path_procedures_pattern =
   Option.map ~f:Str.regexp !pulse_cut_to_one_path_procedures_pattern
 
+
+and pulse_final_types_are_exact = !pulse_final_types_are_exact
 
 and pulse_force_continue = !pulse_force_continue
 
@@ -4399,6 +4506,8 @@ and pulse_prevent_non_disj_top = !pulse_prevent_non_disj_top
 
 and pulse_recency_limit = !pulse_recency_limit
 
+and pulse_report_assert = !pulse_report_assert
+
 and pulse_report_flows_from_taint_source = !pulse_report_flows_from_taint_source
 
 and pulse_report_flows_to_taint_sink = !pulse_report_flows_to_taint_sink
@@ -4406,6 +4515,10 @@ and pulse_report_flows_to_taint_sink = !pulse_report_flows_to_taint_sink
 and pulse_report_issues_for_tests = !pulse_report_issues_for_tests
 
 and pulse_report_latent_issues = !pulse_report_latent_issues
+
+and pulse_retain_cycle_blocklist_pattern =
+  Option.map ~f:Str.regexp !pulse_retain_cycle_blocklist_pattern
+
 
 and pulse_sanity_checks = !pulse_sanity_checks
 
@@ -4502,9 +4615,36 @@ and pure_by_default = !pure_by_default
 
 and pyc_file = RevList.to_list !pyc_file
 
+and python_async_function_naming_convention_regex =
+  join_patterns_list (RevList.to_list !python_async_function_naming_convention_regex)
+
+
+and python_async_method_naming_convention_regex =
+  join_patterns_list (RevList.to_list !python_async_method_naming_convention_regex)
+
+
+and python_decorator_modelled_as_await_async =
+  RevList.to_list !python_decorator_modelled_as_await_async
+  |> List.fold ~init:IString.PairSet.empty ~f:(fun set str ->
+         match String.substr_index_all str ~may_overlap:false ~pattern:"::" |> List.last with
+         | None ->
+             set
+         | Some last_pos ->
+             let length = String.length str in
+             let attribute_name = String.sub str ~pos:(last_pos + 2) ~len:(length - last_pos - 2) in
+             let module_name = String.sub str ~pos:0 ~len:last_pos in
+             IString.PairSet.add (module_name, attribute_name) set )
+
+
 and python_files_index = !python_files_index
 
 and python_trim_source_paths = !python_trim_source_paths
+
+and python_skip_capture_imports_threshold = !python_skip_capture_imports_threshold
+
+and python_skip_capture_path_regex =
+  join_patterns_list (RevList.to_list !python_skip_capture_path_regex_list)
+
 
 and python_skip_db = !python_skip_db
 
@@ -4695,7 +4835,7 @@ and topl_properties =
         L.die UserError "@[%s:%d:%d: topl parse error@]@\n@?" topl_file pos_lnum col
     in
     try In_channel.with_file topl_file ~f
-    with Sys_error msg -> L.die UserError "@[topl:%s: %s@]@\n@?" topl_file msg
+    with Sys_error msg -> [ToplAst.Ignored {ignored_file= topl_file; ignored_reason= msg}]
   in
   List.concat_map ~f:parse (RevList.to_list !topl_properties)
 
@@ -4703,6 +4843,8 @@ and topl_properties =
 and topl_report_latent_issues = !topl_report_latent_issues
 
 and trace_events = !trace_events
+
+and trace_mutual_recursion_cycle_checker = !trace_mutual_recursion_cycle_checker
 
 and trace_ondemand = !trace_ondemand
 

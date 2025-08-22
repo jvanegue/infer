@@ -33,6 +33,7 @@ type op1 =
           must not both be [Integer] types. *)
   | Splat  (** Iterated concatenation of a single byte *)
   | Select of int  (** Select an index from a record *)
+  | GetElementPtr of int  (** Get element pointer when the type is a simple pointer *)
 [@@deriving compare, equal, sexp]
 
 type op2 =
@@ -72,8 +73,8 @@ type opN = Record  (** Record (array / struct) constant *) [@@deriving compare, 
 
 type t = private
   | Reg of {id: int; name: string; typ: LlairTyp.t}  (** Virtual register *)
-  | Global of {name: string; typ: LlairTyp.t [@ignore]}  (** Global constant *)
-  | FuncName of {name: string; typ: LlairTyp.t [@ignore]}  (** Function name *)
+  | Global of {name: string; is_constant: bool; typ: LlairTyp.t [@ignore]}  (** Global constant *)
+  | FuncName of {name: string; typ: LlairTyp.t [@ignore]; unmangled_name: string option [@ignore]}
   | Label of {parent: string; name: string}
       (** Address of named code block within parent function *)
   | Integer of {data: Z.t; typ: LlairTyp.t}  (** Integer constant *)
@@ -85,6 +86,8 @@ type t = private
 [@@deriving compare, equal, sexp]
 
 val pp : t pp
+
+val string_of_exp : t -> string option
 
 include Invariant.S with type t := t
 
@@ -151,7 +154,7 @@ module Global : sig
 
   val of_exp : exp -> t option
 
-  val mk : LlairTyp.t -> string -> t
+  val mk : LlairTyp.t -> string -> bool -> t
 
   val name : t -> string
 
@@ -174,13 +177,15 @@ module FuncName : sig
 
   val of_exp : exp -> t option
 
-  val mk : LlairTyp.t -> string -> t
+  val mk : unmangled_name:string option -> LlairTyp.t -> string -> t
 
   val counterfeit : string -> t
   (** [compare] ignores [FuncName.typ], so it is possible to construct [FuncName]s using a dummy
       type that compare equal to their genuine counterparts. *)
 
   val name : t -> string
+
+  val unmangled_name : t -> string option
 
   val typ : t -> LlairTyp.t
 end
@@ -280,6 +285,8 @@ val splat : LlairTyp.t -> t -> t
 val record : LlairTyp.t -> t iarray -> t
 
 val select : LlairTyp.t -> t -> int -> t
+
+val gep : LlairTyp.t -> t -> int -> t
 
 val update : LlairTyp.t -> rcd:t -> int -> elt:t -> t
 

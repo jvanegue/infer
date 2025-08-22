@@ -524,7 +524,7 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
         | Some {fields} ->
             let fieldname_opt =
               List.find_map
-                ~f:(fun {Struct.name} ->
+                ~f:(fun ({Struct.name} : Struct.field) ->
                   if String.equal (Fieldname.get_field_name name) field_string then Some name
                   else None )
                 fields
@@ -766,9 +766,12 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
         let block_as_arg_attributes =
           match ms_param_type_i with
           | Some (_, {is_no_escape_block_arg}) ->
+              let procdesc = trans_state_param.context.CContext.procdesc in
+              let procname = Procdesc.get_proc_name procdesc in
               Some
                 { ProcAttributes.passed_to= callee_ms.CMethodSignature.name
-                ; passed_as_noescape_block= is_no_escape_block_arg }
+                ; passed_as_noescape_block= is_no_escape_block_arg
+                ; in_outer_block= Procname.is_objc_block procname }
           | None ->
               None
         in
@@ -2248,7 +2251,8 @@ module CTrans_funct (F : CModule_type.CFrontend) : CModule_type.CTranslation = s
       ; cxx_temporary_markers_set }
 
 
-  (** The GNU extension to the conditional operator which allows the middle operand to be omitted. *)
+  (** The GNU extension to the conditional operator which allows the middle operand to be omitted.
+  *)
   and binaryConditionalOperator_trans trans_state stmt_info stmt_list expr_info =
     match stmt_list with
     | [stmt1; ostmt1; ostmt2; stmt2]

@@ -96,12 +96,12 @@ module TextualFile = struct
 
 
   let verify sourcefile textual =
-    TextualVerification.verify textual
+    TextualVerification.verify_strict textual
     |> Result.map_error ~f:(fun err -> (sourcefile, [VerificationError err]))
 
 
   let lang sourcefile module_ =
-    match Textual.Module.lang module_ with
+    match Textual.Module.lang_opt module_ with
     | None ->
         Error
           ( sourcefile
@@ -126,6 +126,7 @@ module TextualFile = struct
   let translate file =
     let open IResult.Let_syntax in
     let* sourcefile, textual = parse file in
+    let textual = TextualTransform.ClassGetTS.transform textual in
     let* textual_verified = verify sourcefile textual in
     textual_to_sil sourcefile textual_verified
 

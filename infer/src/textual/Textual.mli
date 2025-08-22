@@ -10,11 +10,15 @@ module F = Format
 module Hashtbl = Stdlib.Hashtbl
 
 module Lang : sig
-  type t = C | Hack | Java | Python [@@deriving equal]
+  type t = C | Hack | Java | Python | Rust | Swift [@@deriving equal]
 
   val of_string : string -> t option [@@warning "-unused-value-declaration"]
 
   val to_string : t -> string
+
+  val is_swift : t -> bool
+
+  val is_c : t -> bool
 end
 
 module Location : sig
@@ -34,6 +38,8 @@ module type NAME = sig
 
   val of_string : ?loc:Location.t -> string -> t
   (** we replace any dot in the string by '::' because dot is a reserved separator in Textual *)
+
+  val to_string : t -> string
 
   val pp : F.formatter -> t -> unit
 
@@ -72,6 +78,8 @@ module TypeName : sig
 
   val of_string_no_dot_escape : string -> t
 
+  val mk_swift_tuple_type_name : t list -> t
+
   val pp : F.formatter -> t -> unit
 
   module Hashtbl : Hashtbl.S with type key = t
@@ -93,9 +101,13 @@ module QualifiedProcName : sig
   type t = {enclosing_class: enclosing_class; name: ProcName.t} [@@deriving compare, equal, hash]
   (* procedure name [name] is attached to the name space [enclosing_class] *)
 
+  module Map : Stdlib.Map.S with type key = t
+
   val pp : F.formatter -> t -> unit
 
   val name : t -> ProcName.t
+
+  val get_class_name : t -> TypeName.t option
 
   val contains_wildcard : t -> bool
 
@@ -103,10 +115,12 @@ module QualifiedProcName : sig
 
   val is_llvm_builtin : t -> bool
 
+  val is_llvm_init_tuple : t -> bool
+
   module Hashtbl : Hashtbl.S with type key = t
 end
 
-type qualified_fieldname = {enclosing_class: TypeName.t; name: FieldName.t}
+type qualified_fieldname = {enclosing_class: TypeName.t; name: FieldName.t} [@@deriving equal]
 (* field name [name] must be declared in type [enclosing_class] *)
 
 val pp_qualified_fieldname : F.formatter -> qualified_fieldname -> unit
@@ -158,6 +172,14 @@ module Attr : sig
 
   val mk_trait : t
 
+  val mk_plain_name : string -> t
+
+  val mk_method_offset : int -> t
+
+  val get_plain_name : t -> string option
+
+  val get_method_offset : t -> int option
+
   val pp : F.formatter -> t -> unit [@@warning "-unused-value-declaration"]
 
   val pp_with_loc : F.formatter -> t -> unit [@@warning "-unused-value-declaration"]
@@ -186,6 +208,8 @@ module Typ : sig
   val pp_annotated : F.formatter -> annotated -> unit
 
   val mk_without_attributes : t -> annotated
+
+  val any_type_llvm : t
 end
 
 module Ident : sig
@@ -262,7 +286,7 @@ module ProcDecl : sig
 
   val formals_or_die : ?context:string -> t -> Typ.annotated list
 
-  val to_sig : t -> Lang.t option -> ProcSig.t
+  val to_sig : t -> Lang.t -> ProcSig.t
 
   val pp : F.formatter -> t -> unit
 
@@ -286,9 +310,17 @@ module ProcDecl : sig
 
   val malloc_name : QualifiedProcName.t
 
+  val swift_alloc_name : QualifiedProcName.t
+
   val is_malloc_builtin : QualifiedProcName.t -> bool
 
+  val is_swift_alloc_builtin : QualifiedProcName.t -> bool
+
   val free_name : QualifiedProcName.t [@@warning "-unused-value-declaration"]
+
+  val assert_fail_name : QualifiedProcName.t
+
+  val is_assert_fail_builtin : QualifiedProcName.t -> bool
 
   val cast_name : QualifiedProcName.t
 
@@ -310,11 +342,7 @@ module ProcDecl : sig
 
   val is_variadic : t -> bool
 
-  val is_builtin : QualifiedProcName.t -> Lang.t option -> bool
-end
-
-module Global : sig
-  type t = {name: VarName.t; typ: Typ.t; attributes: Attr.t list}
+  val is_builtin : QualifiedProcName.t -> Lang.t -> bool
 end
 
 module FieldDecl : sig
@@ -344,7 +372,7 @@ module Exp : sig
 
   val call_virtual : QualifiedProcName.t -> t -> t list -> t
 
-  val call_sig : QualifiedProcName.t -> int -> Lang.t option -> ProcSig.t
+  val call_sig : QualifiedProcName.t -> int -> Lang.t -> ProcSig.t
 
   val allocate_object : TypeName.t -> t
 
@@ -354,6 +382,8 @@ module Exp : sig
   val cast : Typ.t -> t -> t
 
   val vars : t -> Ident.Set.t
+
+  val is_zero_exp : t -> bool
 
   val pp : F.formatter -> t -> unit
 end
@@ -408,6 +438,10 @@ module Node : sig
   module Set : Stdlib.Set.S with type elt = t
 end
 
+module Global : sig
+  type t = {name: VarName.t; typ: Typ.t; attributes: Attr.t list; init_exp: Exp.t option}
+end
+
 module ProcDesc : sig
   type t =
     { procdecl: ProcDecl.t
@@ -433,6 +467,8 @@ end
 module Struct : sig
   type t =
     {name: TypeName.t; supers: TypeName.t list; fields: FieldDecl.t list; attributes: Attr.t list}
+
+  val pp : F.formatter -> t -> unit
 end
 
 module SsaVerification : sig
@@ -460,7 +496,9 @@ module Module : sig
 
   type t = {attrs: Attr.t list; decls: decl list; sourcefile: SourceFile.t}
 
-  val lang : t -> Lang.t option
+  val lang : t -> Lang.t
+
+  val lang_opt : t -> Lang.t option
 
   val pp : ?show_location:bool -> F.formatter -> t -> unit [@@warning "-unused-value-declaration"]
 end

@@ -33,7 +33,7 @@ type t =
   ; variadic_procs: ProcDesc.t QualifiedProcName.Hashtbl.t
   ; structs: Struct.t TypeName.Hashtbl.t
   ; sourcefile: SourceFile.t
-  ; lang: Lang.t option }
+  ; lang: Lang.t }
 
 let init sourcefile lang =
   { globals= VarName.Hashtbl.create 17
@@ -61,8 +61,7 @@ let pp fmt {globals; procs; variadic_procs; structs; sourcefile; lang} =
     (QualifiedProcName.Hashtbl.to_seq_keys variadic_procs)
     (pp_seq TypeName.pp)
     (TypeName.Hashtbl.to_seq_keys structs)
-    SourceFile.pp sourcefile
-    (Option.value_map lang ~default:"none" ~f:Lang.to_string)
+    SourceFile.pp sourcefile (Lang.to_string lang)
 
 
 type error =
@@ -196,7 +195,8 @@ let is_defined_in_a_trait decls_env {Textual.QualifiedProcName.enclosing_class} 
 
 let is_trait_method decls_env procsig =
   is_defined_in_a_trait decls_env (Textual.ProcSig.to_qualified_procname procsig)
-  && (* The hack init methods does not have the [self] argument, unlike the other trait methods. So,
+  &&
+  (* The hack init methods does not have the [self] argument, unlike the other trait methods. So,
         we address them differenctly in the validtion. *)
   not (Textual.ProcSig.is_hack_init procsig)
 

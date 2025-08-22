@@ -97,6 +97,8 @@ let capture build_cmd =
       @ Option.value_map Config.buck2_inferconfig_target ~default:[] ~f:(fun target ->
             ["--inferconfig"; target] )
       @ (if Config.keep_going then ["--keep-going=true"] else [])
+      @ (if Config.buck_swift then ["--swift=true"] else [])
+      @ (if Config.buck_swift_keep_going then ["--swift-keep-going=true"] else [])
       @ block_files @ files_with_arg @ targets_with_arg
     in
     let buck2_build_cmd =

@@ -412,8 +412,7 @@ module Collection = struct
   let remove ~desc args : model_no_non_disj =
    fun {path; location; ret= ret_id, _} astate ->
     match args with
-    | [ {ProcnameDispatcher.Call.FuncArg.arg_payload= coll_arg}
-      ; {ProcnameDispatcher.Call.FuncArg.arg_payload= elem_arg; typ} ] -> (
+    | [{FuncArg.arg_payload= coll_arg}; {FuncArg.arg_payload= elem_arg; typ}] -> (
       match typ.desc with
       | Tint _ ->
           (* Case of remove(int index) *)
@@ -696,24 +695,23 @@ let matchers : matcher list =
     |> with_non_disj
   ; +map_context_tenv (PatternMatch.Java.implements "java.io.InputStream")
     &::+ (fun _ proc_name_str ->
-           StringSet.mem proc_name_str
-             Resource.inputstream_resource_usage_modeled_throws_IOException )
+    StringSet.mem proc_name_str Resource.inputstream_resource_usage_modeled_throws_IOException )
     <>$ any_arg
     $+...$--> Resource.use ~exn_class_name:"java.io.IOException"
     |> with_non_disj
   ; +map_context_tenv (PatternMatch.Java.implements "java.io.InputStream")
     &::+ (fun _ proc_name_str ->
-           StringSet.mem proc_name_str Resource.inputstream_resource_usage_modeled_do_not_throws )
+    StringSet.mem proc_name_str Resource.inputstream_resource_usage_modeled_do_not_throws )
     <>$ any_arg $+...$--> Basic.skip |> with_non_disj
   ; +map_context_tenv (PatternMatch.Java.implements "java.io.Reader")
     &::+ (fun _ proc_name_str ->
-           StringSet.mem proc_name_str Resource.reader_resource_usage_modeled_throws_IOException )
+    StringSet.mem proc_name_str Resource.reader_resource_usage_modeled_throws_IOException )
     <>$ any_arg
     $+...$--> Resource.use ~exn_class_name:"java.io.IOException"
     |> with_non_disj
   ; +map_context_tenv (PatternMatch.Java.implements "java.io.Reader")
     &::+ (fun _ proc_name_str ->
-           StringSet.mem proc_name_str Resource.reader_resource_usage_modeled_do_not_throws )
+    StringSet.mem proc_name_str Resource.reader_resource_usage_modeled_do_not_throws )
     <>$ any_arg $+...$--> Basic.skip |> with_non_disj
   ; +map_context_tenv (PatternMatch.Java.implements "java.io.Writer")
     &::+ (fun _ proc_name_str -> StringSet.mem proc_name_str Resource.writer_resource_usage_modeled)
@@ -860,7 +858,7 @@ let matchers : matcher list =
   ; +map_context_tenv PatternMatch.Java.implements_enumeration
     &:: "nextElement" <>$ capt_arg_payload
     $!--> (fun x ->
-            Cplusplus.Vector.at ~desc:"Enumeration.nextElement" x (AbstractValue.mk_fresh (), []) )
+    Cplusplus.Vector.at ~desc:"Enumeration.nextElement" x (AbstractValue.mk_fresh (), []) )
     |> with_non_disj
   ; -"java.lang.AssertionError" &:: "<init>" <>$ capt_arg $--> assertion_error
   ; -"java.lang.Object" &:: "<init>" &--> Basic.skip |> with_non_disj

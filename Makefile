@@ -81,7 +81,6 @@ DIRECT_TESTS += \
 ifeq ($(BUILD_CPU),x86_64)
 DIRECT_TESTS += \
   c_frontend \
-  c_llvm-frontend \
 
 endif
 
@@ -116,7 +115,9 @@ ifneq ($(CMAKE),no)
 BUILD_SYSTEMS_TESTS += clang_compilation_db cmake inferconfig inferconfig_not_strict
 endif
 ifneq ($(NDKBUILD),no)
+ifeq ($(BUILD_PLATFORM),Linux)
 BUILD_SYSTEMS_TESTS += ndk_build
+endif
 endif
 ifeq ($(HAS_OBJC),yes)
 BUILD_SYSTEMS_TESTS += \
@@ -129,7 +130,7 @@ BUILD_SYSTEMS_TESTS += \
   pulse_taint_regex_objc \
   pulse_taint_sanitize_objc \
   pulse_taint_exclude_in_objc \
-	pulse_taint_exclude_matching_objc
+  pulse_taint_exclude_matching_objc
 
 DIRECT_TESTS += \
   objc_bufferoverrun \
@@ -173,7 +174,11 @@ endif # BUILD_C_ANALYZERS
 
 ifneq ($(BUILD_SWIFT_ANALYZERS),no)
 DIRECT_TESTS += \
-  swift_frontend \
+  c_llvm-frontend \
+  c_pulse-llvm \
+#   swift_frontend \
+#   swift_bitcode \
+#   swift_pulse \
 
 endif
 
@@ -183,10 +188,10 @@ ifneq ($(ESCRIPT),no)
 DIRECT_TESTS += \
   erlang_flowquery \
   erlang_pulse \
-	erlang_pulse-taint \
+  erlang_pulse-taint \
   erlang_topl \
   erlang_compiler \
-	# TODO: Disabled to avoid timeouts on CI
+  # TODO: Disabled to avoid timeouts on CI
   # erlang_pulse-otp \
 
 
@@ -201,14 +206,14 @@ endif # BUILD_ERLANG_ANALYZERS
 ifneq ($(HACKC),no)
 DIRECT_TESTS += \
   hack_capture \
-	hack_impurity \
+  hack_impurity \
   hack_pulse \
   hack_performance \
 
 BUILD_SYSTEMS_TESTS += \
   differential_hack \
   pulse_messages_hack \
-	pulse_taint_hack_no_follow_field_accesses \
+  pulse_taint_hack_no_follow_field_accesses \
 
 endif
 
@@ -308,10 +313,10 @@ endif
 # endif
 ifneq ($(MVN),no)
 BUILD_SYSTEMS_TESTS += \
-	mvn \
-	jar \
+  mvn \
+  jar \
 # Temporarily(?) disabled due to CI errors
-#	jar_without_sources \
+#  jar_without_sources \
 
 endif
 endif # BUILD_JAVA_ANALYZERS
@@ -513,6 +518,21 @@ clang_setup:
 	  fi; \
 	  $(FCP_DIR)/clang/$(PLUGIN_SETUP_SCRIPT) $(FCP_COMPILE_ARGS); \
 	}
+ifeq ($(BUILD_SWIFT_ANALYZERS), yes)
+#	we need to add our LLVM distribution to opam's sandbox using OPAM_USER_PATH_RO. This doesn't
+#	seem to play well with symbolic links so make sure to use 'realpath' first.
+	$(QUIET)if [ '$(USER_LLVM)' == 'no' ]; then \
+	  CLANG_INSTALL=$$(realpath '$(FCP_DIR)'/clang/install); \
+	  export PATH="$$CLANG_INSTALL/bin:$$PATH" \
+	         OPAM_USER_PATH_RO="$$CLANG_INSTALL"; \
+	fi; \
+	llvm_version=$$(opam show \
+	  --just-file $(ROOT_DIR)/dependencies/llvm/opam-repository/packages/llvm/llvm.*-infer/opam \
+	  --field=version); \
+	$(call silent_on_success,Installing our LLVM OCaml bindings,\
+	opam update local-llvm && \
+	opam install --yes --no-depext llvm.$$llvm_version)
+endif
 
 .PHONY: clang_plugin
 clang_plugin: clang_setup

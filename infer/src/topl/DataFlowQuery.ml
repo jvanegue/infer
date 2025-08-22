@@ -307,13 +307,17 @@ module Topl = struct
           { annot_pattern= None
           ; procedure_name_regex= ToplAst.mk_regex false pattern
           ; type_regexes= None }
-    | Clang | CIL | Hack | Python | Java ->
+    | Clang | CIL | Hack | Python | Java | Rust | Swift ->
         L.die InternalError "Unsupported language for data flow queries"
 
 
   let mk_vname arguments position =
     (* TODO: validate, so these don't throw *)
-    match position with Return -> List.last_exn arguments | Argument n -> List.nth_exn arguments n
+    match position with
+    | Return ->
+        List.last_exn arguments
+    | Argument n ->
+        List.nth_exn arguments n
 
 
   let mk_eq_predicate (language : Language.t) arguments (Eq {left; right}) =
@@ -413,7 +417,7 @@ module Topl = struct
       {ToplAst.source= start_state; target= start_state; label= None; pos_range}
       :: List.concat_map ~f:(from_matcher language source sink) matchers
     in
-    {ToplAst.name; message; prefixes= []; transitions}
+    ToplAst.Ast {name; message; prefixes= []; transitions}
 end
 
 let convert_one_to_topl path =

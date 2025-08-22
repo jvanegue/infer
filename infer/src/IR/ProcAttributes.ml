@@ -72,12 +72,13 @@ let pp_var_data fmt
     is_structured_binding has_cleanup_attribute
 
 
-type block_as_arg_attributes = {passed_to: Procname.t; passed_as_noescape_block: bool}
+type block_as_arg_attributes =
+  {passed_to: Procname.t; passed_as_noescape_block: bool; in_outer_block: bool}
 [@@deriving compare, equal]
 
-let pp_block_as_arg_attributes fmt {passed_to; passed_as_noescape_block} =
-  F.fprintf fmt "@[{ passed_to=%a;passed_as_noescape_block=%b } @]" Procname.pp passed_to
-    passed_as_noescape_block
+let pp_block_as_arg_attributes fmt {passed_to; passed_as_noescape_block; in_outer_block} =
+  F.fprintf fmt "@[{ passed_to=%a;passed_as_noescape_block=%b; in_outer_block:%b } @]" Procname.pp
+    passed_to passed_as_noescape_block in_outer_block
 
 
 type t =
@@ -268,7 +269,8 @@ let pp f
      ; ret_type
      ; ret_annots
      ; is_ret_type_pod
-     ; is_ret_constexpr } [@warning "+missing-record-field-pattern"] ) =
+     ; is_ret_constexpr }
+     [@warning "+missing-record-field-pattern"] ) =
   let default = default translation_unit proc_name in
   let pp_bool_default ~default title b f () =
     if not (Bool.equal default b) then F.fprintf f "; %s= %b@," title b
@@ -365,7 +367,7 @@ let get_this attributes =
     | Clang -> (
         if Procname.is_objc_instance_method attributes.proc_name then Some Mangled.self
         else match attributes.clang_method_kind with CPP_INSTANCE -> Some Mangled.this | _ -> None )
-    | CIL | Erlang | Hack | Python ->
+    | CIL | Erlang | Hack | Python | Rust | Swift ->
         None
   in
   Pvar.mk name attributes.proc_name

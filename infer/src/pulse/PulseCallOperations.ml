@@ -37,9 +37,9 @@ let trim_actuals_if_var_arg proc_name_opt ~formals ~actuals =
   else actuals
 
 
-let is_const_version pname_method other_method =
-  String.equal pname_method (Procname.get_method other_method)
-  && Option.exists (IRAttributes.load other_method) ~f:(fun attr ->
+let is_const_version pname_method (other_method : Struct.tenv_method) =
+  String.equal pname_method (Procname.get_method other_method.name)
+  && Option.exists (IRAttributes.load other_method.name) ~f:(fun attr ->
          attr.ProcAttributes.is_cpp_const_member_fun )
 
 
@@ -666,7 +666,7 @@ let add_need_dynamic_type_specialization needs execution_states =
             LatentInvalidAccess {latent_invalid_access with astate}
         | LatentSpecializedTypeIssue latent_specialized_type_issue ->
             let astate = update_summary latent_specialized_type_issue.astate in
-            LatentSpecializedTypeIssue {latent_specialized_type_issue with astate} ) )
+            LatentSpecializedTypeIssue {latent_specialized_type_issue with astate} ))
 
 
 let maybe_dynamic_type_specialization_is_needed already_specialized contradiction astate =
@@ -712,7 +712,7 @@ let maybe_dynamic_type_specialization_is_needed already_specialized contradictio
 
 let on_recursive_call ({InterproceduralAnalysis.proc_desc} as analysis_data) call_loc
     (call_flags : CallFlags.t) callee_pname ~actuals ~formals_opt astate =
-  let actuals_values = List.map actuals ~f:(fun ((actual, _), _) -> actual) in
+  let actuals_addr_hist = List.map actuals ~f:fst in
   if Procname.equal callee_pname (Procdesc.get_proc_name proc_desc) then (
     ( match formals_opt with
     | Some formals when List.length formals <> List.length actuals ->
@@ -726,32 +726,20 @@ let on_recursive_call ({InterproceduralAnalysis.proc_desc} as analysis_data) cal
            that end up here too; discard any possible cycle coming from them *)
         L.d_printfln "Suppressing recursive call to ObjC getter/setter %a" Procname.pp callee_pname
     | _ ->
-        if AbductiveDomain.has_reachable_in_inner_pre_heap actuals_values astate then
-          L.d_printfln
-            "heap progress made before recursive call to %a; unlikely to be an infinite recursion, \
-             suppressing report"
-            Procname.pp callee_pname
-        else
-          let is_call_with_same_values =
-            AbductiveDomain.are_same_values_as_pre_formals proc_desc actuals_values astate
-          in
-          PulseReport.report analysis_data ~is_suppressed:false ~latent:false
-            (MutualRecursionCycle
-               { cycle= PulseMutualRecursion.mk call_loc callee_pname actuals_values
-               ; location= call_loc
-               ; is_call_with_same_values } ) ) ;
+        let is_call_with_same_values =
+          AbductiveDomain.are_same_values_as_pre_formals proc_desc actuals_addr_hist astate
+        in
+        if Config.trace_mutual_recursion_cycle_checker then
+          L.progress
+            "@\nwe found a complete cycle from %a to itself@\nis_call_with_same_values returned %b"
+            Procname.pp callee_pname is_call_with_same_values ;
+        PulseReport.report analysis_data ~is_suppressed:false ~latent:false
+          (MutualRecursionCycle
+             { cycle= PulseMutualRecursion.mk call_loc callee_pname actuals_addr_hist
+             ; location= call_loc
+             ; is_call_with_same_values } ) ) ;
     astate )
-  else if
-    AbductiveDomain.has_reachable_in_inner_pre_heap
-      (List.map actuals ~f:(fun ((actual, _), _) -> actual))
-      astate
-  then (
-    L.d_printfln
-      "heap progress made before recursive call to %a; unlikely to be an infinite recursion, not \
-       recording the cycle"
-      Procname.pp callee_pname ;
-    astate )
-  else AbductiveDomain.add_recursive_call call_loc callee_pname actuals_values astate
+  else AbductiveDomain.add_recursive_call call_loc callee_pname actuals_addr_hist astate
 
 
 let check_uninit_method ({InterproceduralAnalysis.tenv} as analysis_data) call_loc callee_pname
@@ -778,7 +766,8 @@ let check_uninit_method ({InterproceduralAnalysis.tenv} as analysis_data) call_l
         true
     | Some {Struct.methods} ->
         let callee_name = Procname.get_method callee_pname in
-        List.exists methods ~f:(fun method_name ->
+        List.exists methods ~f:(fun (tenv_method : Struct.tenv_method) ->
+            let method_name = tenv_method.name in
             String.equal callee_name (Procname.get_method method_name) )
   in
   let skip_special_pname pname =

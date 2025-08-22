@@ -24,7 +24,10 @@ let get_location source_file impl pc =
 
 
 let get_start_location_heuristics =
-  let lines_to_find = 10 (* This is set by an arbitrary number. *) in
+  let lines_to_find =
+    10
+    (* This is set by an arbitrary number. *)
+  in
   (* [is_proc_line ~name line] checks two conditions:
      - [line] starts with [name] or [line] includes [" " ^ name].
      - The [name] found should be followed by a space, '<', '(', or end of line. *)
@@ -91,7 +94,7 @@ let get_field_name program static tenv cn fs =
   let {Struct.fields; statics} = JTransType.get_class_struct_typ program tenv cn in
   match
     List.find
-      ~f:(fun {Struct.name= fieldname} ->
+      ~f:(fun ({Struct.name= fieldname} : Struct.field) ->
         String.equal (retrieve_fieldname fieldname) (JBasics.fs_name fs) )
       (if static then statics else fields)
   with

@@ -169,7 +169,7 @@ module BackwardNodeTransferFunction (T : TransferFunctions) = struct
 end
 
 module DisjunctiveMetadata = struct
-  
+
   (** information about the analysis of a single procedure with [MakeDisjunctiveTransferFunctions] *)
   type t =
     { dropped_disjuncts: int
@@ -460,7 +460,8 @@ struct
     let filtered = List.filter l ~f in
     if
       List.is_empty filtered
-      && (* TODO(non-disj): once [nd] detects unreachability accurately we can replace the last
+      &&
+      (* TODO(non-disj): once [nd] detects unreachability accurately we can replace the last
             condition with something like [not (T.NonDisjDomain.is_executable nd)] that tests if we
             can carry on executing using the non-disjunctive state *)
       not (List.is_empty l)

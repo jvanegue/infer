@@ -96,7 +96,8 @@ let is_java_container_write =
         ["clear"; "ensureCapacity"; "put"; "putAll"; "remove"; "removeAt"; "setValueAt"]
     (* https://developer.android.com/reference/android/support/v4/util/SparseArrayCompat *)
     @ make_android_support_template "SparseArrayCompat" array_methods
-    @ (* https://developer.android.com/reference/android/util/SparseArray *)
+    @
+    (* https://developer.android.com/reference/android/util/SparseArray *)
     [ {default with classname= "android.util.SparseArray"; methods= array_methods}
     ; (* https://docs.oracle.com/javase/8/docs/api/java/util/List.html
          Only methods not in parent interface [Collection] are listed *)
@@ -141,7 +142,8 @@ let is_java_container_read =
       ; "valueAt" ]
     (* https://developer.android.com/reference/android/support/v4/util/SparseArrayCompat *)
     @ make_android_support_template "SparseArrayCompat" array_methods
-    @ (* https://developer.android.com/reference/android/util/SparseArray *)
+    @
+    (* https://developer.android.com/reference/android/util/SparseArray *)
     [ {default with classname= "android.util.SparseArray"; methods= array_methods}
     ; (* https://docs.oracle.com/javase/8/docs/api/java/util/List.html
          Only methods not in parent interface [Collection] are listed *)
@@ -237,7 +239,7 @@ let is_container_read tenv pn =
      treatment between std::map::operator[] and all other operator[]. *)
   | ObjC_Cpp _ | C _ ->
       (not (is_cpp_container_write pn)) && is_cpp_container_read pn
-  | Erlang _ | Hack _ | Block _ | Python _ ->
+  | Erlang _ | Hack _ | Block _ | Python _ | Swift _ ->
       false
 
 

@@ -153,6 +153,8 @@ let java_resource_release address memory = add_one address Attribute.JavaResourc
 
 let await_awaitable address memory = add_one address Attribute.AwaitedAwaitable memory
 
+let add_must_be_awaited address memory = add_one address Attribute.MustBeAwaited memory
+
 let csharp_resource_release address memory = add_one address Attribute.CSharpResourceReleased memory
 
 let in_reported_retain_cycle address memory = add_one address Attribute.InReportedRetainCycle memory
@@ -259,6 +261,10 @@ let is_copied_from_const_ref address attrs =
 
 let get_must_be_valid = get_attribute Attributes.get_must_be_valid
 
+let is_must_be_awaited address attrs =
+  Graph.find_opt address attrs |> Option.exists ~f:Attributes.is_must_be_awaited
+
+
 let get_must_not_be_tainted address memory =
   match Graph.find_opt address memory with
   | None ->
@@ -266,6 +272,8 @@ let get_must_not_be_tainted address memory =
   | Some attrs ->
       Attributes.get_must_not_be_tainted attrs
 
+
+let add_tainted address tainted memory = add_one address (Tainted tainted) memory
 
 let get_must_be_initialized = get_attribute Attributes.get_must_be_initialized
 
@@ -327,6 +335,12 @@ let is_std_moved address attrs =
 
 let is_std_vector_reserved address attrs =
   Graph.find_opt address attrs |> Option.exists ~f:Attributes.is_std_vector_reserved
+
+
+let get_unawaited_awaitable address attrs =
+  let open IOption.Let_syntax in
+  let* allocator, trace = get_attribute Attributes.get_allocated_not_freed address attrs in
+  match allocator with Attribute.Awaitable -> Some trace | _ -> None
 
 
 let get_last_lookup address attrs = get_attribute Attributes.get_last_lookup address attrs
@@ -404,6 +418,10 @@ module type S = sig
 
   val await_awaitable : key -> t -> t
 
+  val add_must_be_awaited : key -> t -> t
+
+  val get_unawaited_awaitable : key -> t -> Trace.t option
+
   val remove_hack_builder : key -> t -> t
 
   val set_hack_builder : key -> Attribute.Builder.t -> t -> t
@@ -437,10 +455,14 @@ module type S = sig
 
   val is_copied_from_const_ref : key -> t -> bool
 
+  val is_must_be_awaited : key -> t -> bool
+
   val get_must_be_valid :
     key -> t -> (Timestamp.t * Trace.t * Invalidation.must_be_valid_reason option) option
 
   val get_must_not_be_tainted : key -> t -> Attribute.TaintSink.t Attribute.TaintSinkMap.t
+
+  val add_tainted : key -> Attribute.TaintedSet.t -> t -> t
 
   val get_returned_from_unknown : key -> t -> AbstractValue.t list option
 

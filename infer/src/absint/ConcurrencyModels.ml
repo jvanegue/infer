@@ -158,8 +158,8 @@ end = struct
     let qname_str = QualifiedCppName.to_qual_string qname in
     match List.find lock_models ~f:(fun mdl -> String.equal qname_str mdl.classname) with
     | None ->
-        L.internal_error "is_recursive_lock_type: Could not find lock type %a@\n"
-          QualifiedCppName.pp qname ;
+        L.internal_error
+          "is_recursive_lock_type: Could not find lock type %s, will assume recursive@\n" qname_str ;
         true
     | Some mdl ->
         mdl.recursive
@@ -357,7 +357,8 @@ let is_android_lifecycle_method tenv pname =
            | ObjcProtocol _
            | PythonClass _
            | ObjcBlock _
-           | CFunction _ ->
+           | CFunction _
+           | SwiftClass _ ->
                false
            | JavaClass java_class_name ->
                JavaClassName.package java_class_name
@@ -377,7 +378,7 @@ let is_android_lifecycle_method tenv pname =
   in
   let test_pname pname =
     match (pname : Procname.t) with
-    | C _ | Erlang _ | Hack _ | Block _ | ObjC_Cpp _ | CSharp _ | Python _ ->
+    | C _ | Erlang _ | Hack _ | Block _ | ObjC_Cpp _ | CSharp _ | Python _ | Swift _ ->
         false
     | Java _ ->
         method_starts_with_on pname
@@ -398,8 +399,9 @@ let find_override_or_superclass_annotated is_annot tenv proc_name =
         Option.bind struct_opt ~f:(fun ({Struct.methods} as str) ->
             if Annotations.struct_typ_has_annot str is_annot then Some (SuperClass name)
             else
-              List.find_map methods ~f:(fun pn ->
-                  if is_override pn && is_annotated pn then Some (Override pn) else None ) ) )
+              List.find_map methods ~f:(fun (pn : Struct.tenv_method) ->
+                  if is_override pn.name && is_annotated pn.name then Some (Override pn.name)
+                  else None ) ) )
   in
   if is_annotated proc_name then Some DirectlyAnnotated
   else Procname.get_class_type_name proc_name |> Option.bind ~f:find_override_or_superclass_aux

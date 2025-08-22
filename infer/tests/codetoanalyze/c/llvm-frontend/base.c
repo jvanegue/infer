@@ -6,6 +6,7 @@
  */
 #include "my_lib.h"
 #include <stdlib.h>
+#include <assert.h>
 
 int main() { return 0; }
 int* test() { return NULL; }
@@ -62,4 +63,82 @@ int test9() {
   int ret = *ptr;
   free(ptr);
   return ret;
+}
+
+int test10() {
+  int sum = 0;
+  for (int i = 0; i < 3; i++) {
+    sum += i;
+  }
+  assert(sum != 3);
+  return sum;
+}
+
+void test11() {}
+
+void my_fun(const char* str);
+
+void test12() {
+  my_fun("hello");
+  const char* str;
+  my_fun(str);
+}
+
+int test13() {
+  int i = 10;
+  while (i >= 8) {
+    i--;
+  }
+  assert(i != 7);
+  return i;
+}
+
+struct Cat {
+  char* name;
+  int age;
+};
+
+struct Person {
+  char* name;
+  char* address;
+  int age;
+  int height;
+  struct Cat* cat;
+};
+
+int get_age(struct Person* person) { return person->age; }
+
+int test14() {
+  struct Person* person = malloc(sizeof(struct Person));
+  if (person) {
+    person->age = 30;
+    person->name = "John";
+    int age = get_age(person);
+    free(person);
+    assert(age != 30);
+    return age;
+  }
+  return 0;
+}
+
+int test15() {
+  struct Person person = {.age = 30, .name = "John"};
+  int age = get_age(&person);
+  assert(age != 30);
+  return age;
+}
+
+int test16(struct Person* person, struct Cat* cat) {
+  cat->age = 10;
+  person->age = 30;
+  person->name = "John";
+  person->cat = cat;
+  int age = person->cat->age;
+  assert(age != 10);
+  return age;
+}
+
+int test17(int b) {
+  int z = b ? 1 : 0;
+  return z;
 }

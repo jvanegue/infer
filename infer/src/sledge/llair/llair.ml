@@ -11,7 +11,7 @@ open! NS
 
 [@@@warning "+missing-record-field-pattern"]
 
-module Loc = Loc
+module Loc = LairLoc
 module Typ = LlairTyp
 module Reg = Reg
 module Exp = LlairExp
@@ -43,16 +43,16 @@ module Builtin = Bij (Builtins)
 module Intrinsic = Bij (Intrinsics)
 
 type inst =
-  | Move of {reg_exps: (Reg.t * Exp.t) iarray; loc: Loc.t}
-  | Load of {reg: Reg.t; ptr: Exp.t; len: Exp.t; loc: Loc.t}
-  | Store of {ptr: Exp.t; exp: Exp.t; len: Exp.t; loc: Loc.t}
-  | AtomicRMW of {reg: Reg.t; ptr: Exp.t; exp: Exp.t; len: Exp.t; loc: Loc.t}
+  | Move of {reg_exps: (Reg.t * Exp.t) iarray; loc: LairLoc.t}
+  | Load of {reg: Reg.t; ptr: Exp.t; len: Exp.t; loc: LairLoc.t}
+  | Store of {ptr: Exp.t; exp: Exp.t; len: Exp.t; loc: LairLoc.t}
+  | AtomicRMW of {reg: Reg.t; ptr: Exp.t; exp: Exp.t; len: Exp.t; loc: LairLoc.t}
   | AtomicCmpXchg of
-      {reg: Reg.t; ptr: Exp.t; cmp: Exp.t; exp: Exp.t; len: Exp.t; len1: Exp.t; loc: Loc.t}
-  | Alloc of {reg: Reg.t; num: Exp.t; len: int; loc: Loc.t}
-  | Free of {ptr: Exp.t; loc: Loc.t}
-  | Nondet of {reg: Reg.t option; msg: string; loc: Loc.t}
-  | Builtin of {reg: Reg.t option; name: Builtin.t; args: Exp.t iarray; loc: Loc.t}
+      {reg: Reg.t; ptr: Exp.t; cmp: Exp.t; exp: Exp.t; len: Exp.t; len1: Exp.t; loc: LairLoc.t}
+  | Alloc of {reg: Reg.t; num: Exp.t; len: int; loc: LairLoc.t}
+  | Free of {ptr: Exp.t; loc: LairLoc.t}
+  | Nondet of {reg: Reg.t option; msg: string; loc: LairLoc.t}
+  | Builtin of {reg: Reg.t option; name: Builtin.t; args: Exp.t iarray; loc: LairLoc.t}
 [@@deriving compare, equal, sexp_of]
 
 type cmnd = inst iarray [@@deriving compare, equal, sexp_of]
@@ -74,16 +74,16 @@ and 'a call =
   ; areturn: Reg.t option
   ; return: jump
   ; throw: jump option
-  ; loc: Loc.t }
+  ; loc: LairLoc.t }
 
 and term =
-  | Switch of {key: Exp.t; tbl: (Exp.t * jump) iarray; els: jump; loc: Loc.t}
-  | Iswitch of {ptr: Exp.t; tbl: jump iarray; loc: Loc.t}
+  | Switch of {key: Exp.t; tbl: (Exp.t * jump) iarray; els: jump; loc: LairLoc.t}
+  | Iswitch of {ptr: Exp.t; tbl: jump iarray; loc: LairLoc.t}
   | Call of callee call
-  | Return of {exp: Exp.t option; loc: Loc.t}
-  | Throw of {exc: Exp.t; loc: Loc.t}
-  | Abort of {loc: Loc.t}
-  | Unreachable
+  | Return of {exp: Exp.t option; loc: LairLoc.t}
+  | Throw of {exc: Exp.t; loc: LairLoc.t}
+  | Abort of {loc: LairLoc.t}
+  | Unreachable of {loc: LairLoc.t}
 
 and block =
   { lbl: label
@@ -100,7 +100,7 @@ and func =
   ; fthrow: Reg.t
   ; locals: Reg.Set.t
   ; entry: block
-  ; loc: Loc.t }
+  ; loc: LairLoc.t }
 
 (* compare *)
 
@@ -146,17 +146,17 @@ with type jump := jump
     ; areturn: Reg.t option
     ; return: jump
     ; throw: jump option
-    ; loc: Loc.t }
+    ; loc: LairLoc.t }
   [@@deriving compare, equal]
 
   type nonrec term = term =
-    | Switch of {key: Exp.t; tbl: (Exp.t * jump) iarray; els: jump; loc: Loc.t}
-    | Iswitch of {ptr: Exp.t; tbl: jump iarray; loc: Loc.t}
+    | Switch of {key: Exp.t; tbl: (Exp.t * jump) iarray; els: jump; loc: LairLoc.t}
+    | Iswitch of {ptr: Exp.t; tbl: jump iarray; loc: LairLoc.t}
     | Call of callee call
-    | Return of {exp: Exp.t option; loc: Loc.t}
-    | Throw of {exc: Exp.t; loc: Loc.t}
-    | Abort of {loc: Loc.t}
-    | Unreachable
+    | Return of {exp: Exp.t option; loc: LairLoc.t}
+    | Throw of {exc: Exp.t; loc: LairLoc.t}
+    | Abort of {loc: LairLoc.t}
+    | Unreachable of {loc: LairLoc.t}
   [@@deriving compare, equal]
 end
 
@@ -190,24 +190,24 @@ let sexp_of_call {callee; typ; actuals; areturn; return; throw; loc} =
       ; areturn: Reg.t option
       ; return: jump
       ; throw: jump option
-      ; loc: Loc.t }]
+      ; loc: LairLoc.t }]
 
 
 let sexp_of_term = function
   | Switch {key; tbl; els; loc} ->
-      sexp_ctor "Switch" [%sexp {key: Exp.t; tbl: (Exp.t * jump) iarray; els: jump; loc: Loc.t}]
+      sexp_ctor "Switch" [%sexp {key: Exp.t; tbl: (Exp.t * jump) iarray; els: jump; loc: LairLoc.t}]
   | Iswitch {ptr; tbl; loc} ->
-      sexp_ctor "Iswitch" [%sexp {ptr: Exp.t; tbl: jump iarray; loc: Loc.t}]
+      sexp_ctor "Iswitch" [%sexp {ptr: Exp.t; tbl: jump iarray; loc: LairLoc.t}]
   | Call call ->
       sexp_of_call call
   | Return {exp; loc} ->
-      sexp_ctor "Return" [%sexp {exp: Exp.t option; loc: Loc.t}]
+      sexp_ctor "Return" [%sexp {exp: Exp.t option; loc: LairLoc.t}]
   | Throw {exc; loc} ->
-      sexp_ctor "Throw" [%sexp {exc: Exp.t; loc: Loc.t}]
+      sexp_ctor "Throw" [%sexp {exc: Exp.t; loc: LairLoc.t}]
   | Abort {loc} ->
-      sexp_ctor "Abort" [%sexp {loc: Loc.t}]
-  | Unreachable ->
-      Sexp.Atom "Unreachable"
+      sexp_ctor "Abort" [%sexp {loc: LairLoc.t}]
+  | Unreachable {loc} ->
+      sexp_ctor "Unreachable" [%sexp {loc: LairLoc.t}]
 
 
 let sexp_of_block {lbl; cmnd; term; parent; sort_index; goal_distance} =
@@ -228,12 +228,13 @@ let sexp_of_func {name; formals; freturn; fthrow; locals; entry; loc} =
     ; fthrow: Reg.t
     ; locals: Reg.Set.t
     ; entry: block
-    ; loc: Loc.t }]
+    ; loc: LairLoc.t }]
 
 
 type functions = func FuncName.Map.t [@@deriving sexp_of]
 
-type program = {globals: GlobalDefn.t iarray; functions: functions} [@@deriving sexp_of]
+type program = {globals: GlobalDefn.t iarray; functions: functions; typ_defns: Typ.t list}
+[@@deriving sexp_of]
 
 (* pp *)
 
@@ -242,27 +243,27 @@ let pp_inst fs inst =
   match inst with
   | Move {reg_exps; loc} ->
       let regs, exps = IArray.split reg_exps in
-      pf "@[<2>@[%a@]@ := @[%a@];@]\t%a" (IArray.pp ",@ " Reg.pp) regs (IArray.pp ",@ " Exp.pp) exps
-        Loc.pp loc
+      pf "@[<2>move @[%a@]@ := @[%a@];@]\t%a" (IArray.pp ",@ " Reg.pp) regs (IArray.pp ",@ " Exp.pp)
+        exps LairLoc.pp loc
   | Load {reg; ptr; len; loc} ->
-      pf "@[<2>%a@ := load %a@ %a;@]\t%a" Reg.pp reg Exp.pp len Exp.pp ptr Loc.pp loc
+      pf "@[<2>%a@ := load %a@ %a;@]\t%a" Reg.pp reg Exp.pp len Exp.pp ptr LairLoc.pp loc
   | Store {ptr; exp; len; loc} ->
-      pf "@[<2>store %a@ %a@ %a;@]\t%a" Exp.pp len Exp.pp ptr Exp.pp exp Loc.pp loc
+      pf "@[<2>store %a@ %a@ %a;@]\t%a" Exp.pp len Exp.pp ptr Exp.pp exp LairLoc.pp loc
   | AtomicRMW {reg; ptr; exp; len; loc} ->
       pf "@[<2>%a@ := atomic_rmw %a@ %a@ %a;@]\t%a" Reg.pp reg Exp.pp len Exp.pp ptr Exp.pp exp
-        Loc.pp loc
+        LairLoc.pp loc
   | AtomicCmpXchg {reg; ptr; cmp; exp; len; len1; loc} ->
       pf "@[<2>%a@ := atomic_cmpxchg %a,%a@ %a@ %a@ %a;@]\t%a" Reg.pp reg Exp.pp len Exp.pp len1
-        Exp.pp ptr Exp.pp cmp Exp.pp exp Loc.pp loc
+        Exp.pp ptr Exp.pp cmp Exp.pp exp LairLoc.pp loc
   | Alloc {reg; num; len; loc} ->
-      pf "@[<2>%a@ := alloc [%a x %i];@]\t%a" Reg.pp reg Exp.pp num len Loc.pp loc
+      pf "@[<2>%a@ := alloc [%a x %i];@]\t%a" Reg.pp reg Exp.pp num len LairLoc.pp loc
   | Free {ptr; loc} ->
-      pf "@[<2>free %a;@]\t%a" Exp.pp ptr Loc.pp loc
+      pf "@[<2>free %a;@]\t%a" Exp.pp ptr LairLoc.pp loc
   | Nondet {reg; msg; loc} ->
-      pf "@[<2>%anondet \"%s\";@]\t%a" (Option.pp "%a := " Reg.pp) reg msg Loc.pp loc
+      pf "@[<2>%anondet \"%s\";@]\t%a" (Option.pp "%a := " Reg.pp) reg msg LairLoc.pp loc
   | Builtin {reg; name; args; loc} ->
       pf "@[<2>%abuiltin@ %a(@,@[<hv>%a@]);@]\t%a" (Option.pp "%a := " Reg.pp) reg Builtin.pp name
-        (IArray.pp ",@ " Exp.pp) args Loc.pp loc
+        (IArray.pp ",@ " Exp.pp) args LairLoc.pp loc
 
 
 let pp_actuals pp_actual fs actuals =
@@ -292,7 +293,7 @@ let pp_call fs {callee; typ= _; actuals; areturn; return; throw; loc} =
   Format.fprintf fs "@[<2>@[<7>%acall @[<2>%a%a@]@]@ @[returnto %a%a;@]@]\t%a"
     (Option.pp "%a := " Reg.pp) areturn pp_callee callee (pp_actuals Exp.pp) actuals pp_jump return
     (Option.pp "@ throwto %a" pp_jump)
-    throw Loc.pp loc
+    throw LairLoc.pp loc
 
 
 let pp_term fs term =
@@ -302,28 +303,29 @@ let pp_term fs term =
   | Switch {key; tbl; els; loc} -> (
     match IArray.to_array tbl with
     | [||] ->
-        pf "@[%a@]\t%a" pp_goto els Loc.pp loc
+        pf "@[%a@]\t%a" pp_goto els LairLoc.pp loc
     | [|(z, jmp)|] when Exp.is_false z ->
-        pf "@[if %a@;<1 2>%a@ @[else@;<1 2>%a@]@]\t%a" Exp.pp key pp_goto els pp_goto jmp Loc.pp loc
+        pf "@[if %a@;<1 2>%a@ @[else@;<1 2>%a@]@]\t%a" Exp.pp key pp_goto els pp_goto jmp LairLoc.pp
+          loc
     | _ ->
         pf "@[<2>switch %a@ @[%a@ else: %a@]@]\t%a" Exp.pp key
           (IArray.pp "@ " (fun fs (case, jmp) ->
                Format.fprintf fs "%a: %a" Exp.pp case pp_goto jmp ) )
-          tbl pp_goto els Loc.pp loc )
+          tbl pp_goto els LairLoc.pp loc )
   | Iswitch {ptr; tbl; loc} ->
       pf "@[<2>iswitch %a@ @[<hv>%a@]@]\t%a" Exp.pp ptr
         (IArray.pp "@ " (fun fs jmp -> Format.fprintf fs "%s: %a" jmp.dst.lbl pp_goto jmp))
-        tbl Loc.pp loc
+        tbl LairLoc.pp loc
   | Call call ->
       pp_call fs call
   | Return {exp; loc} ->
-      pf "@[<2>return%a@]\t%a" (Option.pp " %a" Exp.pp) exp Loc.pp loc
+      pf "@[<2>return%a@]\t%a" (Option.pp " %a" Exp.pp) exp LairLoc.pp loc
   | Throw {exc; loc} ->
-      pf "@[<2>throw %a@]\t%a" Exp.pp exc Loc.pp loc
+      pf "@[<2>throw %a@]\t%a" Exp.pp exc LairLoc.pp loc
   | Abort {loc} ->
-      pf "@[<2>abort@]\t%a" Loc.pp loc
-  | Unreachable ->
-      pf "unreachable"
+      pf "@[<2>abort@]\t%a" LairLoc.pp loc
+  | Unreachable {loc} ->
+      pf "@[<2>unreachable@]\t%a" LairLoc.pp loc
 
 
 let pp_cmnd = IArray.pp "@ " pp_inst
@@ -339,20 +341,23 @@ let pp_block fs {lbl; cmnd; term; parent= _; sort_index; goal_distance= _} =
 let rec dummy_block =
   { lbl= "dummy"
   ; cmnd= IArray.empty
-  ; term= Unreachable
+  ; term= Unreachable {loc= LairLoc.none}
   ; parent= dummy_func
   ; sort_index= 0
   ; goal_distance= Int.max_int }
 
 
 and dummy_func =
-  { name= FuncName.mk (Typ.pointer ~elt:(Typ.function_ ~args:IArray.empty ~return:None)) "dummy"
+  { name=
+      FuncName.mk
+        (Typ.pointer ~elt:(Typ.function_ ~args:IArray.empty ~return:None))
+        "dummy" ~unmangled_name:None
   ; formals= IArray.empty
   ; freturn= None
   ; fthrow= Reg.mk Typ.ptr 0 "dummy"
   ; locals= Reg.Set.empty
   ; entry= dummy_block
-  ; loc= Loc.none }
+  ; loc= LairLoc.none }
 
 
 (** Instructions *)
@@ -487,7 +492,7 @@ module Term = struct
           assert (Bool.equal (Option.is_some exp) (Option.is_some parent.freturn))
       | None ->
           assert true )
-    | Throw _ | Abort _ | Unreachable ->
+    | Throw _ | Abort _ | Unreachable _ ->
         assert true
 
 
@@ -503,8 +508,10 @@ module Term = struct
 
   let iswitch ~ptr ~tbl ~loc = Iswitch {ptr; tbl; loc} |> check invariant
 
-  let call ~name ~typ ~actuals ~areturn ~return ~throw ~loc =
-    let target = {func= {dummy_func with name= FuncName.mk typ name}; recursive= false} in
+  let call ~unmangled_name ~name ~typ ~actuals ~areturn ~return ~throw ~loc =
+    let target =
+      {func= {dummy_func with name= FuncName.mk ~unmangled_name typ name}; recursive= false}
+    in
     let cal = {callee= Direct target; typ; actuals; areturn; return; throw; loc} in
     let k = Call cal in
     (k |> check invariant, fun ~callee -> target.func <- callee)
@@ -529,7 +536,12 @@ module Term = struct
 
   let abort ~loc = Abort {loc} |> check invariant
 
-  let unreachable = Unreachable |> check invariant
+  let unreachable ?loc () =
+    let unreachable =
+      match loc with Some loc -> Unreachable {loc} | None -> Unreachable {loc= LairLoc.none}
+    in
+    check invariant unreachable
+
 
   let loc = function
     | Switch {loc; _}
@@ -537,17 +549,16 @@ module Term = struct
     | Call {loc; _}
     | Return {loc; _}
     | Throw {loc; _}
-    | Abort {loc; _} ->
+    | Abort {loc; _}
+    | Unreachable {loc} ->
         loc
-    | Unreachable ->
-        Loc.none
 
 
   let union_locals term vs =
     match term with
     | Call {areturn; _} ->
         Reg.Set.add_option areturn vs
-    | Switch _ | Iswitch _ | Return _ | Throw _ | Abort _ | Unreachable ->
+    | Switch _ | Iswitch _ | Return _ | Throw _ | Abort _ | Unreachable _ ->
         vs
 end
 
@@ -615,6 +626,7 @@ module IP = struct
         | `_ZN5folly13usingJEMallocEv
         | `aligned_alloc
         | `dallocx
+        | `expect
         | `mallctl
         | `mallctlbymib
         | `mallctlnametomib
@@ -678,7 +690,7 @@ module Func = struct
 
   let hash f = Poly.hash f.name
 
-  let undefined_entry = Block.mk ~lbl:"undefined" ~cmnd:IArray.empty ~term:Term.unreachable
+  let undefined_entry = Block.mk ~lbl:"undefined" ~cmnd:IArray.empty ~term:(Term.unreachable ())
 
   let mk_undefined ~name ~formals ~freturn ~fthrow ~loc =
     let locals = Reg.Set.empty in
@@ -702,7 +714,7 @@ module Func = struct
               IArray.fold ~f tbl s
           | Call {return; throw; _} ->
               Option.fold ~f throw (f return s)
-          | Return _ | Throw _ | Abort _ | Unreachable ->
+          | Return _ | Throw _ | Abort _ | Unreachable _ ->
               s
         in
         f blk s
@@ -730,15 +742,14 @@ module Func = struct
     let {name; formals; freturn; entry; loc; _} = func in
     let {cmnd; term; sort_index; _} = entry in
     let pp_if cnd str fs = if cnd then Format.fprintf fs str in
-    Format.fprintf fs "@[<v>@[<v>%a%a@[<2>%a%a@]%t@]" (Option.pp "%a " Typ.pp)
-      (match FuncName.typ name with Pointer {elt= Function {return; _}} -> return | _ -> None)
+    Format.fprintf fs "@[<v>@[<v>%a  %a@[<2>%a%a@]%t@]" Typ.pp (FuncName.typ name)
       (Option.pp " %a := " Reg.pp) freturn FuncName.pp name (pp_actuals pp_formal) formals
       (fun fs ->
         if is_undefined func then Format.fprintf fs " #%i@]" sort_index
         else
           let cfg = List.sort ~cmp:Block.compare (List.tl_exn (entry_cfg func)) in
-          Format.fprintf fs " { #%i %a@;<1 4>@[<v>%a@ %a@]%t%a@]@ }" sort_index Loc.pp loc pp_cmnd
-            cmnd Term.pp term
+          Format.fprintf fs " { #%i %a@;<1 4>@[<v>%a@ %a@]%t%a@]@ }" sort_index LairLoc.pp loc
+            pp_cmnd cmnd Term.pp term
             (pp_if (not (List.is_empty cfg)) "@ @   ")
             (List.pp "@\n@\n  " Block.pp) cfg )
 
@@ -815,7 +826,7 @@ module Func = struct
           jump' return ;
           Option.iter ~f:jump' throw ;
           None
-      | Return _ | Throw _ | Abort _ | Unreachable ->
+      | Return _ | Throw _ | Abort _ | Unreachable _ ->
           None
     in
     resolve_parent_and_jumps Block_label.Set.empty entry |> ignore ;
@@ -865,7 +876,7 @@ let set_derived_metadata functions =
                 () ) ;
             jump return ;
             Option.iter ~f:jump throw
-        | Return _ | Throw _ | Abort _ | Unreachable ->
+        | Return _ | Throw _ | Abort _ | Unreachable _ ->
             () ) ;
         BlockQ.enqueue_back_exn tips_to_roots src ()
     in
@@ -899,15 +910,16 @@ module Program = struct
              Global.compare g1.GlobalDefn.name g2.GlobalDefn.name ) ) )
 
 
-  let mk ~globals ~functions =
-    {globals= IArray.of_list_rev globals; functions= set_derived_metadata functions}
+  let mk ~globals ~functions ~typ_defns =
+    {globals= IArray.of_list_rev globals; functions= set_derived_metadata functions; typ_defns}
     |> check invariant
 
 
-  let pp fs {globals; functions} =
-    Format.fprintf fs "@[<v>@[%a@]@ @ @ @[%a@]@]"
+  let pp fs {globals; functions; typ_defns} =
+    Format.fprintf fs "@[<v>@[%a@]@ @ @ @[%a@]@ @ @ @[%a@]@]"
       (IArray.pp "@\n@\n" GlobalDefn.pp)
       globals (List.pp "@\n@\n" Func.pp)
       ( FuncName.Map.values functions |> Iter.to_list
       |> List.sort ~cmp:(fun x y -> compare_block x.entry y.entry) )
+      (List.pp "@\n@\n" Typ.pp) typ_defns
 end

@@ -11,7 +11,7 @@ module L = Logging
 module Hashtbl = Stdlib.Hashtbl
 
 module Lang = struct
-  type t = C | Hack | Java | Python [@@deriving equal]
+  type t = C | Hack | Java | Python | Rust | Swift [@@deriving equal]
 
   let of_string s =
     match String.lowercase s with
@@ -23,11 +23,32 @@ module Lang = struct
         Some Python
     | "c" ->
         Some C
+    | "rust" ->
+        Some Rust
+    | "swift" ->
+        Some Swift
     | _ ->
         None
 
 
-  let to_string = function Java -> "java" | Hack -> "hack" | Python -> "python" | C -> "C"
+  let to_string = function
+    | Java ->
+        "java"
+    | Hack ->
+        "hack"
+    | Python ->
+        "python"
+    | C ->
+        "C"
+    | Rust ->
+        "Rust"
+    | Swift ->
+        "Swift"
+
+
+  let is_swift lang = match lang with Swift -> true | _ -> false
+
+  let is_c lang = match lang with C -> true | _ -> false
 end
 
 module Location = struct
@@ -96,6 +117,8 @@ module type NAME = sig
 
   val of_string : ?loc:Location.t -> string -> t
 
+  val to_string : t -> string
+
   val pp : F.formatter -> t -> unit
 
   val is_hack_init : t -> bool
@@ -124,6 +147,8 @@ module Name : NAME = struct
     {value= replace_dot_with_2colons str; loc}
 
 
+  let to_string {value} = value
+
   let pp fmt name = F.pp_print_string fmt name.value
 
   let is_hack_init {value} = String.equal value "_86pinit" || String.equal value "_86constinit"
@@ -143,6 +168,10 @@ let builtin_allocate = "__sil_allocate"
 let builtin_malloc = "__sil_malloc"
 
 let builtin_free = "__sil_free"
+
+let builtin_swift_alloc = "__sil_swift_alloc"
+
+let builtin_assert_fail = "__sil_assert_fail"
 
 let builtin_allocate_array = "__sil_allocate_array"
 
@@ -168,6 +197,8 @@ module BaseTypeName : sig
   val hack_generics : t
 
   val wildcard : t
+
+  val swift_tuple_class_name : t
 end = struct
   include Name
 
@@ -180,6 +211,8 @@ end = struct
   let llvm_builtin = {value= "$builtins"; loc= Location.Unknown}
 
   let hack_generics = {value= "HackGenerics"; loc= Location.Unknown}
+
+  let swift_tuple_class_name = {value= "__infer_tuple_class"; loc= Location.Unknown}
 end
 
 module TypeName : sig
@@ -208,6 +241,8 @@ module TypeName : sig
   val hack_generics : t
 
   val wildcard : t
+
+  val mk_swift_tuple_type_name : t list -> t
 end = struct
   module T = struct
     type t = {name: BaseTypeName.t; args: t list} [@@deriving compare, equal, hash]
@@ -222,6 +257,8 @@ end = struct
   let of_string_no_dot_escape str =
     {BaseTypeName.value= str; loc= Location.Unknown} |> from_basename
 
+
+  let mk_swift_tuple_type_name args = {name= BaseTypeName.swift_tuple_class_name; args}
 
   let rec pp fmt {name; args} =
     if List.is_empty args then BaseTypeName.pp fmt name
@@ -247,8 +284,13 @@ end
 module QualifiedProcName = struct
   type enclosing_class = TopLevel | Enclosing of TypeName.t [@@deriving equal, hash, compare]
 
-  type t = {enclosing_class: enclosing_class; name: ProcName.t} [@@deriving compare, equal, hash]
-  (* procedure name [name] is attached to the name space [enclosing_class] *)
+  module T = struct
+    type t = {enclosing_class: enclosing_class; name: ProcName.t} [@@deriving compare, equal, hash]
+    (* procedure name [name] is attached to the name space [enclosing_class] *)
+  end
+
+  include T
+  module Map = Stdlib.Map.Make (T)
 
   let pp_enclosing_class fmt = function
     | TopLevel ->
@@ -285,7 +327,16 @@ module QualifiedProcName = struct
         false
 
 
+  let is_llvm_init_tuple {enclosing_class; name} =
+    is_llvm_builtin {enclosing_class; name}
+    && ProcName.equal name (ProcName.of_string "llvm_init_tuple")
+
+
   let name {name} = name
+
+  let get_class_name name =
+    match name with {enclosing_class= Enclosing class_name} -> Some class_name | _ -> None
+
 
   let is_hack_init {name} = ProcName.is_hack_init name
 
@@ -294,7 +345,7 @@ module QualifiedProcName = struct
   end)
 end
 
-type qualified_fieldname = {enclosing_class: TypeName.t; name: FieldName.t}
+type qualified_fieldname = {enclosing_class: TypeName.t; name: FieldName.t} [@@deriving equal]
 (* field name [name] must be declared in type [enclosing_class] *)
 
 let pp_qualified_fieldname fmt ({enclosing_class; name} : qualified_fieldname) =
@@ -372,6 +423,24 @@ module Attr = struct
 
   let mk_closure_wrapper = {name= "closure_wrapper"; values= []; loc= Location.Unknown}
 
+  let mk_plain_name name = {name= "plain_name"; values= [name]; loc= Location.Unknown}
+
+  let mk_method_offset offset =
+    {name= "method_offset"; values= [Int.to_string offset]; loc= Location.Unknown}
+
+
+  let get_plain_name attr =
+    if String.equal attr.name "plain_name" then
+      match attr.values with [name] -> Some name | _ -> None
+    else None
+
+
+  let get_method_offset attr =
+    if String.equal attr.name "method_offset" then
+      match attr.values with [offset] -> Int.of_string_opt offset | _ -> None
+    else None
+
+
   let pp fmt {name; values} =
     if List.is_empty values then F.fprintf fmt ".%s" name
     else F.fprintf fmt ".%s = \"%a\"" name (Pp.comma_seq F.pp_print_string) values
@@ -428,6 +497,8 @@ module Typ = struct
 
 
   let mk_without_attributes typ = {typ; attributes= []}
+
+  let any_type_llvm = Struct (TypeName.of_string "ptr_elt")
 end
 
 module Ident : sig
@@ -539,9 +610,9 @@ module ProcDecl = struct
 
 
   let to_sig {qualified_name; formals_types} = function
-    | Some Lang.Hack ->
+    | Lang.Hack ->
         ProcSig.Hack {qualified_name; arity= Option.map formals_types ~f:List.length}
-    | Some Lang.Python | Some Lang.Java | Some Lang.C | None ->
+    | Lang.Python | Lang.Java | Lang.C | Lang.Rust | Lang.Swift ->
         ProcSig.Other {qualified_name}
 
 
@@ -573,7 +644,11 @@ module ProcDecl = struct
 
   let malloc_name = make_toplevel_name builtin_malloc Location.Unknown
 
+  let swift_alloc_name = make_toplevel_name builtin_swift_alloc Location.Unknown
+
   let free_name = make_toplevel_name builtin_free Location.Unknown
+
+  let assert_fail_name = make_toplevel_name builtin_assert_fail Location.Unknown
 
   let allocate_array_name = make_toplevel_name builtin_allocate_array Location.Unknown
 
@@ -696,6 +771,14 @@ module ProcDecl = struct
 
   let is_free_builtin qualified_name = QualifiedProcName.equal free_name qualified_name
 
+  let is_swift_alloc_builtin qualified_name =
+    QualifiedProcName.equal swift_alloc_name qualified_name
+
+
+  let is_assert_fail_builtin qualified_name =
+    QualifiedProcName.equal assert_fail_name qualified_name
+
+
   let is_allocate_array_builtin qualified_name =
     QualifiedProcName.equal allocate_array_name qualified_name
 
@@ -753,6 +836,7 @@ module ProcDecl = struct
   let builtins =
     let builtins =
       [ builtin_allocate
+      ; builtin_assert_fail
       ; builtin_malloc
       ; builtin_free
       ; builtin_allocate_array
@@ -767,20 +851,16 @@ module ProcDecl = struct
     builtins @ unop_builtins @ binop_builtins
 
 
-  let is_builtin (proc : QualifiedProcName.t) lang_opt =
-    match lang_opt with
-    | Some lang when Lang.equal lang C ->
+  let builtins_swift = [builtin_assert_fail; builtin_swift_alloc]
+
+  let is_builtin (proc : QualifiedProcName.t) lang =
+    match lang with
+    | Lang.C ->
         List.mem builtins ~equal:String.equal proc.name.value
+    | Lang.Swift ->
+        List.mem builtins_swift ~equal:String.equal proc.name.value
     | _ ->
         false
-end
-
-module Global = struct
-  type t = {name: VarName.t; typ: Typ.t; attributes: Attr.t list}
-
-  let pp fmt {name; typ; attributes} =
-    let annotated_typ : Typ.annotated = {typ; attributes} in
-    F.fprintf fmt "%a: %a" VarName.pp name Typ.pp_annotated annotated_typ
 end
 
 module FieldDecl = struct
@@ -836,15 +916,17 @@ module Exp = struct
   let call_virtual proc recv args = Call {proc; args= recv :: args; kind= Virtual}
 
   let call_sig qualified_name nb_args = function
-    | Some Lang.Hack ->
+    | Lang.Hack ->
         ProcSig.Hack {qualified_name; arity= Some nb_args}
-    | Some Lang.Python | Some Lang.Java | Some Lang.C | None ->
+    | Lang.Python | Lang.Java | Lang.C | Lang.Rust | Lang.Swift ->
         ProcSig.Other {qualified_name}
 
 
   let not exp = call_non_virtual (ProcDecl.of_unop Unop.LNot) [exp]
 
   let cast typ exp = call_non_virtual ProcDecl.cast_name [Typ typ; exp]
+
+  let is_zero_exp exp = match exp with Const (Int i) -> Z.equal i Z.zero | _ -> false
 
   let allocate_object typename =
     Call {proc= ProcDecl.allocate_object_name; args= [Typ (Typ.Struct typename)]; kind= NonVirtual}
@@ -1099,6 +1181,17 @@ module Node = struct
   module Set = Stdlib.Set.Make (T)
 end
 
+module Global = struct
+  type t = {name: VarName.t; typ: Typ.t; attributes: Attr.t list; init_exp: Exp.t option}
+
+  let pp fmt {name; typ; attributes; init_exp} =
+    let annotated_typ : Typ.annotated = {typ; attributes} in
+    if Option.is_some init_exp then
+      F.fprintf fmt "%a: %a = %a" VarName.pp name Typ.pp_annotated annotated_typ (Pp.option Exp.pp)
+        init_exp
+    else F.fprintf fmt "%a: %a" VarName.pp name Typ.pp_annotated annotated_typ
+end
+
 module ProcDesc = struct
   type t =
     { procdecl: ProcDecl.t
@@ -1211,11 +1304,19 @@ module Module = struct
 
   type t = {attrs: Attr.t list; decls: decl list; sourcefile: SourceFile.t}
 
-  let lang {attrs} =
+  let lang_opt {attrs} =
     let lang_attr =
       List.find attrs ~f:(fun (attr : Attr.t) -> String.equal attr.name Attr.source_language)
     in
     lang_attr |> Option.bind ~f:(fun x -> Attr.values x |> List.hd |> Option.bind ~f:Lang.of_string)
+
+
+  let lang module_ =
+    match lang_opt module_ with
+    | Some lang ->
+        lang
+    | None ->
+        L.die InternalError "source_language attribute is either missing or has no value"
 
 
   let pp_attr ~show_location fmt attr =

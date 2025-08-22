@@ -4,7 +4,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import asyncio
-
+from unknown import (_async_fun, async_fun)
 
 async def sleep(i):
     await asyncio.sleep(i)
@@ -164,7 +164,8 @@ async def use_py_get_iter_ok():
     return [a.f for a in x]
 
 
-async def gather_condition_awaitable_ok():
+# we decide that boolification of an unawaited awaitable is too dangerous
+async def gather_condition_awaitable_bad():
     awaitable = sleep()
     asyncio.gather(awaitable if awaitable else sleep())
 
@@ -183,6 +184,168 @@ async def concat_tuple_left_ok(l):
 
 async def concat_tuple_right_ok(l):
     return l + (sleep(), sleep())
+
+
+async def do_not_await_arg(arg):
+    pass
+
+
+async def await_arg(arg):
+    await arg
+
+
+async def use_await_arg_ok():
+    unawaited = async_fun()
+    await await_arg(unawaited)
+
+
+async def use_do_not_await_arg_bad():
+    unawaited = async_fun()
+    await do_not_await_arg(unawaited)
+
+
+async def use_await_arg_named_arg_ok():
+    unawaited = async_fun()
+    await await_arg(arg=unawaited)
+
+
+async def use_do_not_await_arg_named_arg_bad():
+    unawaited = async_fun()
+    await do_not_await_arg(arg=unawaited)
+
+
+async def do_not_await_arg2_with_star(arg1, *, arg2):
+    pass
+
+
+async def await_arg2_with_star(arg1, *, arg2):
+    await arg2
+
+
+async def use_await_arg2_named_arg_with_star_ok():
+    unawaited = async_fun()
+    await await_arg2_with_star(None, arg2=unawaited)
+
+
+async def FN_use_do_not_await_arg2_named_arg_with_star_bad():
+    unawaited = async_fun()
+    await do_not_await_arg2_with_star(None, arg2=unawaited)
+
+
+def get_option_awaitable(b):
+    if b:
+        return asyncio.sleep(1)
+    else:
+        return None
+
+
+async def FP_3_12_call_get_option_awaitable_eq_test_none_ok(b):
+    unawaited = get_option_awaitable(b)
+    if unawaited is None:
+        return None
+    return await unawaited
+
+
+async def call_get_option_awaitable_eq_test_none_bad(b):
+    unawaited = get_option_awaitable(b)
+    if unawaited is None:
+        return await unawaited
+
+
+async def async_naming_convention_test1_bad():
+    _async_fun()
+
+
+async def async_naming_convention_test1_ok():
+    await _async_fun()
+
+
+async def async_naming_convention_test2_bad():
+    async_fun()
+
+
+async def async_naming_convention_test2_ok():
+    await async_fun()
+
+class C:
+    async def async_instance_method(self):
+        pass
+
+    async def async_naming_convention_test3_bad(self):
+        self.async_instance_method()
+
+
+    async def async_naming_convention_test3_ok():
+        await self.async_instance_method()
+
+
+    async def _async_private_instance_method(self):
+        pass
+
+    async def async_naming_convention_test4_bad(self):
+        self._async_private_instance_method()
+
+
+    async def async_naming_convention_test4_ok():
+        await self._async_private_instance_method()
+
+
+async def iter_arg_bad(f):
+    iter = async_fun()
+    for i in iter:
+        f(i)
+    return iter
+
+
+async def iter_arg_ok(f):
+    iter = await async_fun()
+    for i in iter:
+        f(i)
+    return iter
+
+
+def my_iter(f, l):
+    for x in l:
+        f(x)
+
+
+async def my_iter_arg_bad(f):
+    l = async_fun()
+    my_iter(f, l)
+    return l
+
+
+async def my_iter_arg_ok(f):
+    l = await async_fun()
+    my_iter(f, l)
+    return l
+
+
+async def FN_3_10_none_test_bad():
+    opt = async_fun()
+    if opt is None:
+        do()
+    return opt
+
+
+async def not_none_test_bad():
+    opt = async_fun()
+    if opt is not None:
+        do()
+    return opt
+
+
+async def none_test_ok():
+    opt = await async_fun()
+    if opt is None:
+        do()
+    return opt
+
+async def not_none_test_ok():
+    opt = await async_fun()
+    if opt is not None:
+        do()
+    return opt
 
 
 def main_ok():

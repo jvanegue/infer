@@ -188,10 +188,15 @@ module Hack : sig
   val belongs_to_static_companion : t -> bool
 end
 
-module Python : sig
-  type t = private {module_name: PythonClassName.t; function_name: string}
+module Swift : sig
+  type t =
+    | ClassMethod of {class_name: Typ.Name.t; method_name: Mangled.t}
+    | Function of {function_name: Mangled.t}
+  [@@deriving compare, equal, yojson_of, sexp, hash, normalize]
 
-  val get_module_name_as_a_string : t -> string
+  val mk_function : Mangled.t -> t
+
+  val mk_class_method : Typ.Name.t -> Mangled.t -> t
 end
 
 (** Type of procedure names. *)
@@ -203,7 +208,8 @@ type t =
   | Hack of Hack.t
   | Java of Java.t
   | ObjC_Cpp of ObjC_Cpp.t
-  | Python of Python.t
+  | Python of PythonProcname.t
+  | Swift of Swift.t
 [@@deriving compare, yojson_of, sexp, hash, normalize]
 
 val compare_name : t -> t -> int
@@ -262,7 +268,7 @@ module HashQueue : Hash_queue.S with type key = t
 
 module HashSet : HashSet.S with type elt = t
 
-module Cache : Concurrent.CacheS with type HQ.key = t
+module Cache : Concurrent.CacheS with type key = t
 
 (** Maps from proc names. *)
 module Map : PrettyPrintable.PPMap with type key = t
@@ -311,10 +317,14 @@ val make_objc_copy : Typ.Name.t -> t
 (** Create a Objective-C copy name. *)
 
 val make_objc_copyWithZone : is_mutable:bool -> Typ.Name.t -> t
-(** Create an Objective-C method for copyWithZone: or mutableCopyWithZone: according to is_mutable. *)
+(** Create an Objective-C method for copyWithZone: or mutableCopyWithZone: according to is_mutable.
+*)
 
 val make_python : module_name:PythonClassName.t -> function_name:string -> t
 (** Create a Python procedure name. *)
+
+val make_python_builtin : PythonProcname.builtin -> t
+(** Create a Python builtin name. *)
 
 val empty_block : t
 (** Empty block name. *)
@@ -365,7 +375,8 @@ val objc_cpp_replace_method_name : t -> string -> t
 
 val is_static : t -> bool option
 (** Check if a procedure is a static class method or not. If the procedure is not a class method or
-    is unknown to be static, it returns [None]. For now, this checking does not work on C++ methods. *)
+    is unknown to be static, it returns [None]. For now, this checking does not work on C++ methods.
+*)
 
 val get_global_name_of_initializer : t -> string option
 (** Return the name of the global for which this procedure is the initializer if this is an
@@ -466,7 +477,8 @@ val erlang_call_unqualified : arity:int -> t
 
 val erlang_call_qualified : arity:int -> t
 (** Same as [erlang_call_unqualified] but is expected to have an erlang module name as the first
-    parameter, and the function name as second. [arity] is (still) the erlang arity of the function. *)
+    parameter, and the function name as second. [arity] is (still) the erlang arity of the function.
+*)
 
 val is_erlang_call_unqualified : t -> bool
 

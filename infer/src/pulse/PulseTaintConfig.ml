@@ -183,6 +183,7 @@ module Unit = struct
     | Block of {name: string}
     | BlockNameRegex of {name_regex: Str.regexp; exclude_in: string list option}
     | Allocation of {class_name: string}
+    | BuiltinName of {name: string}
 
   let pp_procedure_matcher f procedure_matcher =
     match procedure_matcher with
@@ -228,6 +229,8 @@ module Unit = struct
         F.fprintf f "Block regex"
     | Allocation {class_name} ->
         F.fprintf f "allocation %s" class_name
+    | BuiltinName {name} ->
+        F.fprintf f "builtin %s" name
 
 
   type field_matcher =
@@ -295,9 +298,10 @@ module Unit = struct
         \ \"annotation_values\": %a, \n\
         \ \"block_passed_to\": %a, \n\
         \ \"block_passed_to_regex\": %a, \n\
-        \ \"allocation\": %a" (Pp.option F.pp_print_string) matcher.procedure
-        (Pp.option F.pp_print_string) matcher.procedure_regex (Pp.option F.pp_print_string)
-        matcher.class_name_regex
+        \ \"allocation\": %a, \n\
+        \ \"builtin\": %a"
+        (Pp.option F.pp_print_string) matcher.procedure (Pp.option F.pp_print_string)
+        matcher.procedure_regex (Pp.option F.pp_print_string) matcher.class_name_regex
         (Pp.option (Pp.seq ~sep:"," F.pp_print_string))
         matcher.class_names (Pp.option F.pp_print_string) matcher.class_with_annotation
         (Pp.option (Pp.seq ~sep:"," F.pp_print_string))
@@ -309,7 +313,7 @@ module Unit = struct
         matcher.overrides_of_class_with_annotation (Pp.option F.pp_print_string)
         matcher.method_with_annotation (Pp.option F.pp_print_string) matcher.block_passed_to
         (Pp.option F.pp_print_string) matcher.block_passed_to_regex (Pp.option F.pp_print_string)
-        matcher.allocation
+        matcher.allocation (Pp.option F.pp_print_string) matcher.builtin
     in
     F.fprintf f
       "To build a procedure matcher, exactly one of \n\
@@ -321,6 +325,7 @@ module Unit = struct
       \ \"block_passed_to_regex\", \n\
       \ \"method_with_annotation\", \n\
       \ \"allocation\" or \n\
+      \ \"builtin\" or \n\
       \ \"overrides_of_class_with_annotation\" must be provided, \n\
        or else \"class_names\" and \"method_names\" must be provided, \n\
        or else \"class_names\" and \"procedure_regex\" must be provided, \n\
@@ -331,7 +336,8 @@ module Unit = struct
        or else \"class_with_annotation\", \"class_name_regex\" and \"procedure_regex\" must be \
        provided, \n\
        but got \n\
-      \ %a." pp_procedure_matcher matcher
+      \ %a."
+      pp_procedure_matcher matcher
 
 
   let pp_field_matcher_error_message f (matcher : Pulse_config_t.matcher) =
@@ -341,7 +347,8 @@ module Unit = struct
         \ \"class_names\": %a, \n\
         \ \"field_names\": %a, \n\
         \ \"field_with_annotation\": %a, \n\
-        \ \"annotation_values\": %a" (Pp.option F.pp_print_string) matcher.field_regex
+        \ \"annotation_values\": %a"
+        (Pp.option F.pp_print_string) matcher.field_regex
         (Pp.option (Pp.seq ~sep:"," F.pp_print_string))
         matcher.class_names
         (Pp.option (Pp.seq ~sep:"," F.pp_print_string))
@@ -356,7 +363,8 @@ module Unit = struct
        or else \"class_names\" and \"field_names\" must be provided, \n\
        or else \"field_with_annotation\" and \"annotation_values\" must be provided, \n\
        but got \n\
-      \ %a" pp_field_matcher matcher
+      \ %a"
+      pp_field_matcher matcher
 
 
   let procedure_matcher_of_config ~default_taint_target ~option_name
@@ -374,7 +382,8 @@ module Unit = struct
         ; method_with_annotation= None
         ; annotation_values= None
         ; block_passed_to= None
-        ; allocation= None } ->
+        ; allocation= None
+        ; builtin= None } ->
           ProcedureName {name}
       | { procedure= None
         ; procedure_regex= Some name_regex
@@ -387,7 +396,8 @@ module Unit = struct
         ; overrides_of_class_with_annotation= None
         ; method_with_annotation= None
         ; block_passed_to= None
-        ; allocation= None } ->
+        ; allocation= None
+        ; builtin= None } ->
           ProcedureNameRegex
             { name_regex= Str.regexp name_regex
             ; exclude_in= matcher.exclude_from_regex_in
@@ -403,7 +413,8 @@ module Unit = struct
         ; method_with_annotation= None
         ; annotation_values= None
         ; block_passed_to= None
-        ; allocation= None } ->
+        ; allocation= None
+        ; builtin= None } ->
           ClassNameRegex
             { name_regex= Str.regexp name_regex
             ; exclude_in= matcher.exclude_from_regex_in
@@ -418,7 +429,8 @@ module Unit = struct
         ; method_with_annotation= None
         ; annotation_values= None
         ; block_passed_to= None
-        ; allocation= None } ->
+        ; allocation= None
+        ; builtin= None } ->
           ClassAndMethodNames {class_names; method_names}
       | { procedure= None
         ; procedure_regex= Some method_name_regex
@@ -431,7 +443,8 @@ module Unit = struct
         ; method_with_annotation= None
         ; annotation_values= None
         ; block_passed_to= None
-        ; allocation= None } ->
+        ; allocation= None
+        ; builtin= None } ->
           ClassNameAndMethodRegex
             { class_names
             ; method_name_regex= Str.regexp method_name_regex
@@ -448,7 +461,8 @@ module Unit = struct
         ; method_with_annotation= None
         ; annotation_values= None
         ; block_passed_to= None
-        ; allocation= None } ->
+        ; allocation= None
+        ; builtin= None } ->
           ClassRegexAndMethodRegex
             { class_name_regex= Str.regexp class_name_regex
             ; method_name_regex= Str.regexp method_name_regex
@@ -464,7 +478,8 @@ module Unit = struct
         ; overrides_of_class_with_annotation= None
         ; method_with_annotation= None
         ; annotation_values= None
-        ; allocation= None } ->
+        ; allocation= None
+        ; builtin= None } ->
           ClassRegexAndMethodReturnTypeNames
             { class_name_regex= Str.regexp class_name_regex
             ; method_return_type_names
@@ -480,7 +495,8 @@ module Unit = struct
         ; overrides_of_class_with_annotation= None
         ; method_with_annotation= None
         ; annotation_values= None
-        ; allocation= None } ->
+        ; allocation= None
+        ; builtin= None } ->
           ClassAndMethodReturnTypeNames {class_names; method_return_type_names}
       | { procedure= None
         ; procedure_regex= None
@@ -493,7 +509,8 @@ module Unit = struct
         ; method_with_annotation= None
         ; annotation_values
         ; block_passed_to= None
-        ; allocation= None } ->
+        ; allocation= None
+        ; builtin= None } ->
           ClassWithAnnotation {annotation; annotation_values}
       | { procedure= None
         ; procedure_regex= Some method_name_regex
@@ -506,7 +523,8 @@ module Unit = struct
         ; method_with_annotation= None
         ; annotation_values
         ; block_passed_to= None
-        ; allocation= None } ->
+        ; allocation= None
+        ; builtin= None } ->
           ClassWithAnnotationAndRegexAndMethodRegex
             { annotation
             ; annotation_values
@@ -521,7 +539,8 @@ module Unit = struct
         ; method_return_type_names= None
         ; overrides_of_class_with_annotation= Some annotation
         ; method_with_annotation= None
-        ; allocation= None } ->
+        ; allocation= None
+        ; builtin= None } ->
           OverridesOfClassWithAnnotation {annotation}
       | { procedure= None
         ; procedure_regex= None
@@ -534,7 +553,8 @@ module Unit = struct
         ; method_with_annotation= Some annotation
         ; annotation_values
         ; block_passed_to= None
-        ; allocation= None } ->
+        ; allocation= None
+        ; builtin= None } ->
           MethodWithAnnotation {annotation; annotation_values}
       | { procedure= None
         ; procedure_regex= None
@@ -547,7 +567,8 @@ module Unit = struct
         ; method_with_annotation= None
         ; annotation_values= None
         ; block_passed_to= None
-        ; allocation= Some class_name } ->
+        ; allocation= Some class_name
+        ; builtin= None } ->
           Allocation {class_name}
       | { procedure= None
         ; procedure_regex= None
@@ -560,7 +581,8 @@ module Unit = struct
         ; method_with_annotation= None
         ; annotation_values= None
         ; block_passed_to= Some s
-        ; allocation= None } ->
+        ; allocation= None
+        ; builtin= None } ->
           Block {name= s}
       | { procedure= None
         ; procedure_regex= None
@@ -573,9 +595,24 @@ module Unit = struct
         ; method_with_annotation= None
         ; annotation_values= None
         ; block_passed_to_regex= Some name_regex
-        ; allocation= None } ->
+        ; allocation= None
+        ; builtin= None } ->
           BlockNameRegex
             {name_regex= Str.regexp name_regex; exclude_in= matcher.exclude_from_regex_in}
+      | { procedure= None
+        ; procedure_regex= None
+        ; class_name_regex= None
+        ; class_names= None
+        ; class_with_annotation= None
+        ; method_names= None
+        ; method_return_type_names= None
+        ; overrides_of_class_with_annotation= None
+        ; method_with_annotation= None
+        ; annotation_values= None
+        ; block_passed_to= None
+        ; allocation= None
+        ; builtin= Some name } ->
+          BuiltinName {name}
       | _ ->
           L.die UserError "When parsing option %s: Unexpected JSON format: %a \n %a" option_name
             pp_procedure_matcher_error_message matcher pp_field_matcher_error_message matcher

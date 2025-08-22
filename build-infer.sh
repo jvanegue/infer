@@ -17,8 +17,8 @@ DEPENDENCIES_DIR="$INFER_ROOT/facebook/dependencies"
 PLATFORM="$(uname)"
 SANDCASTLE=${SANDCASTLE:-}
 NCPU="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)"
-INFER_OPAM_DEFAULT_SWITCH="5.2.1+flambda"
-INFER_OPAM_DEFAULT_SWITCH_OPTIONS="--package=ocaml-variants.5.2.1+options,ocaml-option-flambda"
+INFER_OPAM_DEFAULT_SWITCH="5.3.0+flambda"
+INFER_OPAM_DEFAULT_SWITCH_OPTIONS="--package=ocaml-variants.5.3.0+options,ocaml-option-flambda"
 INFER_OPAM_SWITCH=${INFER_OPAM_SWITCH:-$INFER_OPAM_DEFAULT_SWITCH}
 INFER_OPAM_SWITCH_OPTIONS=${INFER_OPAM_SWITCH_OPTIONS:-$INFER_OPAM_DEFAULT_SWITCH_OPTIONS}
 PLUGIN_DIR="$INFER_ROOT/facebook-clang-plugins"
@@ -29,12 +29,13 @@ function usage() {
   echo "Usage: $0 [options] [targets] [-- options for ./configure]"
   echo
   echo " targets:"
-  echo "   all      build everything except swift (default)"
-  echo "   clang    build C and Objective-C analyzer"
+  echo "   all      build everything (default)"
+  echo "   clang    build C, C++, and Objective-C analyzer"
   echo "   erlang   build Erlang analyzer"
   echo "   hack     build Hack analyzer"
   echo "   java     build Java analyzer"
   echo "   python   build Python analyzer (experimental)"
+  echo "   rust     build Rust analyzer (experimental)"
   echo "   swift    build swift analyzer (experimental)"
   echo
   echo " options:"
@@ -59,6 +60,7 @@ BUILD_ERLANG=${BUILD_ERLANG:-no}
 BUILD_HACK=${BUILD_HACK:-no}
 BUILD_JAVA=${BUILD_JAVA:-no}
 BUILD_PYTHON=${BUILD_PYTHON:-no}
+BUILD_RUST=${BUILD_RUST:-no}
 BUILD_SWIFT=${BUILD_SWIFT:-no}
 INTERACTIVE=${INTERACTIVE:-yes}
 JOBS=${JOBS:-$NCPU}
@@ -74,7 +76,8 @@ function build_all() {
   BUILD_HACK=yes
   BUILD_JAVA=yes
   BUILD_PYTHON=yes
-  BUILD_SWIFT=no
+  BUILD_RUST=yes
+  BUILD_SWIFT=yes
 }
 
 while [[ $# -gt 0 ]]; do
@@ -107,6 +110,11 @@ while [[ $# -gt 0 ]]; do
       ;;
     python)
       BUILD_PYTHON=yes
+      shift
+      continue
+      ;;
+    rust)
+      BUILD_RUST=yes
       shift
       continue
       ;;
@@ -154,7 +162,8 @@ done
 
 if [ "$BUILD_CLANG" == "no" ] && [ "$BUILD_ERLANG" == "no" ] && \
    [ "$BUILD_HACK" == "no" ] && [ "$BUILD_JAVA" == "no" ] && \
-   [ "$BUILD_PYTHON" == "no" ] && [ "$BUILD_SWIFT" == "no" ]; then
+   [ "$BUILD_PYTHON" == "no" ] && [ "$BUILD_SWIFT" == "no" ] && \
+   [ "$BUILD_RUST" == "no" ]; then
   build_all
 fi
 
@@ -179,7 +188,30 @@ install_opam_deps () {
     if [ "$USE_OPAM_LOCK" == yes ]; then
         locked=.locked
     fi
+    opam pin add --no-action ppx_show "$INFER_ROOT"/dependencies/ppx_show
+    opam pin add --no-action pyml "$INFER_ROOT"/dependencies/pyml
+    # camlzip checks that it is within the required version that the zip/jar file declares as
+    # needed to decompress it:
+    #   https://github.com/xavierleroy/camlzip/blob/dd86042ac5eba8ba21e3d98b2f3e3dd82fc14033/zip.ml#L197-L198
+    #
+    # Sadly, for some reason we sometimes encounter jar files with a required version of 788.
+    # So, we fork camlzip to remove the check (YOLO), and pin the forked version here.
+    #
+    # Also done for the non-Sandcastle case below (in Sandcastle we can pin ahead of installing
+    # dependencies because at this point here we are sure that the opam repository is
+    # initialized but for non-Sandcastle builds that point is inside build-infer.sh so we need
+    # to pin camlzip after the fact instead; this will only rebuild javalib and sawja and only
+    # the first time that we pin camlzip)
+    opam pin add --no-action camlzip "$INFER_ROOT"/dependencies/camlzip
     opam install --deps-only "$INFER_ROOT"/opam/infer.opam$locked
+}
+
+# regardless of the LLVM toolchain used to provide the LLVM libraries, we need our own LLVM OCaml
+# bindings to be installed
+setup_local_opam_repo () {
+    opam repo list -s | grep -q local-llvm \
+    && opam repo set-url local-llvm "$INFER_ROOT"/dependencies/llvm/opam-repository \
+    || opam repo add local-llvm "$INFER_ROOT"/dependencies/llvm/opam-repository
 }
 
 echo "initializing opam... " >&2
@@ -191,7 +223,7 @@ eval $(SHELL=bash opam env)
 echo >&2
 echo "installing infer dependencies; this can take up to 30 minutes... " >&2
 opam_retry install_opam_deps
-
+setup_local_opam_repo
 if [ "$ONLY_SETUP_OPAM" == "yes" ]; then
   exit 0
 fi
@@ -218,8 +250,11 @@ fi
 if [ "$BUILD_PYTHON" == "no" ]; then
   CONFIGURE_PREPEND_OPTS+=" --disable-python-analyzers"
 fi
-if [ "$BUILD_SWIFT" == "yes" ]; then
-  CONFIGURE_PREPEND_OPTS+=" --enable-swift-analyzers"
+if [ "$BUILD_RUST" == "no" ]; then
+  CONFIGURE_PREPEND_OPTS+=" --disable-rust-analyzers"
+fi
+if [ "$BUILD_SWIFT" == "no" ]; then
+  CONFIGURE_PREPEND_OPTS+=" --disable-swift-analyzers"
 fi
 
 set -x

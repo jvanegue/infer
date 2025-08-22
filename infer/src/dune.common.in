@@ -21,6 +21,8 @@ let java = is_yes "@BUILD_JAVA_ANALYZERS@"
 
 let python = is_yes "@BUILD_PYTHON_ANALYZERS@"
 
+let rust = is_yes "@BUILD_RUST_ANALYZERS@"
+
 let swift = is_yes "@BUILD_SWIFT_ANALYZERS@"
 
 let facebook = is_yes "@IS_FACEBOOK_TREE@"
@@ -28,3 +30,19 @@ let facebook = is_yes "@IS_FACEBOOK_TREE@"
 let windows = is_yes "@WINDOWS_BUILD@"
 
 let darwin = String.equal "@BUILD_PLATFORM@" "Darwin"
+
+let if_platform_env ?(else_ = "") s =
+  match Sys.getenv_opt "PLATFORM_ENV" with Some pe when String.length pe > 0 -> s | _ -> else_
+
+
+let platform_linking_flags =
+  if windows then "(:standard -cclib -lgcc_s -cclib -lole32)"
+  else
+    if_platform_env
+      (Printf.sprintf "-noautolink %s %s %s "
+         ( if swift then
+             "(:include %{project_root}/src/sledge/llvm-config_ldflags.sexp) (:include \
+              %{project_root}/src/linking-flags-llvm.sexp) "
+           else "" )
+         "(:include %{project_root}/src/linking-flags.sexp)"
+         "-cclib -Wl,-Bstatic -cclib -lzstd -cclib -Wl,-Bdynamic" )

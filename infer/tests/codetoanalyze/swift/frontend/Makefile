@@ -8,12 +8,14 @@ TESTS_DIR=../../..
 SWIFT_OPTIONS =
 INFER_OPTIONS =
 
-SOURCES = $(wildcard *.swift)
+SOURCES = $(realpath $(wildcard *.swift))
 
 CLEAN_EXTRA = $(foreach source,$(SOURCES),$(basename $(notdir $(source))).o)
 
 include $(TESTS_DIR)/base.make
 include $(TESTS_DIR)/swift-base.make
+
+.NOTPARALLEL:
 
 default: test
 
@@ -42,4 +44,4 @@ replace: capture
 
 .PHONY: clean
 clean:
-	$(REMOVE_DIR) infer-out */*.test.sil */*/*.test.sil $(CLEAN_EXTRA)
+	$(REMOVE_DIR) infer-out *.test.sil $(CLEAN_EXTRA)

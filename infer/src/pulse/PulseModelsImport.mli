@@ -17,7 +17,7 @@ type model_data =
       -> PathContext.t
       -> Ident.t * Typ.t
       -> Exp.t
-      -> ValueOrigin.t ProcnameDispatcher.Call.FuncArg.t list
+      -> ValueOrigin.t FuncArg.t list
       -> Location.t
       -> CallFlags.t
       -> AbductiveDomain.t
@@ -90,7 +90,8 @@ module Basic : sig
   val map_continue : ('a, 'b) pulse_result -> ('a execution_domain_base_t, 'b) pulse_result
 
   val shallow_copy_value :
-       PathContext.t
+       ?ask_specialization:bool
+    -> PathContext.t
     -> Location.t
     -> ValueHistory.event
     -> Ident.t
@@ -100,7 +101,8 @@ module Basic : sig
     -> AbductiveDomain.t execution_domain_base_t AccessResult.t list
 
   val shallow_copy :
-       PathContext.t
+       ?ask_specialization:bool
+    -> PathContext.t
     -> Location.t
     -> ValueHistory.event
     -> Ident.t
@@ -140,11 +142,7 @@ module Basic : sig
 
   val id_first_arg : desc:string -> AbstractValue.t * ValueHistory.t -> model_no_non_disj
 
-  val free_or_delete :
-       [< `Delete | `Free]
-    -> Invalidation.t
-    -> ValueOrigin.t ProcnameDispatcher.Call.FuncArg.t
-    -> model
+  val free_or_delete : [< `Delete | `Free] -> Invalidation.t -> ValueOrigin.t FuncArg.t -> model
 
   val alloc_not_null :
        ?desc:string
@@ -166,20 +164,19 @@ module Basic : sig
   val call_constructor :
        Typ.name
     -> Typ.t list
-    -> ValueOrigin.t ProcnameDispatcher.Call.FuncArg.t list
+    -> ValueOrigin.t FuncArg.t list
     -> Exp.t
     -> model_data
     -> AbductiveDomain.t
     -> NonDisjDomain.t
     -> ExecutionDomain.t AccessResult.t list * NonDisjDomain.t
 
-  val assert_ :
-    (AbstractValue.t * ValueHistory.t) ProcnameDispatcher.Call.FuncArg.t -> model_no_non_disj
+  val assert_ : (AbstractValue.t * ValueHistory.t) FuncArg.t -> model_no_non_disj
 
   val unknown_call :
        ?force_pure:bool
     -> string
-    -> (AbstractValue.t * ValueHistory.t) ProcnameDispatcher.Call.FuncArg.t list
+    -> (AbstractValue.t * ValueHistory.t) FuncArg.t list
     -> model_no_non_disj
 
   val unknown_call_without_formals :

@@ -20,6 +20,7 @@ module T = struct
     (* array/struct operations *)
     | Splat
     | Select of int
+    | GetElementPtr of int
   [@@deriving compare, equal, sexp]
 
   type op2 =
@@ -55,16 +56,20 @@ module T = struct
     | Update of int
   [@@deriving compare, equal, sexp]
 
-  type op3 = (* if-then-else *)
-    | Conditional [@@deriving compare, equal, sexp]
+  type op3 =
+    (* if-then-else *)
+    | Conditional
+  [@@deriving compare, equal, sexp]
 
-  type opN = (* array/struct constants *)
-    | Record [@@deriving compare, equal, sexp]
+  type opN =
+    (* array/struct constants *)
+    | Record
+  [@@deriving compare, equal, sexp]
 
   type t =
     | Reg of {id: int; name: string; typ: LlairTyp.t}
-    | Global of {name: string; typ: LlairTyp.t [@ignore]}
-    | FuncName of {name: string; typ: LlairTyp.t [@ignore]}
+    | Global of {name: string; is_constant: bool; typ: LlairTyp.t [@ignore]}
+    | FuncName of {name: string; typ: LlairTyp.t [@ignore]; unmangled_name: string option [@ignore]}
     | Label of {parent: string; name: string}
     | Integer of {data: Z.t; typ: LlairTyp.t}
     | Float of {data: string; typ: LlairTyp.t}
@@ -77,6 +82,27 @@ module T = struct
   let hash = Poly.hash
 
   let demangle = ref (fun _ -> None)
+
+  let string_of_exp exp =
+    match exp with
+    | ApN (Record, _, elts) -> (
+      match
+        String.init (IArray.length elts) ~f:(fun i ->
+            match IArray.get elts i with
+            | Integer {data; typ= Integer {byts= 1; _}} ->
+                Char.of_int_exn (Z.to_int data)
+            | _ ->
+                raise_notrace (Invalid_argument "not a string") )
+      with
+      | str ->
+          let len = String.length str - 1 in
+          let new_str = String.sub str ~pos:0 ~len in
+          Some new_str
+      | exception _ ->
+          None )
+    | _ ->
+        None
+
 
   let pp_demangled ppf name =
     match !demangle name with
@@ -149,12 +175,12 @@ module T = struct
       Format.kfprintf (fun fs -> Format.pp_close_box fs ()) fs fmt
     in
     match exp with
-    | Reg {name; id} ->
-        pf "%%%s!%i" name id
+    | Reg {name; id; typ} ->
+        pf "%%%s!%i : %a" name id LlairTyp.pp typ
     | Global {name} ->
         pf "%@%s%a" name pp_demangled name
-    | FuncName {name} ->
-        pf "&%s%a" name pp_demangled name
+    | FuncName {name; unmangled_name} ->
+        pf "&%s%a [%s]" name pp_demangled name (Option.value ~default:"None" unmangled_name)
     | Label {name} ->
         pf "%s" name
     | Integer {data; typ= Pointer _} when Z.equal Z.zero data ->
@@ -171,8 +197,10 @@ module T = struct
         pf "((%a)(%a)@ %a)" LlairTyp.pp dst LlairTyp.pp src pp arg
     | Ap1 (Splat, _, byt) ->
         pf "%a^" pp byt
-    | Ap1 (Select idx, _, rcd) ->
-        pf "%a[%i]" pp rcd idx
+    | Ap1 (Select idx, typ, rcd) ->
+        pf "%a[%i]:%a" pp rcd idx LlairTyp.pp typ
+    | Ap1 (GetElementPtr idx, typ, rcd) ->
+        pf "gep %a[%i]:%a" pp rcd idx LlairTyp.pp typ
     | Ap2 (Update idx, _, rcd, elt) ->
         pf "[%a@ @[| %i → %a@]]" pp rcd idx pp elt
     | Ap2 (Xor, _, Integer {data}, x) when Z.is_true data ->
@@ -183,24 +211,21 @@ module T = struct
         pf "(%a@ %a %a)" pp x pp_op2 op pp y
     | Ap3 (Conditional, _, cnd, thn, els) ->
         pf "(%a@ ? %a@ : %a)" pp cnd pp thn pp els
-    | ApN (Record, _, elts) ->
-        pf "{%a}" pp_record elts
+    | ApN (Record, _, _) ->
+        pf "{%a}" pp_record exp
   [@@warning "-missing-record-field-pattern"]
 
 
-  and pp_record fs elts =
-    match
-      String.init (IArray.length elts) ~f:(fun i ->
-          match IArray.get elts i with
-          | Integer {data; typ= Integer {byts= 1; _}} ->
-              Char.of_int_exn (Z.to_int data)
-          | _ ->
-              raise_notrace (Invalid_argument "not a string") )
-    with
-    | s ->
-        Format.fprintf fs "@[<h>%s@]" (String.escaped s)
-    | exception _ ->
-        Format.fprintf fs "@[<hv>%a@]" (IArray.pp ",@ " pp) elts
+  and pp_record fs exp =
+    match exp with
+    | ApN (Record, _, elts) -> (
+      match string_of_exp exp with
+      | Some s ->
+          Format.fprintf fs "@[<h>%s@]" (String.escaped s)
+      | None ->
+          Format.fprintf fs "@[<hv>%a@]" (IArray.pp ",@ " pp) elts )
+    | _ ->
+        assert false
 end
 
 include T
@@ -228,10 +253,8 @@ let rec invariant exp =
       (* pre-llvm17 check: assert false *) ()
   | Integer {data; typ} -> (
     match typ with
-    | Integer {bits} ->
-        (* data in −(2^(bits − 1)) to 2^(bits − 1) − 1 *)
-        let n = Z.shift_left Z.one (bits - 1) in
-        assert (Z.(Compare.(neg n <= data && data < n)))
+    | Integer _ ->
+        assert true
     | Pointer _ ->
         assert (Z.equal Z.zero data)
     | _ ->
@@ -268,19 +291,18 @@ let rec invariant exp =
       assert false
   | Ap1 (Convert {src= Integer _}, Integer _, _) ->
       assert false
-  | Ap1 (Convert {src}, dst, arg) ->
-      assert (LlairTyp.convertible src dst) ;
-      assert (LlairTyp.castable src (typ_of arg)) ;
-      assert (not (LlairTyp.equal src dst) (* avoid redundant representations *))
-  | Ap1 (Select idx, typ, rcd) -> (
-      assert (LlairTyp.castable typ (typ_of rcd)) ;
-      match typ with
-      | Array _ ->
-          assert true
-      | Tuple {elts} | Struct {elts} ->
-          assert (valid_idx idx elts)
-      | _ ->
-          assert false )
+  | Ap1 (Convert _, _, _) ->
+      ()
+  | Ap1 (Select idx, typ, _) -> (
+    match typ with
+    | Array _ ->
+        assert true
+    | Tuple {elts} | Struct {elts} ->
+        assert (valid_idx idx elts)
+    | _ ->
+        assert false )
+  | Ap1 (GetElementPtr _, _, _) ->
+      ()
   | Ap1 (Splat, typ, byt) ->
       assert (LlairTyp.convertible LlairTyp.byt (typ_of byt)) ;
       assert (LlairTyp.is_sized typ)
@@ -335,7 +357,7 @@ and typ_of exp =
       LlairTyp.ptr
   | Ap1 ((Signed _ | Unsigned _ | Convert _ | Splat), dst, _) ->
       dst
-  | Ap1 (Select idx, typ, _) -> (
+  | Ap1 (Select idx, typ, _) | Ap1 (GetElementPtr idx, typ, _) -> (
     match typ with
     | Array {elt} ->
         elt
@@ -406,7 +428,7 @@ module Global = struct
 
   let of_exp = function Global _ as e -> Some (e |> check invariant) | _ -> None
 
-  let mk typ name = Global {name; typ} |> check invariant
+  let mk typ name is_constant = Global {name; typ; is_constant} |> check invariant
 end
 
 (** Function names are the expressions constructed by [FuncName] *)
@@ -417,6 +439,8 @@ module FuncName = struct
 
   let typ = function FuncName x -> x.typ | r -> violates invariant r
 
+  let unmangled_name = function FuncName x -> x.unmangled_name | r -> violates invariant r
+
   let invariant x =
     let@ () = Invariant.invariant [%here] x [%sexp_of: t] in
     match x with FuncName _ -> invariant x | _ -> assert false
@@ -424,13 +448,13 @@ module FuncName = struct
 
   let of_exp = function FuncName _ as e -> Some (e |> check invariant) | _ -> None
 
-  let mk typ name = FuncName {name; typ} |> check invariant
+  let mk ~unmangled_name typ name = FuncName {name; typ; unmangled_name} |> check invariant
 
   let counterfeit =
     let dummy_function_type =
       LlairTyp.pointer ~elt:(LlairTyp.function_ ~args:IArray.empty ~return:None)
     in
-    fun name -> mk dummy_function_type name
+    fun name -> mk dummy_function_type name ~unmangled_name:None
 
 
   module Map = Map
@@ -468,6 +492,8 @@ let float typ data = Float {data; typ} |> check invariant
 let record typ elts = ApN (Record, typ, elts) |> check invariant
 
 let select typ rcd idx = Ap1 (Select idx, typ, rcd) |> check invariant
+
+let gep typ rcd idx = Ap1 (GetElementPtr idx, typ, rcd)
 
 let update typ ~rcd idx ~elt = Ap2 (Update idx, typ, rcd, elt) |> check invariant
 

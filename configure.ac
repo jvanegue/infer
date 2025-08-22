@@ -54,6 +54,15 @@ AS_IF([test "x$CLANG_INCLUDES" = "x"], [
   CLANG_INCLUDES="$CLANG_PREFIX/include"
 ])
 
+AC_ARG_VAR([LLVM_CONFIG], [which llvm-config to use to build the LLVM frontend (defaults=$CLANG_PREFIX/bin/llvm-config)])
+USER_LLVM=no
+AS_IF([test "x$LLVM_CONFIG" = "x"], [
+  LLVM_CONFIG="$CLANG_PREFIX"/bin/llvm-config
+], [
+  USER_LLVM=yes
+])
+AC_SUBST([USER_LLVM])
+
 BUILD_PLATFORM=unknown
 WINDOWS_BUILD=no
 AC_MSG_CHECKING([for build platform])
@@ -150,11 +159,20 @@ AC_ARG_ENABLE(python-analyzers,
 BUILD_PYTHON_ANALYZERS=$enable_python_analyzers
 AC_SUBST([BUILD_PYTHON_ANALYZERS])
 
-AC_ARG_ENABLE(swift-analyzers,
-  AS_HELP_STRING([--enable-swift-analyzers],
-    [build the Swift analyzers (default is not to build them)]),
+enable_rust_analyzers_default=no
+AC_ARG_ENABLE(rust-analyzers,
+  AS_HELP_STRING([--disable-rust-analyzers],
+    [do not build the Rust analyzers (default is to build them)]),
   ,
-  enable_swift_analyzers=no)
+  enable_rust_analyzers=$enable_rust_analyzers_default)
+BUILD_RUST_ANALYZERS=$enable_rust_analyzers
+AC_SUBST([BUILD_RUST_ANALYZERS])
+
+AC_ARG_ENABLE(swift-analyzers,
+  AS_HELP_STRING([--disable-swift-analyzers],
+    [do not build the Swift analyzers (default is to build them)]),
+  ,
+  enable_swift_analyzers=yes)
 BUILD_SWIFT_ANALYZERS=$enable_swift_analyzers
 AC_SUBST([BUILD_SWIFT_ANALYZERS])
 
@@ -356,7 +374,6 @@ AS_IF([$HACKC --version >/dev/null 2>/dev/null],
    AC_MSG_RESULT([no])])
 
 if test "x$enable_swift_analyzers" = "xyes"; then
-  AC_CHECK_TOOL([LLVM_CONFIG], [llvm-config], [no])
   AC_CHECK_TOOL([SWIFTC], [swiftc], [no])
 fi
 
@@ -534,6 +551,7 @@ AC_CLASSIFY_FRONTEND_SUPPORT([erlang], [$BUILD_ERLANG_ANALYZERS])
 AC_CLASSIFY_FRONTEND_SUPPORT([hack], [$BUILD_HACK_ANALYZERS])
 AC_CLASSIFY_FRONTEND_SUPPORT([java], [$BUILD_JAVA_ANALYZERS])
 AC_CLASSIFY_FRONTEND_SUPPORT([python], [$BUILD_PYTHON_ANALYZERS])
+AC_CLASSIFY_FRONTEND_SUPPORT([rust], [$BUILD_RUST_ANALYZERS])
 AC_CLASSIFY_FRONTEND_SUPPORT([swift], [$BUILD_SWIFT_ANALYZERS])
 
 AC_MSG_NOTICE([enabled language frontends:  $enabled_languages])

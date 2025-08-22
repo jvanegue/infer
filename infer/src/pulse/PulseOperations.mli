@@ -141,7 +141,7 @@ val eval_proc_name :
 val hack_propagates_type_on_load :
   Tenv.t -> PathContext.t -> Location.t -> Exp.t -> AbstractValue.t -> t -> t
 
-val add_static_type_objc_class : Tenv.t -> Typ.t -> AbstractValue.t -> Location.t -> t -> t
+val add_static_type_objc_swift_class : Tenv.t -> Typ.t -> AbstractValue.t -> Location.t -> t -> t
 
 val havoc_id : Ident.t -> ValueHistory.t -> t -> t
 
@@ -239,6 +239,8 @@ val allocate : Attribute.allocator -> Location.t -> AbstractValue.t -> t -> t
 
 val is_allocated : AbstractValue.t -> t -> bool
 
+val get_unawaited_awaitable : AbstractValue.t -> t -> Trace.t option
+
 val java_resource_release : recursive:bool -> AbstractValue.t -> t -> t
 (** releases the resource of the argument, and recursively calls itself on the delegated resource if
     [recursive==true] *)
@@ -248,6 +250,8 @@ val csharp_resource_release : recursive:bool -> AbstractValue.t -> t -> t
     [recursive==true] *)
 
 val add_dict_contain_const_keys : AbstractValue.t -> t -> t
+
+val abduce_must_be_awaited : AbstractValue.t -> t -> t
 
 val remove_dict_contain_const_keys : AbstractValue.t -> t -> t
 
@@ -291,7 +295,8 @@ val invalidate_array_elements :
 (** record that all the array elements that address points to is invalid *)
 
 val shallow_copy :
-     PathContext.t
+     ?ask_specialization:bool
+  -> PathContext.t
   -> Location.t
   -> AbstractValue.t * ValueHistory.t
   -> t

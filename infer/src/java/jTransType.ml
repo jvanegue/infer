@@ -229,6 +229,7 @@ and get_class_struct_typ =
   let make_struct program tenv node supers ~fields ~statics annots ~java_class_kind name =
     let methods =
       Javalib.m_fold (fun m procnames -> translate_method_name program tenv m :: procnames) node []
+      |> List.map ~f:Struct.mk_tenv_method
     in
     let node_name = Javalib.get_name node in
     let java_location : Location.t option = JProgramDesc.get_java_location program node_name in
@@ -264,6 +265,7 @@ and get_class_struct_typ =
         | Some (Javalib.JClass jclass as node) ->
             let statics, fields = get_all_fields program tenv cn in
             let annots = JAnnotation.translate_item jclass.Javalib.c_annotations in
+            let annots = if Javalib.is_final node then Annot.final :: annots else annots in
             let interface_list = create_super_list program tenv jclass.Javalib.c_interfaces in
             let supers =
               match jclass.Javalib.c_super_class with

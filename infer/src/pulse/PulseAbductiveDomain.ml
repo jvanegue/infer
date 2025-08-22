@@ -92,7 +92,8 @@ let pp_ ~is_summary f
      ; transitive_info
      ; topl
      ; recursive_calls
-     ; skipped_calls } [@warning "+missing-record-field-pattern"] ) =
+     ; skipped_calls }
+     [@warning "+missing-record-field-pattern"] ) =
   let pp_decompiler f =
     if Config.debug_level_analysis >= 3 then F.fprintf f "decompiler=%a;@;" Decompiler.pp decompiler
   in
@@ -455,6 +456,10 @@ module Internal = struct
       abduce_one addr (MustNotBeTainted map) astate
 
 
+    let add_tainted address tainted astate =
+      map_post_attrs astate ~f:(BaseAddressAttributes.add_tainted address tainted)
+
+
     let get_taint_sources_and_sanitizers addr astate =
       let attrs = (astate.post :> base_domain).attrs in
       match BaseAddressAttributes.find_opt addr attrs with
@@ -587,6 +592,10 @@ module Internal = struct
 
     let std_vector_reserve addr astate =
       map_post_attrs astate ~f:(BaseAddressAttributes.std_vector_reserve addr)
+
+
+    let get_unawaited_awaitable addr astate =
+      BaseAddressAttributes.get_unawaited_awaitable addr (astate.post :> base_domain).attrs
 
 
     let is_java_resource_released addr astate =
@@ -1474,7 +1483,7 @@ let empty =
   ; path_condition= Formula.ttrue
   ; decompiler= Decompiler.empty
   ; need_dynamic_type_specialization= AbstractValue.Set.empty
-  ; topl= PulseTopl.start ()
+  ; topl= PulseTopl.start () (* TODO: this defeats the laziness of Topl.automaton *)
   ; transitive_info= TransitiveInfo.bottom
   ; recursive_calls= PulseMutualRecursion.Set.empty
   ; skipped_calls= SkippedCalls.empty }
@@ -1688,49 +1697,11 @@ let mk_initial tenv (proc_attrs : ProcAttributes.t) =
   update_pre_for_kotlin_proc astate proc_attrs formals
 
 
-(* work a bit hard: we need to canonicalize abstract values taken out of edges on the fly and
-   compare the two edges maps access per access so we sort their respective accesses first to behave
-   in [n (lg n)] instead of quadratically *)
-let equal_edges astate edges_pre edges_post =
-  let to_sorted astate edges =
-    RawMemory.Edges.to_seq edges
-    |> Stdlib.Seq.map (fun (access, (v, _hist)) ->
-           ( CanonValue.canon_access astate access |> downcast_access
-           , CanonValue.canon' astate v |> downcast ) )
-    |> Stdlib.Seq.fold_left (fun l x -> x :: l) []
-    |> List.sort ~compare:(fun (access1, _) (access2, _) ->
-           RawMemory.Access.compare access1 access2 )
-  in
-  List.equal [%compare.equal: RawMemory.Access.t * AbstractValue.t] (to_sorted astate edges_pre)
-    (to_sorted astate edges_post)
-
-
-let rec equal_pre_post_heaps visited astate v =
-  if AbstractValue.Set.mem v !visited then true
-  else
-    let raw_edges_post_opt = RawMemory.find_opt v (SafeMemory.select `Post astate) in
-    let raw_edges_pre_opt = RawMemory.find_opt v (SafeMemory.select `Pre astate) in
-    (* addresses get "registered" in the pre with empty edges, which doesn't happen in the post and
-       can lead to spuriously considering that the edges are different *)
-    let raw_edges_pre_opt =
-      if Option.exists raw_edges_pre_opt ~f:RawMemory.Edges.is_empty then None
-      else raw_edges_pre_opt
-    in
-    visited := AbstractValue.Set.add v !visited ;
-    Option.equal (equal_edges astate) raw_edges_pre_opt raw_edges_post_opt
-    && Option.for_all raw_edges_pre_opt ~f:(fun raw_edges_pre ->
-           RawMemory.Edges.for_all raw_edges_pre ~f:(fun (_access, (v, _)) ->
-               equal_pre_post_heaps visited astate v ) )
-
-
 let are_same_values_as_pre_formals proc_desc values astate =
   let open IOption.Let_syntax in
-  let visited_ref = ref AbstractValue.Set.empty in
-  let compatible_sub_heaps astate v_pre v_post =
-    AbstractValue.equal v_pre v_post && equal_pre_post_heaps visited_ref astate v_pre
-  in
   let deref pre_or_post addr astate =
-    SafeMemory.find_edge_opt pre_or_post addr Dereference astate >>| fst >>| downcast
+    let+ aval, hist = SafeMemory.find_edge_opt pre_or_post addr Dereference astate in
+    (downcast aval, hist)
   in
   let pvar_value pre_or_post pvar astate =
     let* pvar_addr =
@@ -1740,14 +1711,20 @@ let are_same_values_as_pre_formals proc_desc values astate =
   in
   let proc_name = Procdesc.get_proc_name proc_desc in
   let same_input_parameters () =
-    List.for_all2 (Procdesc.get_formals proc_desc) values ~f:(fun (mangled_name, _, _) v ->
+    List.for_all2 (Procdesc.get_formals proc_desc) values
+      ~f:(fun (mangled_name, _, _) (addr, hist) ->
         if Language.curr_language_is Hack && Mangled.is_self mangled_name then true
         else
           let formal = Pvar.mk mangled_name proc_name in
-          let formal_v = pvar_value `Pre formal astate |> Option.value_exn in
-          compatible_sub_heaps astate formal_v v )
+          let formal_addr, _ = pvar_value `Pre formal astate |> Option.value_exn in
+          let same_values = AbstractValue.equal formal_addr addr in
+          let is_constant = Option.is_some @@ ValueHistory.is_class_object_initialized hist in
+          same_values || is_constant )
     |> function
-    | List.Or_unequal_lengths.Ok b -> b | List.Or_unequal_lengths.Unequal_lengths -> false
+    | List.Or_unequal_lengths.Ok b ->
+        b
+    | List.Or_unequal_lengths.Unequal_lengths ->
+        false
   in
   let same_globals () =
     let formals =
@@ -1765,9 +1742,9 @@ let are_same_values_as_pre_formals proc_desc values astate =
         | ProgramVar pvar ->
             if Pvar.Set.mem pvar formals then (* handled above *) true
             else
-              let v_pre = deref `Pre (ValueOrigin.value vo) astate in
-              let v_curr = pvar_value `Post pvar astate in
-              Option.equal (compatible_sub_heaps astate) v_pre v_curr
+              let v_pre = deref `Pre (ValueOrigin.value vo) astate |> Option.map ~f:fst in
+              let v_curr = Option.map ~f:fst (pvar_value `Post pvar astate) in
+              Option.equal AbstractValue.equal v_pre v_curr
         | LogicalVar _ ->
             (* should be impossible *)
             L.internal_error "Logical variable found in precondition" ;
@@ -2208,47 +2185,49 @@ module Summary = struct
       | Error (unreachable_location, JavaResource class_name, trace) ->
           Error
             (`JavaResourceLeak
-              ( astate
-              , astate_before_filter
-              , class_name
-              , trace
-              , Option.value unreachable_location ~default:location ) )
+               ( astate
+               , astate_before_filter
+               , class_name
+               , trace
+               , Option.value unreachable_location ~default:location ) )
       | Error (unreachable_location, Awaitable, trace) ->
           Error
             (`UnawaitedAwaitable
-              ( astate
-              , astate_before_filter
-              , trace
-              , Option.value unreachable_location ~default:location ) )
+               ( astate
+               , astate_before_filter
+               , trace
+               , Option.value unreachable_location ~default:location ) )
       | Error (unreachable_location, HackBuilderResource builder_type, trace) ->
           Error
             (`HackUnfinishedBuilder
-              ( astate
-              , astate_before_filter
-              , trace
-              , Option.value unreachable_location ~default:location
-              , builder_type ) )
+               ( astate
+               , astate_before_filter
+               , trace
+               , Option.value unreachable_location ~default:location
+               , builder_type ) )
       | Error (unreachable_location, CSharpResource class_name, trace) ->
           Error
             (`CSharpResourceLeak
-              ( astate
-              , astate_before_filter
-              , class_name
-              , trace
-              , Option.value unreachable_location ~default:location ) )
+               ( astate
+               , astate_before_filter
+               , class_name
+               , trace
+               , Option.value unreachable_location ~default:location ) )
       | Error (unreachable_location, allocator, trace) ->
           Error
             (`MemoryLeak
-              ( astate
-              , astate_before_filter
-              , allocator
-              , trace
-              , Option.value unreachable_location ~default:location ) ) )
+               ( astate
+               , astate_before_filter
+               , allocator
+               , trace
+               , Option.value unreachable_location ~default:location ) ) )
     | Some (address, must_be_valid) ->
         Error
           (`PotentialInvalidAccessSummary
-            (astate, astate_before_filter, Decompiler.find address astate0.decompiler, must_be_valid)
-            )
+             ( astate
+             , astate_before_filter
+             , Decompiler.find address astate0.decompiler
+             , must_be_valid ) )
 
 
   let of_post proc_attrs location astate0 =
@@ -2454,34 +2433,6 @@ let reachable_addresses_from ?edge_filter addresses astate pre_or_post =
   |> CanonValue.downcast_set
 
 
-let has_reachable_in_inner_pre_heap addresses astate =
-  (* We are looking for one "real" (i.e. in the program text somewhere) dereference from the stack
-     variables in the pre-condition. Since the first dereference is always to access the value of
-     the formal, it is enough to look for access paths with at least two dereferences. *)
-  let has_two_dereferences accesses =
-    let rec has_two_dereferences_aux has_deref (accesses : Access.t list) =
-      match accesses with
-      | [] ->
-          false
-      | Dereference :: accesses' ->
-          has_deref || has_two_dereferences_aux true accesses'
-      | _ :: accesses' ->
-          has_two_dereferences_aux has_deref accesses'
-    in
-    has_two_dereferences_aux false accesses
-  in
-  let addresses =
-    ListLabels.to_seq addresses |> Seq.map (CanonValue.canon' astate) |> CanonValue.Set.of_seq
-  in
-  GraphVisit.fold astate
-    ~var_filter:(fun _ -> true)
-    `Pre ~init:false ~finish:Fn.id
-    ~f:(fun _ found v accesses ->
-      if CanonValue.Set.mem v addresses && has_two_dereferences accesses then Stop true
-      else Continue found )
-  |> snd
-
-
 module Stack = struct
   include SafeStack
 
@@ -2589,6 +2540,10 @@ module AddressAttributes = struct
     SafeAttributes.add_taint_sink path taint trace (CanonValue.canon' astate v) astate
 
 
+  let add_tainted v taint astate =
+    SafeAttributes.add_tainted (CanonValue.canon' astate v) taint astate
+
+
   let invalidate addr_hist invalidation location astate =
     SafeAttributes.invalidate (CanonValue.canon_fst' astate addr_hist) invalidation location astate
 
@@ -2625,6 +2580,10 @@ module AddressAttributes = struct
 
   let get_hack_builder v astate =
     SafeAttributes.get_hack_builder (CanonValue.canon' astate v) astate
+
+
+  let get_unawaited_awaitable v astate =
+    SafeAttributes.get_unawaited_awaitable (CanonValue.canon' astate v) astate
 
 
   let is_java_resource_released v astate =

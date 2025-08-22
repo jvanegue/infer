@@ -34,7 +34,8 @@ module PathContext = PulsePathContext
     values in the raw map corresponding to the memory are not necessarily normalized at all times
     but the API allows one to pretend they are by normalizing them on the fly. On the other hand,
     *keys* in the memory map are always normalized so values must be normalized before being looked
-    up in the map and this module takes care of that transparently too. See also [PulseCanonValue]. *)
+    up in the map and this module takes care of that transparently too. See also [PulseCanonValue].
+*)
 
 (** signature common to the "normal" [Domain], representing the post at the current program point,
     and the inverted [PreDomain], representing the inferred pre-condition*)
@@ -79,7 +80,8 @@ val pp : Format.formatter -> t -> unit
 
 val mk_initial : Tenv.t -> ProcAttributes.t -> t
 
-val are_same_values_as_pre_formals : Procdesc.t -> AbstractValue.t list -> t -> bool
+val are_same_values_as_pre_formals :
+  Procdesc.t -> (AbstractValue.t * ValueHistory.t) list -> t -> bool
 
 val mk_join_state :
      pre:PulseBaseStack.t * PulseBaseMemory.t * PulseBaseAddressAttributes.t
@@ -222,7 +224,8 @@ module AddressAttributes : sig
     -> Location.t
     -> t
     -> t
-  (** Add "Uninitialized" attributes when a variable is declared or a memory is allocated by malloc. *)
+  (** Add "Uninitialized" attributes when a variable is declared or a memory is allocated by malloc.
+  *)
 
   val always_reachable : AbstractValue.t -> t -> t
 
@@ -238,6 +241,8 @@ module AddressAttributes : sig
 
   val get_hack_builder : AbstractValue.t -> t -> Attribute.Builder.t option
   [@@warning "-unused-value-declaration"]
+
+  val get_unawaited_awaitable : AbstractValue.t -> t -> Trace.t option
 
   val is_java_resource_released : AbstractValue.t -> t -> bool
 
@@ -280,6 +285,8 @@ module AddressAttributes : sig
 
   val get_taint_sources_and_sanitizers :
     AbstractValue.t -> t -> Attribute.TaintedSet.t * Attribute.TaintSanitizedSet.t
+
+  val add_tainted : AbstractValue.t -> Attribute.TaintedSet.t -> t -> t
 
   val get_propagate_taint_from :
     AbstractValue.t -> t -> (Attribute.taint_propagation_reason * Attribute.taint_in list) option
@@ -355,12 +362,6 @@ val reachable_addresses_from :
   -> AbstractValue.Set.t
 (** Compute the set of abstract addresses that are reachable from given abstract addresses. *)
 
-val has_reachable_in_inner_pre_heap : AbstractValue.t list -> t -> bool
-(** [true] if there is a value in the provided list that is reachable from the pre-condition after
-    some non-trivial steps in the pre heap, i.e. the value is gotten from at least one dereference
-    from the parameters of the current procedure. Used to detect likely-harmless recursive calls
-    since heap progress has been made. *)
-
 val get_unreachable_attributes : t -> AbstractValue.t list
 (** collect the addresses that have attributes but are unreachable in the current post-condition *)
 
@@ -368,7 +369,8 @@ val finalize_all_hack_builders : t -> t
 
 val mark_potential_leaks : Location.t -> dead_roots:Var.t list -> t -> t
 
-val add_recursive_call : Location.t -> Procname.t -> AbstractValue.t list -> t -> t
+val add_recursive_call :
+  Location.t -> Procname.t -> (AbstractValue.t * ValueHistory.t) list -> t -> t
 
 val add_recursive_calls : PulseMutualRecursion.Set.t -> t -> t
 

@@ -12,7 +12,6 @@ open PulseDomainInterface
 open PulseOperationResult.Import
 open PulseModelsImport
 module GenericArrayBackedCollection = PulseModelsGenericArrayBackedCollection
-module FuncArg = ProcnameDispatcher.Call.FuncArg
 
 (* NOTE: The semantic models do not check overflow for now. *)
 let binop_overflow_common binop (x, x_hist) (y, y_hist) res : model_no_non_disj =
@@ -410,14 +409,16 @@ module Function = struct
       | Some {typ= {desc= Typ.Tstruct name}} -> (
         match Tenv.lookup analysis_data.tenv name with
         | Some tstruct ->
-            List.find ~f:(fun m -> Procname.is_cpp_lambda m) tstruct.Struct.methods
+            List.find
+              ~f:(fun (m : Struct.tenv_method) -> Procname.is_cpp_lambda m.name)
+              tstruct.Struct.methods
         | None ->
             None )
       | _ ->
           None
     in
     match callee_proc_name_opt with
-    | Some callee_proc_name ->
+    | Some {name= callee_proc_name} ->
         let actuals =
           (lambda_ptr_hist, typ)
           :: List.map actuals ~f:(fun FuncArg.{arg_payload; typ} -> (arg_payload, typ))
@@ -453,11 +454,14 @@ module Function = struct
       in
       PulseOperations.havoc_id ret_id (Hist.single_event event) astate
     else
+      (* with ask_specialization:true we make sure we will copy the dynamic type of the closure object *)
+      (* TODO: why do we realloc a closure here? Looks useless since closure are immuable values *)
       match src_typ.Typ.desc with
       | Tptr (_, (Pk_lvalue_reference | Pk_rvalue_reference)) ->
-          Basic.shallow_copy path location event ret_id dest src astate
+          Basic.shallow_copy ~ask_specialization:true path location event ret_id dest src astate
       | _ ->
-          Basic.shallow_copy_value path location event ret_id dest src astate
+          Basic.shallow_copy_value ~ask_specialization:true path location event ret_id dest src
+            astate
 end
 
 module Std = struct

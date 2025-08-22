@@ -37,7 +37,8 @@ val get_ret_pvar : Procname.t -> t
 (** [get_ret_pvar proc_name] retuns the return pvar associated with the procedure name *)
 
 val get_ret_param_pvar : Procname.t -> t
-(** [get_ret_param_pvar proc_name] retuns the return_param pvar associated with the procedure name *)
+(** [get_ret_param_pvar proc_name] retuns the return_param pvar associated with the procedure name
+*)
 
 val get_simplified_name : t -> string
 (** Get a simplified version of the name component of a program variable. *)
@@ -112,6 +113,8 @@ val mk_global :
   -> Mangled.t
   -> t
 (** create a global variable with the given name *)
+
+val mk_local : Mangled.t -> Procname.t -> t
 
 val mk_tmp : string -> Procname.t -> t
 (** create a fresh temporary variable local to procedure [pname]. for use in the frontends only! *)

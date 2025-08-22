@@ -29,6 +29,7 @@ module Attribute = struct
     | JavaResource of JavaClassName.t
     | CSharpResource of CSharpClassName.t
     | ObjCAlloc
+    | SwiftAlloc
     | HackBuilderResource of HackClassName.t
     | Awaitable (* used for Hack and Python *)
     | FileDescriptor
@@ -51,7 +52,7 @@ module Attribute = struct
         F.fprintf fmt "java resource %a" JavaClassName.pp class_name
     | CSharpResource class_name ->
         F.fprintf fmt "csharp resource %a" CSharpClassName.pp class_name
-    | ObjCAlloc ->
+    | ObjCAlloc | SwiftAlloc ->
         F.fprintf fmt "alloc"
     | HackBuilderResource class_name ->
         F.fprintf fmt "hack builder %a" HackClassName.pp class_name
@@ -236,6 +237,7 @@ module Attribute = struct
     | Initialized
     | Invalid of Invalidation.t * Trace.t
     | LastLookup of AbstractValue.t
+    | MustBeAwaited
     | MustBeInitialized of Timestamp.t * Trace.t
     | MustBeValid of Timestamp.t * Trace.t * Invalidation.must_be_valid_reason option
     | MustNotBeTainted of TaintSink.t TaintSinkMap.t
@@ -305,6 +307,8 @@ module Attribute = struct
   let awaited_awaitable_rank = Variants.awaitedawaitable.rank
 
   let csharp_resource_released_rank = Variants.csharpresourcereleased.rank
+
+  let must_be_awaited_rank = Variants.mustbeawaited.rank
 
   let must_be_initialized_rank = Variants.mustbeinitialized.rank
 
@@ -381,6 +385,8 @@ module Attribute = struct
           trace
     | LastLookup value ->
         F.fprintf f "LastLookup(%a)" AbstractValue.pp value
+    | MustBeAwaited ->
+        F.fprintf f "MustBeAwaited"
     | MustBeInitialized (timestamp, trace) ->
         F.fprintf f "MustBeInitialized(@[@[%a@],@;t=%d@])"
           (Trace.pp ~pp_immediate:(pp_string_if_debug "read"))
@@ -436,6 +442,7 @@ module Attribute = struct
 
   let is_suitable_for_pre = function
     | DictReadConstKeys _
+    | MustBeAwaited
     | MustBeValid _
     | MustBeInitialized _
     | MustNotBeTainted _
@@ -480,6 +487,7 @@ module Attribute = struct
   let is_suitable_for_post = function
     | DictReadConstKeys _
     | Invalid (ComparedToNullInThisProcedure _, _)
+    | MustBeAwaited
     | MustBeInitialized _
     | MustNotBeTainted _
     | MustBeValid _
@@ -549,6 +557,7 @@ module Attribute = struct
     | AwaitedAwaitable
     | HackBuilder _
     | HackConstinitCalled
+    | MustBeAwaited
     | MustBeInitialized _
     | MustBeValid _
     | MustNotBeTainted _
@@ -654,6 +663,7 @@ module Attribute = struct
       | Initialized
       | JavaResourceReleased
       | LastLookup _
+      | MustBeAwaited
       | StaticType _
       | StdMoved
       | StdVectorReserve
@@ -668,6 +678,7 @@ module Attribute = struct
     | CppNew, Some (CppDelete, _)
     | CppNewArray, Some (CppDeleteArray, _)
     | ObjCAlloc, _
+    | SwiftAlloc, _
     | FileDescriptor, Some (FClose, _) ->
         true
     | JavaResource _, _ | CSharpResource _, _ | HackBuilderResource _, _ | Awaitable, _ ->
@@ -689,7 +700,8 @@ module Attribute = struct
     | ObjCAlloc
     | JavaResource _
     | CSharpResource _
-    | FileDescriptor ->
+    | FileDescriptor
+    | SwiftAlloc ->
         false
 
 
@@ -707,7 +719,8 @@ module Attribute = struct
     | ObjCAlloc
     | JavaResource _
     | CSharpResource _
-    | FileDescriptor ->
+    | FileDescriptor
+    | SwiftAlloc ->
         false
 
 
@@ -767,6 +780,7 @@ module Attribute = struct
       | Invalid _
       | JavaResourceReleased
       | LastLookup _
+      | MustBeAwaited
       | MustBeInitialized _
       | MustBeValid _
       | MustNotBeTainted _
@@ -874,7 +888,7 @@ module Attributes = struct
       | Some kinds_to_remove -> (
           let taint_map =
             get_by_rank Attribute.must_not_be_tainted_rank attrs
-                ~dest:(function [@warning "-partial-match"] MustNotBeTainted map -> map)
+              ~dest:(function [@warning "-partial-match"] MustNotBeTainted map -> map )
           in
           match taint_map with
           | None ->
@@ -945,6 +959,8 @@ module Attributes = struct
   let is_hack_constinit_called = mem_by_rank Attribute.hack_constinit_called_rank
 
   let is_csharp_resource_released = mem_by_rank Attribute.csharp_resource_released_rank
+
+  let is_must_be_awaited = mem_by_rank Attribute.must_be_awaited_rank
 
   let get_must_be_valid =
     get_by_rank Attribute.must_be_valid_rank ~dest:(function [@warning "-partial-match"]
