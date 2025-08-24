@@ -3081,11 +3081,13 @@ module Formula = struct
 
     val normalize_atom : t -> Atom.t -> Atom.t list SatUnsat.t
 
-    val and_normalized_atoms : t * new_eqs -> Atom.t list -> orig_atom:Atom.t list -> add_term:bool -> (t * new_eqs) SatUnsat.t
+    val and_normalized_atoms : t * new_eqs -> Atom.t list -> orig_atom:Atom.t list -> add_raw_term:bool -> (t * new_eqs) SatUnsat.t
     (** use with the result of {!normalize_atom} in place of {!and_atom} *)
 
-    val and_atom : Atom.t -> t * new_eqs -> bool -> (t * new_eqs) SatUnsat.t
-
+    val and_atom : Atom.t -> t * new_eqs -> add_raw_term:bool -> (t * new_eqs) SatUnsat.t
+    (** [and_atom atom (phi, new_eqs)] is
+        [SatUnsat.(normalize_atom phi atom >>= and_normalized_atoms (phi, new_eqs))] *)
+      
     val and_dynamic_type :
       Var.t -> Typ.t -> ?source_file:SourceFile.t -> t * new_eqs -> (t * new_eqs) SatUnsat.t
 
@@ -3095,8 +3097,6 @@ module Formula = struct
 
     val propagate_atom : Atom.t -> t * new_eqs -> (t * new_eqs) SatUnsat.t
 
-    (** [and_atom atom (phi, new_eqs)] is
-        [SatUnsat.(normalize_atom phi atom >>= and_normalized_atoms (phi, new_eqs))] *)
   end = struct
     (* Use the monadic notations when normalizing formulas. *)
     open SatUnsat.Import
@@ -3651,7 +3651,7 @@ module Formula = struct
                                       Atom.eval ~is_neq_zero:(is_neq_zero phi)
                                         (NotEqual (Var var, Term.zero))
                                     in
-                                    and_normalized_atoms (phi, new_eqs) atoms ~orig_atom:atoms ~add_term:true >>| snd )
+                                    and_normalized_atoms (phi, new_eqs) atoms ~orig_atom:atoms ~add_raw_term:true >>| snd )
                                   else Sat (phi, new_eqs) )
                                 else if
                                   match tx with
@@ -3669,7 +3669,7 @@ module Formula = struct
                                       Atom.eval ~is_neq_zero:(is_neq_zero phi)
                                         (NotEqual (Var var, Term.zero))
                                     in
-                                    and_normalized_atoms (phi, new_eqs) atoms ~orig_atom:atoms ~add_term:true >>| snd
+                                    and_normalized_atoms (phi, new_eqs) atoms ~orig_atom:atoms ~add_raw_term:true >>| snd
                                   else Sat (phi, new_eqs) )
                                 else (
                                   Debug.p "%a is neither zero nor non-zero, leaving phi alone@\n"
@@ -3698,7 +3698,7 @@ module Formula = struct
                                 (Pp.seq ~sep:"," (Atom.pp_with_pp_var Var.pp))
                                 atoms ;
                               (* L.debug Analysis Quiet "JV: Calling and_normalized_atoms from propagate_in_term_eqs (RANGE case) \n"; *)
-                              and_normalized_atoms (phi, new_eqs) atoms ~orig_atom:atoms ~add_term:true >>| snd )
+                              and_normalized_atoms (phi, new_eqs) atoms ~orig_atom:atoms ~add_raw_term:true >>| snd )
                       | Domain | DomainAndRange -> (
                           let* phi, new_eqs = phi_new_eqs_sat in
                           let subst_target_x =
@@ -3753,7 +3753,7 @@ module Formula = struct
                                     (Pp.seq ~sep:"," (Atom.pp_with_pp_var Var.pp))
                                     atoms ;
                                   (* L.debug Analysis Quiet "JV: Calling and_normalized_atoms from propagate_in_term_eqs (DOMAIN case) \n";  *)
-                                  and_normalized_atoms (phi, new_eqs) atoms ~orig_atom:atoms ~add_term:true >>| snd
+                                  and_normalized_atoms (phi, new_eqs) atoms ~orig_atom:atoms ~add_raw_term:true >>| snd
                               | None -> (
                                 match get_term_eq phi t' with
                                 | None -> (
@@ -3800,7 +3800,7 @@ module Formula = struct
                   (Atom.subst_variables
                      ~f:(fun x' -> if Var.equal x' x then subst_target_x else VarSubst x')
                      atom )
-                  (phi, new_eqs) false
+                  (phi, new_eqs) ~add_raw_term:false
                 >>| snd
               else phi_new_eqs_sat )
             in_atoms
@@ -3856,7 +3856,7 @@ module Formula = struct
                                   Atom.eval ~is_neq_zero:(is_neq_zero phi)
                                     (LessThan (Term.zero, Var var))
                                 in
-                                and_normalized_atoms (phi, new_eqs) atoms ~orig_atom:atoms ~add_term:true >>| snd )
+                                and_normalized_atoms (phi, new_eqs) atoms ~orig_atom:atoms ~add_raw_term:true >>| snd )
                               else Sat (phi, new_eqs)
                             in
                             and_below var typ (phi, new_eqs)
@@ -3875,7 +3875,7 @@ module Formula = struct
                           Debug.p "Found new atoms thanks to %a≠0: [%a]@\n" Var.pp v
                             (Pp.seq ~sep:"," (Atom.pp_with_pp_var Var.pp))
                             atoms ;
-                          and_normalized_atoms (phi, new_eqs) atoms ~orig_atom:atoms ~add_term:true >>| snd ) )
+                          and_normalized_atoms (phi, new_eqs) atoms ~orig_atom:atoms ~add_raw_term:true >>| snd ) )
                 in_term_eqs (Sat phi_new_eqs) )
 
     (* Assumes [w] is restricted, [l] is normalized. This is called [addlineq] in \[2\]. *)
@@ -3965,28 +3965,28 @@ module Formula = struct
           let+ phi_new_eqs = (add_atom atom phi, new_eqs) |> propagate_atom atom in
           (false, phi_new_eqs)
 
-    and and_normalized_atoms (phi, new_eqs) atoms ~orig_atom ~add_term =
+    and and_normalized_atoms (phi, new_eqs) atoms ~orig_atom ~add_raw_term =
 
-      (* JV: Possibly useful: test if variables in orig_atom are present in term_conds: if so, add orig_atom in term_conds even if add_term is false *)
+      (* JV: Possibly useful: test if variables in orig_atom are present in term_conds: if so, add orig_atom in term_conds even if add_raw_term is false *)
       (* May not be necessary thanks to Pulse fresh name creation, which witness the existence of a change without tracking intermediate constraints *)
       let upd_phi =
-        (* let _ = (if add_term then "TRUE - adding atom" else "FALSE - not adding atom") in *)
+        (* let _ = (if add_raw_term then "TRUE - adding raw atom" else "FALSE - not adding raw atom") in *)
         (* L.debug Analysis Quiet "JV: and_normalized_atoms: adding termination atom cond \n"; *)
-        if add_term then
+        if add_raw_term then
           (and_termcond_atoms phi orig_atom)
         else
           phi
       in
       
       SatUnsat.list_fold atoms ~init:(false, (upd_phi,new_eqs))
-        ~f:(fun (linear_changed, (phi,new_eqs)) atom ->
-          let+ changed', phi_new_eqs = and_normalized_atom (phi, new_eqs) atom in
+        ~f:(fun (linear_changed, phi_new_eqs) atom ->
+          let+ changed', phi_new_eqs = and_normalized_atom phi_new_eqs atom in
           (linear_changed || changed', phi_new_eqs) )
 
 
-    and and_atom atom (phi, new_eqs) add_term =
+    and and_atom atom (phi, new_eqs) ~add_raw_term =
       (* L.debug Analysis Quiet "JV: Calling and_normalized_atoms from and_atom \n"; *)
-      normalize_atom phi atom >>= and_normalized_atoms (phi, new_eqs) ~orig_atom:[atom] ~add_term:add_term
+      normalize_atom phi atom >>= and_normalized_atoms (phi, new_eqs) ~orig_atom:[atom] ~add_raw_term
 
     and and_var_is_zero v (phi, neweqs) =
       if Language.curr_language_is Erlang then
@@ -4032,23 +4032,23 @@ module Formula = struct
             Sat (phi, new_eqs)
         | Some atoms ->
            (* L.debug Analysis Quiet "JV: Calling and_normalized_atoms from and_var_term \n"; *)
-            and_normalized_atoms (phi, new_eqs) atoms ~orig_atom:atoms ~add_term:true >>| snd
+            and_normalized_atoms (phi, new_eqs) atoms ~orig_atom:atoms ~add_raw_term:true >>| snd
       in
       solve_normalized_term_eq ~fuel new_eqs t' v' phi
 
     (* interface *)
 
-    let and_atom atom phi_new_eqs add_term =
+    let and_atom atom phi_new_eqs ~add_raw_term =
       (* Debug.p "BEGIN and_atom %a@\n" (Atom.pp_with_pp_var Var.pp) atom ; *)
-      let phi_new_eqs' = and_atom atom phi_new_eqs add_term >>| snd in
+      let phi_new_eqs' = and_atom atom phi_new_eqs ~add_raw_term >>| snd in
       (* Debug.p "END and_atom %a -> %a@\n" (Atom.pp_with_pp_var Var.pp) atom 
         (SatUnsat.pp (Pp.pair ~fst:(pp_with_pp_var Var.pp) ~snd:pp_new_eqs))
           phi_new_eqs' ; *)
       phi_new_eqs'
 
 
-    let and_normalized_atoms phi_new_eqs atoms ~orig_atom ~add_term =
-      let phi_new_eqs' = and_normalized_atoms phi_new_eqs atoms ~orig_atom:orig_atom ~add_term:add_term >>| snd in
+    let and_normalized_atoms phi_new_eqs atoms ~orig_atom ~add_raw_term =
+      let phi_new_eqs' = and_normalized_atoms phi_new_eqs atoms ~orig_atom:orig_atom ~add_raw_term >>| snd in
       (* Debug.p "and_normalized_atoms [@[<v>%a@]] -> %a@\n" 
         (Pp.seq ~sep:";" (Atom.pp_with_pp_var Var.pp))
         atoms
@@ -4303,9 +4303,9 @@ module Intervals = struct
         Sat (phi, new_eqs)
 end
 
-let and_atom atom formula add_term =
+let and_atom atom formula ~add_raw_term:add_term =
   let open SatUnsat.Import in
-  let* updphi, new_eqs = Formula.Normalizer.and_atom atom (formula.phi, RevList.empty) add_term in
+  let* updphi, new_eqs = Formula.Normalizer.and_atom atom (formula.phi, RevList.empty) ~add_raw_term:add_term in
 
   (* let (termcond: Atom.Set.t) = (Formula.get_terminal_conds updphi) in *)
   (* let newphi = {formula with phi=updphi; term_conds=termcond} in *)
@@ -4338,7 +4338,7 @@ let and_mk_atom binop op1 op2 formula =
     Intervals.and_binop ~negated:false binop op1 op2 (formula, RevList.empty)
   in
   let atom = (mk_atom_of_binop binop) (Term.of_operand op1) (Term.of_operand op2) in
-  let+ formula, new_eqs' = and_atom atom formula false in
+  let+ formula, new_eqs' = and_atom atom formula ~add_raw_term:false in
   
   (** (old_formula, RevList.append new_eqs new_eqs') *)
   (** -JV for pulse-inf .. probably not the right fix *)
@@ -4355,7 +4355,7 @@ let and_not_equal = and_mk_atom Ne
 let and_is_int v formula =
   (* L.debug Analysis Quiet "JV: Calling and_is_int with arg FALSE \n"; *)
   let atom = Atom.equal (IsInt (Var v)) Term.one in
-  and_atom atom formula false
+  and_atom atom formula ~add_raw_term:false
 
 
 let and_less_equal = and_mk_atom Le
@@ -4364,25 +4364,25 @@ let and_less_than = and_mk_atom Lt
 
 let and_equal_unop v (op : Unop.t) x formula =
   let* formula = Intervals.unop v op x formula in
-  and_atom (Equal (Var v, Term.of_unop op (Term.of_operand x))) formula false
+  and_atom (Equal (Var v, Term.of_unop op (Term.of_operand x))) formula ~add_raw_term:false
 
 
 let and_equal_binop v (bop : Binop.t) x y formula =
   let* formula = Intervals.binop v bop x y formula in
-  and_atom (Equal (Var v, Term.of_binop bop (Term.of_operand x) (Term.of_operand y))) formula false
+  and_atom (Equal (Var v, Term.of_binop bop (Term.of_operand x) (Term.of_operand y))) formula ~add_raw_term:false
 
 
 let and_equal_string_concat v x y formula =
-  and_atom (Equal (Var v, StringConcat (Term.of_operand x, Term.of_operand y))) formula false
+  and_atom (Equal (Var v, StringConcat (Term.of_operand x, Term.of_operand y))) formula ~add_raw_term:false
 
 
-let prune_atom ~depth atom (formula, new_eqs) ifk =
+let prune_atom ~depth atom (formula, new_eqs) ifkind =
   (* Use [phi] to normalize [atom] here to take previous [prune]s into account. *)
   Debug.p "prune atom %a in %a@\n" (Atom.pp_with_pp_var Var.pp) atom pp formula ;
   let* normalized_atoms = Formula.Normalizer.normalize_atom formula.phi atom in
   let* phi, new_eqs =
     (* L.debug Analysis Quiet "JV: Calling and_normalized_atoms from prune_atom \n"; *)
-    Formula.Normalizer.and_normalized_atoms (formula.phi, new_eqs) normalized_atoms ~orig_atom:[atom] ~add_term:ifk
+    Formula.Normalizer.and_normalized_atoms (formula.phi, new_eqs) normalized_atoms ~orig_atom:[atom] ~add_raw_term:ifkind
   in
   (* Sticking this call in slightly hopefully *)
   let* phi, new_eqs = Formula.Normalizer.propagate_atom atom (phi, new_eqs) in
@@ -4529,7 +4529,7 @@ let and_equal_instanceof v1 v2 t ~nullable formula =
   let t = Tenv.expand_hack_alias_in_typ tenv t in
 
   let* formula, new_eqs' =
-    and_atom (Atom.equal (Var v1) (IsInstanceOf {var= v2; typ= t; nullable})) formula false
+    and_atom (Atom.equal (Var v1) (IsInstanceOf {var= v2; typ= t; nullable})) formula ~add_raw_term:false
 
   in
   let* formula, new_eqs' =
@@ -4540,7 +4540,7 @@ let and_equal_instanceof v1 v2 t ~nullable formula =
         let* phi, neweqs' =
           (* It might look odd to keep the instanceof around, but removing it messes up the latency calculations
              because there's then no dependency on v2 *)
-          Formula.Normalizer.and_atom (Atom.equal (Var v1) value_term) (formula.phi, new_eqs') false
+          Formula.Normalizer.and_atom (Atom.equal (Var v1) value_term) (formula.phi, new_eqs') ~add_raw_term:false
         in
         Sat ({formula with phi}, neweqs')
   in
@@ -4620,7 +4620,7 @@ let and_fold_subst_variables formula0 ~up_to_f:formula_foreign ~init ~f:f_var =
     IContainer.fold_of_pervasives_set_fold Atom.Set.fold atoms_foreign ~init:acc_phi_new_eqs
       ~f:(fun (acc_f, phi_new_eqs) atom_foreign ->
         let acc_f, atom = Atom.fold_subst_variables atom_foreign ~init:acc_f ~f_subst in
-        let phi_new_eqs = Formula.Normalizer.and_atom atom phi_new_eqs false |> sat_value_exn in
+        let phi_new_eqs = Formula.Normalizer.and_atom atom phi_new_eqs ~add_raw_term:false |> sat_value_exn in
         (acc_f, phi_new_eqs) )
   in
   let and_ phi_foreign acc phi =
