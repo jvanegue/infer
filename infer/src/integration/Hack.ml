@@ -79,6 +79,37 @@ module Peekable_in_channel = struct
   let peek_line {cur_line} = cur_line
 end
 
+type dump_input = Data of string | TextualModule of Textual.Module.t
+
+let dump_textual_to_tmp_file source_path ~extension input =
+  let textual_filename = TextualSil.to_filename source_path in
+  try
+    let filename =
+      IFilename.temp_file ~in_dir:(ResultsDir.get_path Temporary) textual_filename extension
+    in
+    match input with
+    | Data data ->
+        Out_channel.write_all filename ~data
+    | TextualModule textual ->
+        TextualSil.dump_module ~show_location:true ~filename textual
+  with Sys_error err ->
+    L.debug Capture Quiet "Error occurred during textual dump of %s: %s" source_path err
+
+
+let textual_to_sil file =
+  let open IResult.Let_syntax in
+  let open TextualParser in
+  let source_path = TextualFile.source_path file in
+  let* sourcefile, textual_parsed = TextualFile.parse file in
+  if Config.debug_mode then
+    dump_textual_to_tmp_file source_path ~extension:".parsed.sil" (TextualModule textual_parsed) ;
+  let textual_fixed = TextualTransform.fix_hackc_mistranslations textual_parsed in
+  if Config.debug_mode then
+    dump_textual_to_tmp_file source_path ~extension:".fixed.sil" (TextualModule textual_fixed) ;
+  let* textual_verified = TextualFile.verify sourcefile textual_fixed in
+  TextualFile.textual_to_sil sourcefile textual_verified
+
+
 (** Utility functions to consume (potentially) multi-file hackc output. *)
 module Unit : sig
   type t = private {source_path: string; content: string}
@@ -153,24 +184,14 @@ end = struct
         (count_opt, Seq.of_dispenser (fun () -> extract_unit pic))
 
 
-  let dump_textual_to_tmp_file source_path content =
-    let textual_filename = TextualSil.to_filename source_path in
-    try
-      let out_file =
-        IFilename.temp_file ~in_dir:(ResultsDir.get_path Temporary) textual_filename "sil"
-      in
-      Out_channel.write_all out_file ~data:content
-    with Sys_error err ->
-      L.debug Capture Quiet "Error occurred during textual dump of %s: %s" source_path err
-
-
   (** Translate and capture a textual unit. Returns [Ok] on success and [Error] if there were errors
       during capture. *)
   let capture_unit {source_path; content} =
     L.debug Capture Quiet "Capturing %s@\n" source_path ;
     let open TextualParser in
     let line_map = LineMap.create content in
-    let trans = TextualFile.translate (TranslatedFile {source_path; content; line_map}) in
+    let file : TextualParser.TextualFile.t = TranslatedFile {source_path; content; line_map} in
+    let trans = textual_to_sil file in
     let log_error sourcefile error =
       if Config.keep_going then (
         L.debug Capture Quiet "%a@\n" (pp_error sourcefile) error ;
@@ -188,7 +209,8 @@ end = struct
           List.iter errs ~f:(log_error sourcefile) ;
           Error ()
     in
-    if Config.debug_mode || Result.is_error trans then dump_textual_to_tmp_file source_path content ;
+    if Config.debug_mode || Result.is_error trans then
+      dump_textual_to_tmp_file source_path (Data content) ~extension:".hackc.sil" ;
     res
 end
 
@@ -444,7 +466,7 @@ let load_textual_models filenames =
   let acc_tenv = Tenv.create () in
   List.iter filenames ~f:(fun filename ->
       L.debug Capture Quiet "Loading textual models in %s@\n" filename ;
-      match TextualParser.TextualFile.translate (StandaloneFile filename) with
+      match textual_to_sil (StandaloneFile filename) with
       | Ok sil ->
           TextualParser.TextualFile.capture ~use_global_tenv:true sil ;
           Tenv.merge ~src:sil.tenv ~dst:acc_tenv

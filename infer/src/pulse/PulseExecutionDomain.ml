@@ -200,9 +200,15 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
 
     (* This brings 30% less false positives but also remove 10-15% of real bugs involving goto *)
     (* This should stay enabled in the upstream version to minimize FP *)
-    let phys_equal4 (a,b,c,d) (e,f,g,h) =
-      (phys_equal a e) && (phys_equal b f) && (phys_equal c g) && (phys_equal d h)
+
+    let phys_equal3 (a,b,c) (e,f,g) =
+      (phys_equal a e) && (phys_equal b f) && (phys_equal c g)
     in
+    
+    (* let phys_equal4 (a,b,c,d) (e,f,g,h) =
+      (phys_equal a e) && (phys_equal b f) && (phys_equal c g) && (phys_equal d h)
+    in *)
+    
     (* end 30% FP diminish *)
     (* let cmp_four _ _ = false in *)    
     
@@ -212,9 +218,12 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
     | (hd,idx)::tl ->
        let cond = extract_pathcond hd in
        let pathcond = Formula.extract_path_cond cond in
-       let termcond = Formula.extract_term_cond cond in
+       (* let termcond = Formula.extract_term_cond cond in *)
        let termcond2 = Formula.extract_term_cond2 cond in
-       let key = (cfgnode,termcond,pathcond,termcond2) in
+
+       (* let key = (cfgnode,termcond,pathcond,termcond2) in *)
+       let key = (cfgnode,pathcond,termcond2) in
+       
        let dl_ws = get_widenstate () in
        match dl_ws with
        | None -> L.debug Analysis Quiet "PULSEINF: widenstate htable NONE - should never happen! num_iter %u \n" num_iters; -1 
@@ -226,10 +235,10 @@ let back_edge (prev: t list) (next: t list) (num_iters: int)  : t list * int =
                 let _ = add_widenstate key in
                 record_pathcond tl ([key] @ kl)
              | Some _ ->
-                match (Formula.set_is_empty termcond),(Formula.map_is_empty pathcond),(Formula.termset_is_empty termcond2) with 
-                | true,true,true -> idx (* -2 *)
+                match (Formula.map_is_empty pathcond),(Formula.termset_is_empty termcond2) with 
+                | true,true -> idx (* -2 *)
                 | _ ->
-                   let test = (List.mem ~equal:phys_equal4 kl key) in
+                   let test = (List.mem ~equal:phys_equal3 kl key) in
                    if test then 
                      (
                      (* (L.debug Analysis Quiet "PULSEINF: Recorded pathcond ALREADY in htable (SAME ITER NO BUG) idx %d numiter %u \n" idx num_iters; *) -2)

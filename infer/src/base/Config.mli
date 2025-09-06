@@ -102,6 +102,8 @@ val abstract_pulse_models_for_erlang : bool
 
 val analysis_schedule_file : string option
 
+val android_view_class_list : string list
+
 val annotation_reachability_apply_superclass_annotations : bool
 
 val annotation_reachability_check_loops : bool
@@ -787,6 +789,10 @@ val scheduler : scheduler
 val scope_leakage_config : Yojson.Safe.t
 
 val select : [`All | `Select of int] option
+
+val semdiff_current : string option
+
+val semdiff_previous : string option
 
 val shrink_analysis_db : bool
 

@@ -182,25 +182,78 @@ let pp_space_specialization fmt =
   module NonDisjDomain = NonDisjDomain
                  
   type analysis_data = PulseSummary.t InterproceduralAnalysis.t
-                     
-  (* Call on back_edge from widen in AbstractInterpreter.ml *)
+
+
+  (* Infinite Loop logic -- updated to using zip and unzip. 
+     Unfortunately this seems to introduce regressions, so we disable it for now *)
+  (* Called from widen in AbstractInterpreter.ml *)
+  (*
   let back_edge (prev:DisjDomain.t list) (next:DisjDomain.t list) (num_iters:int)  : DisjDomain.t list * int =
-    
     let plist,rplist = List.unzip prev in
-    let nlist,rnlist = List.unzip next in    
+    let nlist,_ = List.unzip next in    
+    let dbe,cnt = (ExecutionDomain.back_edge plist nlist num_iters) in
+    let pts = PathContext.initial in
+    let res = if (cnt > 0) then
+                let newplist = (plist @ dbe) in
+                let newrplist = (rplist @ [pts]) in
+                match (List.zip newplist newrplist) with
+                | Unequal_lengths -> L.debug Analysis Quiet "PULSEINF: Zipping lists of unequal lengths ERROR \n"; prev
+                | Ok result -> result
+              else
+                prev            
+    in
+    (res,-1)
+  *)
+  (* END OF BACK-EDGE CODE *)
+
+  (* old known-to-work back-edge code *)
+ let back_edge (prev:DisjDomain.t list) (next:DisjDomain.t list) (num_iters:int)  : DisjDomain.t list * int =
+
+    (* let plen,nlen = List.length(prev), List.length(next) in 
+    L.debug Analysis Quiet "PULSEINF: BACKEDGE NUMITER %d Number of Prev state = %d Number of Post states = %d \n" num_iters plen nlen; *)
+    
+    let rec listpair_split (l:DisjDomain.t list) (o1:ExecutionDomain.t list) (o2:PathContext.t list) =
+      match l with
+      | [] -> (o1,o2)
+      | (ed,pc)::tail -> listpair_split tail (ed::o1) (pc::o2)
+    in
+    let listpair_combine (l1:ExecutionDomain.t list) (l2: PathContext.t list) : (ExecutionDomain.t * PathContext.t) list =
+      
+      let l1len,l2len = (List.length l1),(List.length l2) in
+      (* L.debug Analysis Quiet "JV: listpair_combine L1 len = %u L2 len = %u \n" l1len l2len; *)
+      if (l1len <> l2len) then [] else
+        
+        let rec listpair_combine_int (l1:ExecutionDomain.t list) (l2: PathContext.t list) (out: (ExecutionDomain.t * PathContext.t) list)
+                : (ExecutionDomain.t * PathContext.t) list =
+          match (l1,l2) with
+          | hd::tl, hd2::tl2  -> let p = (hd,hd2) in listpair_combine_int tl tl2 (out @ [p])
+          | [],[]             -> out
+          | _                 -> L.debug Analysis Quiet "PULSEINF: BACKEDGE MISMATCH in list size to recombine. Should never happen! \n"; out
+        in listpair_combine_int l1 l2 []
+    in
+    let plist,rplist = listpair_split prev [] [] in
+    let nlist,rnlist = listpair_split next [] [] in
     let dbe,cnt      = (ExecutionDomain.back_edge plist nlist num_iters) in
+    let _,_       = (PathContext.back_edge rplist rnlist num_iters) in    
     let (pathctx: PathContext.t option) = (List.nth rnlist cnt) in
+
     let used,pts =
       match (pathctx) with
       | Some p -> 1, p
-      | None ->
-         L.debug Analysis Quiet "PULSEINF: PATHCTX DEBUG: not finding back pathctx at provided index  - this should never happen \n";
-         0, PathContext.initial
-            
+      | _ ->
+         L.debug Analysis Quiet "PULSEINF: PATHCTX DEBUG: not finding back pathctx at provided index  - this should never happen \n"; 
+         0, PathContext.initial (* pathctx is None *)
+
     in
-    let res = if (used > 0 && cnt >= 0) then List.zip_exn (plist @ dbe) (rplist @ [pts]) else prev
-    in (res,-1)
-  (* END OF BACK-EDGE CODE *)
+    (* L.debug Analysis Quiet "JV PATHCTX: dbe len = %u pts len = 1 \n" (List.length dbe); *)
+    (* L.debug Analysis Quiet "PULSEINF: Prev MODIFIED %b (if true added Infinite state) \n" (used > 0 && cnt >= 0); *)
+    
+    let res = if (used > 0 && cnt >= 0) then
+                listpair_combine (plist @ dbe) (rplist @ [pts])
+              else prev (* listpair_combine plist rplist *)
+    in
+    (res,-1)
+ (* END OF BACK-EDGE CODE *)
                      
   let get_pvar_formals pname =
     IRAttributes.load pname |> Option.map ~f:ProcAttributes.get_pvar_formals
