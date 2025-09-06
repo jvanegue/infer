@@ -183,9 +183,8 @@ let pp_space_specialization fmt =
                  
   type analysis_data = PulseSummary.t InterproceduralAnalysis.t
 
-
-  (* Infinite Loop logic -- updated to using zip and unzip. 
-     Unfortunately this seems to introduce regressions, so we disable it for now *)
+  (* Infinite Loop logic updated using zip and unzip. 
+     Unfortunately this introduces new FP -> disable it for now *)
   (* Called from widen in AbstractInterpreter.ml *)
   (*
   let back_edge (prev:DisjDomain.t list) (next:DisjDomain.t list) (num_iters:int)  : DisjDomain.t list * int =
@@ -207,6 +206,7 @@ let pp_space_specialization fmt =
   (* END OF BACK-EDGE CODE *)
 
   (* old known-to-work back-edge code *)
+  (* known to work *)
  let back_edge (prev:DisjDomain.t list) (next:DisjDomain.t list) (num_iters:int)  : DisjDomain.t list * int =
 
     (* let plen,nlen = List.length(prev), List.length(next) in 
