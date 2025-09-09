@@ -2141,7 +2141,7 @@ and ondemand_callchain_limit =
 
 
 and ondemand_recursion_restart_limit =
-  CLOpt.mk_int ~long:"ondemand-recursion-restart-limit" ~default:100
+  CLOpt.mk_int ~long:"ondemand-recursion-restart-limit" ~default:2
     ~in_help:InferCommand.[(Analyze, manual_generic)]
     "In order to make the analysis of mutual recursion cycles deterministic in their output, the \
      analysis of a cycle of mutually recursive functions may restart the analysis of the entire \
