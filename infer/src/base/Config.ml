@@ -145,6 +145,8 @@ let java_lambda_marker_infix_generated_by_javalib = "$Lambda$"
 
 let java_lambda_marker_prefix_generated_by_javac = "lambda$"
 
+let manual_android = "ANDROID OPTIONS"
+
 let manual_buck = "BUCK OPTIONS"
 
 let manual_buffer_overrun = "BUFFER OVERRUN OPTIONS"
@@ -471,7 +473,7 @@ let () =
     match cmd with
     | Report ->
         `Add
-    | Analyze | Capture | Compile | Debug | Explore | Help | ReportDiff | Run ->
+    | Analyze | Capture | Compile | Debug | Explore | Help | ReportDiff | Run | SemDiff ->
         `Reject
   in
   (* make sure we generate doc for all the commands we know about *)
@@ -558,6 +560,14 @@ and analysis_schedule_file =
     ~in_help:InferCommand.[(Analyze, manual_scheduler)]
     ( "The file where an analysis schedule is stored. The default is "
     ^ ResultsDirEntryName.get_path ~results_dir:"infer-out" AnalysisDependencyGraph )
+
+
+and android_view_class_list =
+  CLOpt.mk_string_list ~long:"android-view-class-list"
+    ~in_help:InferCommand.[(Analyze, manual_android)]
+    ~default:["android.view.View"]
+    "A class C is considered a view when it has a supertype that matches one of these classes. The \
+     default is [`android.view.View`]."
 
 
 and annotation_reachability_apply_superclass_annotations =
@@ -656,7 +666,7 @@ and ( bo_debug
         match command with
         | Debug | Explore | Help ->
             None
-        | (Analyze | Capture | Compile | Report | ReportDiff | Run) as command ->
+        | (Analyze | Capture | Compile | Report | ReportDiff | Run | SemDiff) as command ->
             Some (command, manual_generic) )
   in
   let bo_debug =
@@ -3194,6 +3204,18 @@ and select =
     "Select option number $(i,N) or $(i,all) of them. If omitted, prompt for input."
 
 
+and semdiff_current =
+  CLOpt.mk_path_opt ~long:"semdiff-current"
+    ~in_help:InferCommand.[(SemDiff, manual_generic)]
+    "Current python program to be analysed by semdiff"
+
+
+and semdiff_previous =
+  CLOpt.mk_path_opt ~long:"semdiff-previous"
+    ~in_help:InferCommand.[(SemDiff, manual_generic)]
+    "Previous python program to be analysed by semdiff"
+
+
 and shrink_analysis_db =
   CLOpt.mk_bool ~long:"shrink-analysis-db"
     ~in_help:InferCommand.[(Analyze, manual_generic)]
@@ -3812,6 +3834,8 @@ let rest = !rest
 and abstract_pulse_models_for_erlang = !abstract_pulse_models_for_erlang
 
 and analysis_schedule_file = !analysis_schedule_file
+
+and android_view_class_list = RevList.to_list !android_view_class_list
 
 and annotation_reachability_apply_superclass_annotations =
   !annotation_reachability_apply_superclass_annotations
@@ -4724,6 +4748,10 @@ and select =
     with _ ->
       L.die UserError "Wrong argument for --select: expected an integer or \"all\" but got '%s'" n )
 
+
+and semdiff_current = !semdiff_current
+
+and semdiff_previous = !semdiff_previous
 
 and shrink_analysis_db = !shrink_analysis_db
 

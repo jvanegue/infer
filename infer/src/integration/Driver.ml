@@ -230,7 +230,7 @@ let capture ~changed_files mode =
           Hack.capture ~prog ~args
       | Textual {textualfiles} ->
           List.map textualfiles ~f:(fun x -> TextualParser.TextualFile.StandaloneFile x)
-          |> TextualParser.capture
+          |> TextualParser.textual_frontend_capture
       | XcodeBuild {prog; args} ->
           L.progress "Capturing in xcodebuild mode...@." ;
           XcodeBuild.capture ~prog ~args
@@ -339,7 +339,7 @@ let analyze_and_report ~changed_files mode =
   match (Config.command, mode) with
   | _ when Config.infer_is_clang || Config.infer_is_javac ->
       (* Called from another integration to do capture only. *) ()
-  | (Capture | Compile | Debug | Explore | Help | Report | ReportDiff), _ ->
+  | (Capture | Compile | Debug | Explore | Help | Report | ReportDiff | SemDiff), _ ->
       ()
   | (Analyze | Run), _ when Config.invalidate_only ->
       ()

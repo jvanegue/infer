@@ -9,18 +9,39 @@ open! IStd
 module L = Logging
 open Textual
 
-(* returns all the idents that are defined in the procdesc *)
-let collect_ident_defs ({nodes} : ProcDesc.t) : Ident.Set.t =
-  List.fold nodes ~init:Ident.Set.empty ~f:(fun set (node : Node.t) ->
-      let set =
-        List.fold node.ssa_parameters ~init:set ~f:(fun set (id, _) -> Ident.Set.add id set)
+let get_fresh_ident ({nodes; fresh_ident} : ProcDesc.t) =
+  match fresh_ident with
+  | None ->
+      let idents =
+        (* all the idents that are defined in the procdesc *)
+        List.fold nodes ~init:Ident.Set.empty ~f:(fun set (node : Node.t) ->
+            let set =
+              List.fold node.ssa_parameters ~init:set ~f:(fun set (id, _) -> Ident.Set.add id set)
+            in
+            List.fold node.instrs ~init:set ~f:(fun set (instr : Instr.t) ->
+                match instr with
+                | Load {id} | Let {id= Some id} ->
+                    Ident.Set.add id set
+                | Store _ | Prune _ | Let _ ->
+                    set ) )
       in
-      List.fold node.instrs ~init:set ~f:(fun set (instr : Instr.t) ->
-          match instr with
-          | Load {id} | Let {id= Some id} ->
-              Ident.Set.add id set
-          | Store _ | Prune _ | Let _ ->
-              set ) )
+      Ident.fresh idents
+  | Some fresh_ident ->
+      fresh_ident
+
+
+let create_fresh_label_generator ~prefix ({nodes} : ProcDesc.t) =
+  let labels : NodeName.Set.t =
+    List.fold nodes ~init:NodeName.Set.empty ~f:(fun set (node : Node.t) ->
+        NodeName.Set.add node.label set )
+  in
+  let counter = ref 0 in
+  let rec fresh_label () =
+    let name : NodeName.t = {value= Printf.sprintf "%s%d" prefix !counter; loc= Location.Unknown} in
+    incr counter ;
+    if NodeName.Set.mem name labels then fresh_label () else name
+  in
+  fresh_label
 
 
 let module_map_procs ~f (module_ : Module.t) =
@@ -28,6 +49,19 @@ let module_map_procs ~f (module_ : Module.t) =
   let decls =
     List.map module_.decls ~f:(fun decl ->
         match decl with Proc pdesc -> Proc (f pdesc) | Global _ | Struct _ | Procdecl _ -> decl )
+  in
+  {module_ with decls}
+
+
+let module_map_procdecl ~f (module_ : Module.t) =
+  let open Module in
+  let decls =
+    List.map module_.decls ~f:(fun decl ->
+        match decl with
+        | Procdecl pdecl ->
+            Procdecl (f pdecl)
+        | Global _ | Struct _ | Proc _ ->
+            decl )
   in
   {module_ with decls}
 
@@ -54,6 +88,8 @@ module FixClosureAppExpr = struct
 
   let of_procdesc globals pdesc =
     let open ProcDesc in
+    if Option.is_some pdesc.fresh_ident then
+      L.die InternalError "we assume fresh ident has not been computed yet" ;
     let globals_and_locals =
       List.fold pdesc.locals ~init:globals ~f:(fun set (varname, _) ->
           IString.Set.add varname.VarName.value set )
@@ -77,6 +113,8 @@ module FixClosureAppExpr = struct
       match exp with
       | Var _ | Lvar _ | Const _ | Typ _ ->
           exp
+      | If {cond; then_; else_} ->
+          If {cond= of_bexp cond; then_= of_exp then_; else_= of_exp else_}
       | Load l ->
           Load {l with exp= of_exp l.exp}
       | Field f ->
@@ -92,6 +130,17 @@ module FixClosureAppExpr = struct
           Closure {proc; captured= List.map captured ~f:of_exp; params; attributes}
       | Apply {closure; args} ->
           Apply {closure= of_exp closure; args= List.map args ~f:of_exp}
+    and of_bexp bexp =
+      let open BoolExp in
+      match bexp with
+      | Exp exp ->
+          Exp (of_exp exp)
+      | Not bexp ->
+          Not (of_bexp bexp)
+      | And (bexp1, bexp2) ->
+          And (of_bexp bexp1, of_bexp bexp2)
+      | Or (bexp1, bexp2) ->
+          Or (of_bexp bexp1, of_bexp bexp2)
     in
     let of_instr instr =
       let open Instr in
@@ -104,18 +153,6 @@ module FixClosureAppExpr = struct
           Prune {args with exp= of_exp args.exp}
       | Let args ->
           Let {args with exp= of_exp args.exp}
-    in
-    let rec of_bexp bexp =
-      let open BoolExp in
-      match bexp with
-      | Exp exp ->
-          Exp (of_exp exp)
-      | Not bexp ->
-          Not (of_bexp bexp)
-      | And (bexp1, bexp2) ->
-          And (of_bexp bexp1, of_bexp bexp2)
-      | Or (bexp1, bexp2) ->
-          Or (of_bexp bexp1, of_bexp bexp2)
     in
     let rec of_terminator t =
       let open Terminator in
@@ -194,6 +231,7 @@ module FixHackWrapper = struct
           in
           {last_node with Node.instrs} :: others |> List.rev
     in
+    (* no need to update fresh_ident *)
     {pdesc with nodes}
 
 
@@ -205,6 +243,94 @@ module FixHackWrapper = struct
         if has_wrapper_attr && not (is_forward_to_static_method_wrapper pdesc) then
           replace_forward_call pdesc
         else pdesc )
+end
+
+module FixHackInvokeClosure = struct
+  let fix_proc_name (type_name : TypeName.t) (name : ProcName.t) =
+    let str_name = type_name.name.value in
+    match String.substr_index_all str_name ~may_overlap:false ~pattern:"::" |> List.last with
+    | Some last_pos ->
+        let chopped_str_name =
+          String.sub str_name ~pos:0 ~len:last_pos |> String.chop_prefix_exn ~prefix:"Closure$"
+        in
+        let chopped_type_name =
+          {type_name with TypeName.name= {type_name.name with BaseTypeName.value= chopped_str_name}}
+        in
+        let chopped_static_type_name =
+          { type_name with
+            TypeName.name= {type_name.name with BaseTypeName.value= chopped_str_name ^ "$static"} }
+        in
+        ( chopped_type_name
+        , {QualifiedProcName.enclosing_class= Enclosing chopped_static_type_name; name} )
+    | _ ->
+        (* should not happen *)
+        (type_name, {QualifiedProcName.enclosing_class= Enclosing type_name; name})
+
+
+  let this_varname : VarName.t = VarName.of_string "$this"
+
+  let transform_instrs hashtbl class_name instrs =
+    let rec aux acc = function
+      | Instr.Let
+          { id= Some ret_id
+          ; exp=
+              Call
+                { proc= {enclosing_class= Enclosing class_name_call; name} as to_be_fixed_proc
+                ; args
+                ; kind= NonVirtual }
+          ; loc= loc1 }
+        :: Instr.Load {id= cls_id; exp= Lvar varname; loc= loc2}
+        :: rev_instrs
+        when TypeName.equal class_name_call class_name && VarName.equal varname this_varname ->
+          let fixed_typed_name, fixed_proc = fix_proc_name class_name_call name in
+          let fixed_call_exp = Exp.Call {proc= fixed_proc; args; kind= NonVirtual} in
+          let fixed_call_instr = Instr.Let {id= Some ret_id; exp= fixed_call_exp; loc= loc1} in
+          let fixed_lazy_init_instr =
+            Instr.Let
+              { id= Some cls_id
+              ; exp=
+                  Call
+                    { proc= ProcDecl.lazy_class_initialize_builtin
+                    ; args= [Exp.Typ (Typ.Struct fixed_typed_name)]
+                    ; kind= NonVirtual }
+              ; loc= loc2 }
+          in
+          QualifiedProcName.Hashtbl.replace hashtbl to_be_fixed_proc fixed_proc ;
+          aux (fixed_lazy_init_instr :: fixed_call_instr :: acc) rev_instrs
+      | instr :: rev_instrs ->
+          aux (instr :: acc) rev_instrs
+      | [] ->
+          acc
+    in
+    let rev_instrs = List.rev instrs in
+    aux [] rev_instrs
+
+
+  let transform_invoke hashtbl (pdesc : ProcDesc.t) =
+    let qualified_procname = pdesc.procdecl.qualified_name in
+    if QualifiedProcName.is_hack_closure_generated_invoke qualified_procname then
+      match qualified_procname.enclosing_class with
+      | Enclosing class_name ->
+          let nodes =
+            List.map pdesc.nodes ~f:(fun (node : Node.t) ->
+                {node with instrs= transform_instrs hashtbl class_name node.instrs} )
+          in
+          {pdesc with nodes}
+      | _ ->
+          pdesc
+    else pdesc
+
+
+  let fix_decls hashtbl module_ =
+    module_map_procdecl module_ ~f:(fun ({qualified_name} as pdecl) ->
+        QualifiedProcName.Hashtbl.find_opt hashtbl qualified_name
+        |> Option.value_map ~default:pdecl ~f:(fun qualified_name -> {pdecl with qualified_name}) )
+
+
+  let transform module_ =
+    let hashtbl = QualifiedProcName.Hashtbl.create 16 in
+    let module_ = module_map_procs module_ ~f:(transform_invoke hashtbl) in
+    if QualifiedProcName.Hashtbl.length hashtbl > 0 then fix_decls hashtbl module_ else module_
 end
 
 module Subst = struct
@@ -221,6 +347,8 @@ module Subst = struct
         Field {f with exp= of_exp_one f.exp ~id ~by}
     | Index (exp1, exp2) ->
         Index (of_exp_one exp1 ~id ~by, of_exp_one exp2 ~id ~by)
+    | If _ ->
+        L.die InternalError "TODO: Textual If statement"
     | Call f ->
         Call {f with args= List.map f.args ~f:(fun exp -> of_exp_one exp ~id ~by)}
     | Closure {proc; captured; params; attributes} ->
@@ -248,6 +376,8 @@ module Subst = struct
         Field {f with exp= of_exp f.exp eqs}
     | Index (exp1, exp2) ->
         Index (of_exp exp1 eqs, of_exp exp2 eqs)
+    | If _ ->
+        L.die InternalError "TODO: Textual If statement"
     | Call f ->
         Call {f with args= List.map f.args ~f:(fun exp -> of_exp exp eqs)}
     | Closure {proc; captured; params; attributes} ->
@@ -304,6 +434,7 @@ module Subst = struct
 
   let of_procdesc pdesc eqs =
     let open ProcDesc in
+    (* no need to update fresh_ident *)
     {pdesc with nodes= List.map pdesc.nodes ~f:(fun node -> of_node node eqs)}
 end
 
@@ -327,6 +458,7 @@ module State = struct
   type t =
     { instrs_rev: Instr.t list
     ; fresh_ident: Ident.t
+    ; may_need_iteration: bool
     ; pdesc: ProcDesc.t
     ; closure_declarations: ClosureDeclarations.t }
 
@@ -489,160 +621,12 @@ module TransformClosures = struct
       ; label_loc= loc }
     in
     let params = this_var :: params in
+    let fresh_ident = Some (Ident.next state.fresh_ident) in
     let state = {state with fresh_ident= save_fresh_ident} in
-    (state, {procdecl; nodes= [node]; start; params; locals= []; exit_loc= loc})
+    (state, {procdecl; nodes= [node]; fresh_ident; start; params; locals= []; exit_loc= loc})
 end
 
-let remove_effects_in_subexprs lang decls_env _module =
-  let fresh_closure_counter =
-    let counter = ref (-1) in
-    fun () ->
-      incr counter ;
-      !counter
-  in
-  let rec flatten_exp loc (exp : Exp.t) state : Exp.t * State.t =
-    match exp with
-    | Var _ | Lvar _ | Const _ | Typ _ ->
-        (exp, state)
-    | Load {exp; typ} ->
-        let exp, state = flatten_exp loc exp state in
-        let fresh = state.State.fresh_ident in
-        let new_instr : Instr.t = Load {id= fresh; exp; typ; loc} in
-        (Var fresh, State.push_instr new_instr state |> State.incr_fresh)
-    | Field f ->
-        let exp, state = flatten_exp loc f.exp state in
-        (Field {f with exp}, state)
-    | Index (exp1, exp2) ->
-        let exp1, state = flatten_exp loc exp1 state in
-        let exp2, state = flatten_exp loc exp2 state in
-        (Index (exp1, exp2), state)
-    | Call {proc; args; kind} ->
-        let args, state = flatten_exp_list loc args state in
-        if ProcDecl.is_side_effect_free_sil_expr proc then (Call {proc; args; kind}, state)
-        else
-          let fresh = state.State.fresh_ident in
-          let new_instr : Instr.t = Let {id= Some fresh; exp= Call {proc; args; kind}; loc} in
-          (Var fresh, State.push_instr new_instr state |> State.incr_fresh)
-    | Closure {proc; captured; params; attributes} ->
-        let captured, state = flatten_exp_list loc captured state in
-        let signature = TransformClosures.signature_body lang proc captured params in
-        let closure =
-          match TextualDecls.get_procdesc decls_env signature with
-          | Some procdecl ->
-              procdecl
-          | None ->
-              L.die InternalError "TextualBasicVerication should make this situation impossible"
-        in
-        let typename =
-          TransformClosures.typename ~fresh_closure_counter _module.Module.sourcefile attributes loc
-        in
-        let id_object = state.State.fresh_ident in
-        let state = State.incr_fresh state in
-        let instrs, fields =
-          TransformClosures.closure_building_instrs id_object loc typename closure captured
-        in
-        let state =
-          List.fold instrs ~init:state ~f:(fun state instr -> State.push_instr instr state)
-        in
-        let struct_ = TransformClosures.type_declaration typename fields in
-        let state = State.incr_fresh state in
-        let loc = if Lang.equal lang Python then Location.decr_line loc else loc in
-        let state =
-          if not (State.ClosureDeclarations.mem typename state.closure_declarations) then
-            let state, call_procdecl =
-              TransformClosures.closure_call_procdesc loc typename state closure fields params
-            in
-            State.add_closure_declaration struct_ call_procdecl state
-          else state
-        in
-        (Var id_object, state)
-    | Apply {closure; args} ->
-        let closure, state = flatten_exp loc closure state in
-        let args, state = flatten_exp_list loc args state in
-        let fresh = state.State.fresh_ident in
-        let new_instr : Instr.t =
-          Let {id= Some fresh; exp= TransformClosures.closure_call_exp loc closure args; loc}
-        in
-        (Var fresh, State.push_instr new_instr state |> State.incr_fresh)
-  and flatten_exp_list loc exp_list state =
-    let exp_list, state =
-      List.fold exp_list ~init:([], state) ~f:(fun (args, state) exp ->
-          let exp, state = flatten_exp loc exp state in
-          (exp :: args, state) )
-    in
-    (List.rev exp_list, state)
-  in
-  let flatten_in_instr (instr : Instr.t) state : State.t =
-    match instr with
-    | Load ({exp; loc} as args) ->
-        let exp, state = flatten_exp loc exp state in
-        State.push_instr (Load {args with exp}) state
-    | Store ({exp1; exp2; loc} as args) ->
-        let exp1, state = flatten_exp loc exp1 state in
-        let exp2, state = flatten_exp loc exp2 state in
-        State.push_instr (Store {args with exp1; exp2}) state
-    | Prune {exp; loc} ->
-        let exp, state = flatten_exp loc exp state in
-        State.push_instr (Prune {exp; loc}) state
-    | Let {id; exp= Call {proc; args; kind}; loc}
-      when not (ProcDecl.is_side_effect_free_sil_expr proc) ->
-        let args, state = flatten_exp_list loc args state in
-        State.push_instr (Let {id; exp= Call {proc; args; kind}; loc}) state
-    | Let {id; exp; loc} ->
-        let exp, state = flatten_exp loc exp state in
-        State.push_instr (Let {id; exp; loc}) state
-  in
-  let flatten_in_terminator loc (last : Terminator.t) state : Terminator.t * State.t =
-    match last with
-    | If _ ->
-        L.die InternalError "remove_internal_calls should not be called on If terminator"
-    | Ret exp ->
-        let exp, state = flatten_exp loc exp state in
-        (Ret exp, state)
-    | Jump node_calls ->
-        let node_calls_rev, state =
-          List.fold node_calls ~init:([], state)
-            ~f:(fun (node_calls, state) {Terminator.label; ssa_args} ->
-              let ssa_args, state = flatten_exp_list loc ssa_args state in
-              ({Terminator.label; ssa_args} :: node_calls, state) )
-        in
-        (Jump (List.rev node_calls_rev), state)
-    | Throw exp ->
-        let exp, state = flatten_exp loc exp state in
-        (Throw exp, state)
-    | Unreachable ->
-        (last, state)
-  in
-  let flatten_node (node : Node.t) pdesc fresh_ident closure_declarations =
-    let state =
-      let init : State.t = {instrs_rev= []; fresh_ident; pdesc; closure_declarations} in
-      List.fold node.instrs ~init ~f:(fun state instr -> flatten_in_instr instr state)
-    in
-    let last, ({instrs_rev; fresh_ident} : State.t) =
-      flatten_in_terminator node.last_loc node.last state
-    in
-    ({node with last; instrs= List.rev instrs_rev}, fresh_ident, state.closure_declarations)
-  in
-  let flatten_pdesc (pdesc : ProcDesc.t) closure_declarations =
-    let fresh = collect_ident_defs pdesc |> Ident.fresh in
-    let _, closure_declarations, rev_nodes =
-      List.fold pdesc.nodes ~init:(fresh, closure_declarations, [])
-        ~f:(fun (fresh, closure_declarations, instrs) node ->
-          let node, fresh, closure_declarations =
-            flatten_node node pdesc fresh closure_declarations
-          in
-          (fresh, closure_declarations, node :: instrs) )
-    in
-    ({pdesc with nodes= List.rev rev_nodes}, closure_declarations)
-  in
-  let module_, closure_declarations =
-    module_fold_procs ~init:State.ClosureDeclarations.empty ~f:flatten_pdesc _module
-  in
-  ( {module_ with decls= closure_declarations.decls @ module_.decls}
-  , not (State.ClosureDeclarations.is_empty closure_declarations) )
-
-
-let remove_if_terminator module_ =
+module RemoveIf = struct
   (* first transform if conditions into disjunctions of conjunctions of possibly-negated
      atoms (expressions) then use this form to build the CFG by jumping to each disjunct
      non-deterministically and in each of them asserting each conjunct in sequence *)
@@ -669,7 +653,8 @@ let remove_if_terminator module_ =
           And (neg bexp1, neg bexp2)
     in
     pos bexp
-  in
+
+
   let disjunctive_normal_form bexp =
     let open BoolExp in
     let rec dnf (bexp : BoolExp.t) : BoolExp.t =
@@ -692,12 +677,58 @@ let remove_if_terminator module_ =
               And (bexp1, bexp2) )
     in
     dnf bexp
-  in
-  let transform pdesc =
-    let labels : NodeName.Set.t =
-      List.fold pdesc.ProcDesc.nodes ~init:NodeName.Set.empty ~f:(fun set (node : Node.t) ->
-          NodeName.Set.add node.label set )
+
+
+  let transform_exp (pdesc : ProcDesc.t) =
+    let fresh_label = create_fresh_label_generator ~prefix:"if_exp" pdesc in
+    let rec transform_instrs rev_instrs rev_nodes node instrs =
+      match instrs with
+      | Instr.Let {id= Some id; exp= If {cond; then_; else_}; loc} :: instrs ->
+          let next_label = fresh_label () in
+          let mk_branch_node exp : Node.t =
+            { label= fresh_label ()
+            ; ssa_parameters= []
+            ; exn_succs= []
+            ; last= Jump [{label= next_label; ssa_args= [exp]}]
+            ; instrs= []
+            ; last_loc= loc
+            ; label_loc= loc }
+          in
+          let typ =
+            Typ.(Ptr Void)
+            (* TODO find a better type *)
+          in
+          let next_node : Node.t =
+            {node with label= next_label; ssa_parameters= [(id, typ)]; instrs; label_loc= loc}
+          in
+          let then_node = mk_branch_node then_ in
+          let else_node = mk_branch_node else_ in
+          let interrupted_node : Node.t =
+            { node with
+              last=
+                If
+                  { bexp= cond
+                  ; then_= Jump [{label= then_node.label; ssa_args= []}]
+                  ; else_= Jump [{label= else_node.label; ssa_args= []}] }
+            ; instrs= List.rev rev_instrs
+            ; last_loc= loc }
+          in
+          let rev_nodes = then_node :: else_node :: interrupted_node :: rev_nodes in
+          transform_instrs [] rev_nodes next_node instrs
+      | instr :: instrs ->
+          transform_instrs (instr :: rev_instrs) rev_nodes node instrs
+      | [] ->
+          {node with Node.instrs= List.rev rev_instrs} :: rev_nodes
     in
+    let rev_nodes =
+      List.fold pdesc.nodes ~init:[] ~f:(fun rev_nodes node ->
+          transform_instrs [] rev_nodes node node.Node.instrs )
+    in
+    {pdesc with nodes= List.rev rev_nodes}
+
+
+  let transform_terminator pdesc =
+    let fresh_label = create_fresh_label_generator ~prefix:"if" pdesc in
     let predecessors_count : NodeName.t -> int =
       (* we count how many predecessors a node has *)
       let get label map = NodeName.Map.find_opt label map |> Option.value ~default:0 in
@@ -718,15 +749,6 @@ let remove_if_terminator module_ =
                    NodeName.Map.add label (count + 1) map ) )
       in
       fun label -> get label map
-    in
-    let fresh_label =
-      let counter = ref 0 in
-      let rec fresh_label () =
-        let name : NodeName.t = {value= Printf.sprintf "if%d" !counter; loc= Location.Unknown} in
-        incr counter ;
-        if NodeName.Set.mem name labels then fresh_label () else name
-      in
-      fresh_label
     in
     let rec collect_conjuncts bexp conjuncts =
       (* should be called after disjunctive_normal_form and negative_normal_form *)
@@ -808,9 +830,243 @@ let remove_if_terminator module_ =
             {node with instrs= prelude @ node.instrs} :: nodes
           else node :: nodes )
     in
+    (* no need to update fresh_ident *)
     {pdesc with ProcDesc.nodes}
+
+
+  let transform_pdesc pdesc = transform_exp pdesc |> transform_terminator
+
+  let run module_ = module_map_procs ~f:transform_pdesc module_
+end
+
+let remove_if_exp_and_terminator = RemoveIf.run
+
+let rec exp_needs_flattening (exp : Exp.t) =
+  match exp with
+  | Var _ | Lvar _ | Const _ | Typ _ ->
+      false
+  | Load _ | Closure _ | Apply _ ->
+      true
+  | Field f ->
+      exp_needs_flattening f.exp
+  | Index (exp1, exp2) ->
+      exp_needs_flattening exp1 || exp_needs_flattening exp2
+  | If {cond; then_; else_} ->
+      bexp_needs_flattening cond || exp_needs_flattening then_ || exp_needs_flattening else_
+  | Call {args} ->
+      List.exists ~f:exp_needs_flattening args
+
+
+and bexp_needs_flattening (bexp : BoolExp.t) =
+  match bexp with
+  | Exp exp ->
+      exp_needs_flattening exp
+  | Not bexp ->
+      bexp_needs_flattening bexp
+  | And (bexp1, bexp2) ->
+      bexp_needs_flattening bexp1 || bexp_needs_flattening bexp2
+  | Or (bexp1, bexp2) ->
+      bexp_needs_flattening bexp1 || bexp_needs_flattening bexp2
+
+
+let rec terminator_needs_flattening (last : Terminator.t) =
+  match last with
+  | If {bexp; then_; else_} ->
+      bexp_needs_flattening bexp || terminator_needs_flattening then_
+      || terminator_needs_flattening else_
+  | Ret exp ->
+      exp_needs_flattening exp
+  | Jump node_calls ->
+      List.exists node_calls ~f:(fun {Terminator.ssa_args} ->
+          List.exists ~f:exp_needs_flattening ssa_args )
+  | Throw exp ->
+      exp_needs_flattening exp
+  | Unreachable ->
+      false
+
+
+let remove_effects_in_subexprs lang decls_env module_ =
+  let fresh_closure_counter =
+    let counter = ref (-1) in
+    fun () ->
+      incr counter ;
+      !counter
   in
-  module_map_procs ~f:transform module_
+  let rec flatten_exp loc ?(toplevel = false) (exp : Exp.t) state : Exp.t * State.t =
+    match exp with
+    | Var _ | Lvar _ | Const _ | Typ _ ->
+        (exp, state)
+    | Load {exp; typ} ->
+        let exp, state = flatten_exp loc exp state in
+        let fresh = state.State.fresh_ident in
+        let new_instr : Instr.t = Load {id= fresh; exp; typ; loc} in
+        (Var fresh, State.push_instr new_instr state |> State.incr_fresh)
+    | Field f ->
+        let exp, state = flatten_exp loc f.exp state in
+        (Field {f with exp}, state)
+    | Index (exp1, exp2) ->
+        let exp1, state = flatten_exp loc exp1 state in
+        let exp2, state = flatten_exp loc exp2 state in
+        (Index (exp1, exp2), state)
+    | If {cond; then_; else_} when toplevel ->
+        let cond, state = flatten_bexp loc cond state in
+        let exp = Exp.If {cond; then_; else_} in
+        let state = {state with State.may_need_iteration= exp_needs_flattening exp} in
+        (exp, state)
+    | If {cond; then_; else_} ->
+        let cond, state = flatten_bexp loc cond state in
+        let fresh = state.State.fresh_ident in
+        let exp = Exp.If {cond; then_; else_} in
+        let new_instr : Instr.t = Let {id= Some fresh; exp; loc} in
+        let state = {state with State.may_need_iteration= exp_needs_flattening exp} in
+        (Var fresh, State.push_instr new_instr state |> State.incr_fresh)
+    | Call {proc; args; kind} ->
+        let args, state = flatten_exp_list loc args state in
+        if ProcDecl.is_side_effect_free_sil_expr proc then (Call {proc; args; kind}, state)
+        else
+          let fresh = state.State.fresh_ident in
+          let new_instr : Instr.t = Let {id= Some fresh; exp= Call {proc; args; kind}; loc} in
+          (Var fresh, State.push_instr new_instr state |> State.incr_fresh)
+    | Closure {proc; captured; params; attributes} ->
+        let captured, state = flatten_exp_list loc captured state in
+        let signature = TransformClosures.signature_body lang proc captured params in
+        let closure =
+          match TextualDecls.get_procdesc decls_env signature with
+          | Some procdecl ->
+              procdecl
+          | None ->
+              L.die InternalError "TextualBasicVerication should make this situation impossible"
+        in
+        let typename =
+          TransformClosures.typename ~fresh_closure_counter module_.Module.sourcefile attributes loc
+        in
+        let id_object = state.State.fresh_ident in
+        let state = State.incr_fresh state in
+        let instrs, fields =
+          TransformClosures.closure_building_instrs id_object loc typename closure captured
+        in
+        let state =
+          List.fold instrs ~init:state ~f:(fun state instr -> State.push_instr instr state)
+        in
+        let struct_ = TransformClosures.type_declaration typename fields in
+        let state = State.incr_fresh state in
+        let loc = if Lang.equal lang Python then Location.decr_line loc else loc in
+        let state =
+          if not (State.ClosureDeclarations.mem typename state.closure_declarations) then
+            let state, call_procdecl =
+              TransformClosures.closure_call_procdesc loc typename state closure fields params
+            in
+            State.add_closure_declaration struct_ call_procdecl state
+          else state
+        in
+        (Var id_object, state)
+    | Apply {closure; args} ->
+        let closure, state = flatten_exp loc closure state in
+        let args, state = flatten_exp_list loc args state in
+        let fresh = state.State.fresh_ident in
+        let new_instr : Instr.t =
+          Let {id= Some fresh; exp= TransformClosures.closure_call_exp loc closure args; loc}
+        in
+        (Var fresh, State.push_instr new_instr state |> State.incr_fresh)
+  and flatten_exp_list loc exp_list state =
+    let exp_list, state =
+      List.fold exp_list ~init:([], state) ~f:(fun (args, state) exp ->
+          let exp, state = flatten_exp loc exp state in
+          (exp :: args, state) )
+    in
+    (List.rev exp_list, state)
+  and flatten_bexp loc bexp state =
+    match (bexp : BoolExp.t) with
+    | Exp exp ->
+        let exp, state = flatten_exp loc exp state in
+        (BoolExp.Exp exp, state)
+    | Not bexp ->
+        let bexp, state = flatten_bexp loc bexp state in
+        (BoolExp.Not bexp, state)
+    | And (bexp1, bexp2) ->
+        let bexp1, state = flatten_bexp loc bexp1 state in
+        (* because of lazyness we only transform fst arg *)
+        (BoolExp.And (bexp1, bexp2), state)
+    | Or (bexp1, bexp2) ->
+        let bexp1, state = flatten_bexp loc bexp1 state in
+        (* because of lazyness we only transform fst arg *)
+        (BoolExp.Or (bexp1, bexp2), state)
+  in
+  let flatten_in_instr (instr : Instr.t) state : State.t =
+    match instr with
+    | Load ({exp; loc} as args) ->
+        let exp, state = flatten_exp loc exp state in
+        State.push_instr (Load {args with exp}) state
+    | Store ({exp1; exp2; loc} as args) ->
+        let exp1, state = flatten_exp loc exp1 state in
+        let exp2, state = flatten_exp loc exp2 state in
+        State.push_instr (Store {args with exp1; exp2}) state
+    | Prune {exp; loc} ->
+        let exp, state = flatten_exp loc exp state in
+        State.push_instr (Prune {exp; loc}) state
+    | Let {id; exp= Call {proc; args; kind}; loc}
+      when not (ProcDecl.is_side_effect_free_sil_expr proc) ->
+        let args, state = flatten_exp_list loc args state in
+        State.push_instr (Let {id; exp= Call {proc; args; kind}; loc}) state
+    | Let {id; exp; loc} ->
+        let exp, state = flatten_exp loc ~toplevel:true exp state in
+        State.push_instr (Let {id; exp; loc}) state
+  in
+  let flatten_in_terminator loc (last : Terminator.t) state : Terminator.t * State.t =
+    match last with
+    | If {bexp; then_; else_} ->
+        let bexp, state = flatten_bexp loc bexp state in
+        let last = Terminator.If {bexp; then_; else_} in
+        let may_need_iteration = terminator_needs_flattening last in
+        let state = {state with State.may_need_iteration} in
+        (last, state)
+    | Ret exp ->
+        let exp, state = flatten_exp loc exp state in
+        (Ret exp, state)
+    | Jump node_calls ->
+        let node_calls_rev, state =
+          List.fold node_calls ~init:([], state)
+            ~f:(fun (node_calls, state) {Terminator.label; ssa_args} ->
+              let ssa_args, state = flatten_exp_list loc ssa_args state in
+              ({Terminator.label; ssa_args} :: node_calls, state) )
+        in
+        (Jump (List.rev node_calls_rev), state)
+    | Throw exp ->
+        let exp, state = flatten_exp loc exp state in
+        (Throw exp, state)
+    | Unreachable ->
+        (last, state)
+  in
+  let flatten_node (node : Node.t) state =
+    let state =
+      let init : State.t = {state with instrs_rev= []} in
+      List.fold node.instrs ~init ~f:(fun state instr -> flatten_in_instr instr state)
+    in
+    let last, ({instrs_rev} as state : State.t) =
+      flatten_in_terminator node.last_loc node.last state
+    in
+    ({node with last; instrs= List.rev instrs_rev}, state)
+  in
+  let rec flatten_pdesc (pdesc : ProcDesc.t) closure_declarations =
+    let fresh_ident = get_fresh_ident pdesc in
+    let state : State.t =
+      {pdesc; may_need_iteration= false; instrs_rev= []; fresh_ident; closure_declarations}
+    in
+    let rev_nodes, {State.fresh_ident; may_need_iteration; closure_declarations} =
+      List.fold pdesc.nodes ~init:([], state) ~f:(fun (rev_nodes, state) node ->
+          let node, state = flatten_node node state in
+          (node :: rev_nodes, state) )
+    in
+    let pdesc = {pdesc with nodes= List.rev rev_nodes; fresh_ident= Some fresh_ident} in
+    let pdesc = RemoveIf.transform_pdesc pdesc in
+    if may_need_iteration then flatten_pdesc pdesc closure_declarations
+    else (pdesc, closure_declarations)
+  in
+  let module_, closure_declarations =
+    module_fold_procs ~init:State.ClosureDeclarations.empty ~f:flatten_pdesc module_
+  in
+  ( {module_ with decls= closure_declarations.decls @ module_.decls}
+  , not (State.ClosureDeclarations.is_empty closure_declarations) )
 
 
 (* TODO (T131910123): replace with STORE+LOAD transform *)
@@ -973,6 +1229,7 @@ let out_of_ssa module_ =
           in
           ({node with instrs; ssa_parameters; last} : Node.t) )
     in
+    (* no need to update fresh_ident *)
     {pdesc with nodes}
   in
   module_map_procs ~f:transform module_
@@ -984,14 +1241,11 @@ let run lang module_ =
     L.die InternalError
       "to_sil conversion should not be performed if TextualDecls verification has raised any \
        errors before." ;
-  let module_, new_decls_were_added =
-    (* note: because && and || operators are lazy we must remove them before moving calls *)
-    module_ |> remove_if_terminator |> remove_effects_in_subexprs lang decls_env
-  in
+  let module_, new_decls_were_added = module_ |> remove_effects_in_subexprs lang decls_env in
   let decls_env =
     if new_decls_were_added then TextualDecls.make_decls module_ |> snd else decls_env
   in
-  let module_ = module_ |> let_propagation |> FixHackWrapper.transform |> out_of_ssa in
+  let module_ = module_ |> let_propagation |> out_of_ssa in
   (module_, decls_env)
 
 
@@ -1135,6 +1389,7 @@ module ClassGetTS = struct
         ~f:(fun (decl : Module.decl) ->
           match decl with
           | Proc procdesc ->
+              (* no need to update fresh_ident *)
               Module.Proc {procdesc with nodes= transform_nodes procdesc}
           | _ ->
               decl )
@@ -1142,3 +1397,6 @@ module ClassGetTS = struct
     in
     {module_ with decls= new_decls}
 end
+
+let fix_hackc_mistranslations module_ =
+  module_ |> ClassGetTS.transform |> FixHackInvokeClosure.transform |> FixHackWrapper.transform

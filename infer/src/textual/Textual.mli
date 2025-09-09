@@ -111,6 +111,8 @@ module QualifiedProcName : sig
 
   val contains_wildcard : t -> bool
 
+  val is_hack_closure_generated_invoke : t -> bool
+
   val is_python_builtin : t -> bool
 
   val is_llvm_builtin : t -> bool
@@ -332,7 +334,7 @@ module ProcDecl : sig
 
   val is_get_lazy_class_builtin : QualifiedProcName.t -> bool
 
-  val is_lazy_class_initialize_builtin : QualifiedProcName.t -> bool
+  val lazy_class_initialize_builtin : QualifiedProcName.t
 
   val is_side_effect_free_sil_expr : QualifiedProcName.t -> bool
 
@@ -349,7 +351,7 @@ module FieldDecl : sig
   type t = {qualified_name: qualified_fieldname; typ: Typ.t; attributes: Attr.t list}
 end
 
-module Exp : sig
+module rec Exp : sig
   type call_kind = Virtual | NonVirtual [@@deriving equal]
 
   type t =
@@ -359,6 +361,7 @@ module Exp : sig
     | Field of {exp: t; field: qualified_fieldname}  (** field offset *)
     | Index of t * t  (** an array index offset: [exp1[exp2]] *)
     | Const of Const.t
+    | If of {cond: BoolExp.t; then_: t; else_: t}
     | Call of {proc: QualifiedProcName.t; args: t list; kind: call_kind}
     | Closure of
         { proc: QualifiedProcName.t
@@ -388,7 +391,7 @@ module Exp : sig
   val pp : F.formatter -> t -> unit
 end
 
-module BoolExp : sig
+and BoolExp : sig
   type t = Exp of Exp.t | Not of t | And of t * t | Or of t * t
 
   val pp : F.formatter -> t -> unit [@@warning "-unused-value-declaration"]
@@ -446,6 +449,8 @@ module ProcDesc : sig
   type t =
     { procdecl: ProcDecl.t
     ; nodes: Node.t list
+    ; fresh_ident: Ident.t option
+          (* an ident that is never defined in this pdesc (used for some later  transformations) *)
     ; start: NodeName.t
     ; params: VarName.t list
     ; locals: (VarName.t * Typ.annotated) list

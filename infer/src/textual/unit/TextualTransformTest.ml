@@ -155,7 +155,8 @@ let%test_module "remove_effects_in_subexprs transformation" =
               n1:*cell = load n0.cell.next @[38:13]
               ret n1 @[38:13]
 
-        } @[39:9] |}]
+        } @[39:9]
+        |}]
   end )
 
 
@@ -226,7 +227,7 @@ let%test_module "remove_if_terminator transformation" =
 
 
     let%expect_test _ =
-      let module_ = parse_module input_text |> TextualTransform.remove_if_terminator in
+      let module_ = parse_module input_text |> TextualTransform.remove_if_exp_and_terminator in
       show module_ ;
       [%expect
         {|
@@ -516,7 +517,9 @@ let%test_module "remove_if_terminator transformation" =
 
 
     let%expect_test _ =
-      let module_ = parse_module python_inspired_text |> TextualTransform.remove_if_terminator in
+      let module_ =
+        parse_module python_inspired_text |> TextualTransform.remove_if_exp_and_terminator
+      in
       show module_ ;
       [%expect
         {|
@@ -668,7 +671,7 @@ let%test_module "out-of-ssa transformation" =
 
     let%expect_test _ =
       let module_ =
-        parse_module python_inspired_text |> TextualTransform.remove_if_terminator
+        parse_module python_inspired_text |> TextualTransform.remove_if_exp_and_terminator
         |> TextualTransform.out_of_ssa
       in
       show module_ ;
@@ -747,74 +750,76 @@ let%expect_test "closures" =
   show module_ ;
   [%expect
     {|
-      .source_language = "hack" @[2:8]
+    .source_language = "hack" @[2:8]
 
-      define C.add(x: int, y: int, z: int, u: float, v: string) : int {
-        #entry: @[5:10]
-            ret __sil_plusa([&x:int], __sil_plusa([&y:int], [&z:int])) @[6:12]
+    define C.add(x: int, y: int, z: int, u: float, v: string) : int {
+      #entry: @[5:10]
+          ret __sil_plusa([&x:int], __sil_plusa([&y:int], [&z:int])) @[6:12]
 
-      } @[7:9]
+    } @[7:9]
 
-      define D.foo(x: int) : void {
-        local y: *HackMixed
-        #entry: @[11:10]
-            n0 = fun (p1, p2, p3) -> C.add([&x:int], 1, p1, p2, p3) @[12:12]
-            store &y <- n0:*HackMixed @[13:12]
-            n1 = [&y:*HackMixed]([&x:int], 1., null) @[14:12]
-            n2 = n0([&x:int], 2., null) @[15:12]
-            ret __sil_plusa(n1, n2) @[16:12]
+    define D.foo(x: int) : void {
+      local y: *HackMixed
+      #entry: @[11:10]
+          n0 = fun (p1, p2, p3) -> C.add([&x:int], 1, p1, p2, p3) @[12:12]
+          store &y <- n0:*HackMixed @[13:12]
+          n1 = [&y:*HackMixed]([&x:int], 1., null) @[14:12]
+          n2 = n0([&x:int], 2., null) @[15:12]
+          ret __sil_plusa(n1, n2) @[16:12]
 
-      } @[17:9] |}] ;
+    } @[17:9]
+    |}] ;
   let module_, _ = remove_effects_in_subexprs Lang.Hack module_ in
   show module_ ;
   [%expect
     {|
-      .source_language = "hack" @[2:8]
+    .source_language = "hack" @[2:8]
 
-      type .final PyClosure<dummy:0> = {x: int; y: int}
+    type .final PyClosure<dummy:0> = {x: int; y: int}
 
-      define .closure_wrapper PyClosure<dummy:0>.call(__this: *PyClosure<dummy:0>, p1: int, p2: float, p3: string) : int {
-        #entry: @[12:12]
-            n0:*PyClosure<dummy:0> = load &__this @[12:12]
-            n1:int = load n0.?.x @[12:12]
-            n2:*PyClosure<dummy:0> = load &__this @[12:12]
-            n3:int = load n2.?.y @[12:12]
-            n4:int = load &p1 @[12:12]
-            n5:float = load &p2 @[12:12]
-            n6:string = load &p3 @[12:12]
-            n7 = C.add(n1, n3, n4, n5, n6) @[12:12]
-            ret n7 @[12:12]
+    define .closure_wrapper PyClosure<dummy:0>.call(__this: *PyClosure<dummy:0>, p1: int, p2: float, p3: string) : int {
+      #entry: @[12:12]
+          n0:*PyClosure<dummy:0> = load &__this @[12:12]
+          n1:int = load n0.?.x @[12:12]
+          n2:*PyClosure<dummy:0> = load &__this @[12:12]
+          n3:int = load n2.?.y @[12:12]
+          n4:int = load &p1 @[12:12]
+          n5:float = load &p2 @[12:12]
+          n6:string = load &p3 @[12:12]
+          n7 = C.add(n1, n3, n4, n5, n6) @[12:12]
+          ret n7 @[12:12]
 
-      } @[12:12]
+    } @[12:12]
 
-      define C.add(x: int, y: int, z: int, u: float, v: string) : int {
-        #entry: @[5:10]
-            n0:int = load &x @[6:12]
-            n1:int = load &y @[6:12]
-            n2:int = load &z @[6:12]
-            ret __sil_plusa(n0, __sil_plusa(n1, n2)) @[6:12]
+    define C.add(x: int, y: int, z: int, u: float, v: string) : int {
+      #entry: @[5:10]
+          n0:int = load &x @[6:12]
+          n1:int = load &y @[6:12]
+          n2:int = load &z @[6:12]
+          ret __sil_plusa(n0, __sil_plusa(n1, n2)) @[6:12]
 
-      } @[7:9]
+    } @[7:9]
 
-      define D.foo(x: int) : void {
-        local y: *HackMixed
-        #entry: @[11:10]
-            n3:int = load &x @[12:12]
-            n4 = __sil_allocate(<PyClosure<dummy:0>>) @[12:12]
-            store n4.?.x <- n3:int @[12:12]
-            store n4.?.y <- 1:int @[12:12]
-            n0 = n4 @[12:12]
-            store &y <- n0:*HackMixed @[13:12]
-            n6:*HackMixed = load &y @[14:12]
-            n7:int = load &x @[14:12]
-            n8 = n6.?.call(n7, 1., null) @[14:12]
-            n1 = n8 @[14:12]
-            n9:int = load &x @[15:12]
-            n10 = n0.?.call(n9, 2., null) @[15:12]
-            n2 = n10 @[15:12]
-            ret __sil_plusa(n1, n2) @[16:12]
+    define D.foo(x: int) : void {
+      local y: *HackMixed
+      #entry: @[11:10]
+          n3:int = load &x @[12:12]
+          n4 = __sil_allocate(<PyClosure<dummy:0>>) @[12:12]
+          store n4.?.x <- n3:int @[12:12]
+          store n4.?.y <- 1:int @[12:12]
+          n0 = n4 @[12:12]
+          store &y <- n0:*HackMixed @[13:12]
+          n6:*HackMixed = load &y @[14:12]
+          n7:int = load &x @[14:12]
+          n8 = n6.?.call(n7, 1., null) @[14:12]
+          n1 = n8 @[14:12]
+          n9:int = load &x @[15:12]
+          n10 = n0.?.call(n9, 2., null) @[15:12]
+          n2 = n10 @[15:12]
+          ret __sil_plusa(n1, n2) @[16:12]
 
-      } @[17:9] |}] ;
+    } @[17:9]
+    |}] ;
   type_check module_ ;
   [%expect {|
       verification succeeded |}]
@@ -841,7 +846,7 @@ let%expect_test "get_class_ts" =
         }
     |}
   in
-  let module_ = parse_module source |> TextualTransform.ClassGetTS.transform in
+  let module_ = parse_module source |> TextualTransform.fix_hackc_mistranslations in
   show module_ ;
   [%expect
     {|
@@ -862,3 +867,268 @@ let%expect_test "get_class_ts" =
           ret null @[16:16]
 
     } @[17:9] |}]
+
+
+let%expect_test "toplevel if expression" =
+  let source =
+    {|
+        .source_language = "hack"
+
+        define main($a: int, $b: int): int {
+            #b0:
+                n0 = (if $b then 0 else $a)
+                n1 = (if $a then 2 else n0)
+                ret n0
+        }
+    |}
+  in
+  let module_ = parse_module source |> TextualTransform.remove_if_exp_and_terminator in
+  show module_ ;
+  [%expect
+    {|
+    .source_language = "hack" @[2:8]
+
+    define main($a: int, $b: int) : int {
+      #b0: @[5:12]
+          jmp if_exp1, if_exp2 @[6:16]
+
+      #if_exp2: @[6:16]
+          prune __sil_lnot([&$b:int]) @[6:16]
+          jmp if_exp0([&$a:int]) @[6:16]
+
+      #if_exp1: @[6:16]
+          prune [&$b:int] @[6:16]
+          jmp if_exp0(0) @[6:16]
+
+      #if_exp0(n0: *void): @[6:16]
+          jmp if_exp4, if_exp5 @[7:16]
+
+      #if_exp5: @[7:16]
+          prune __sil_lnot([&$a:int]) @[7:16]
+          jmp if_exp3(n0) @[7:16]
+
+      #if_exp4: @[7:16]
+          prune [&$a:int] @[7:16]
+          jmp if_exp3(2) @[7:16]
+
+      #if_exp3(n1: *void): @[7:16]
+          ret n0 @[8:16]
+
+    } @[9:9]
+    |}]
+
+
+let%expect_test "if expression in subexpr" =
+  let source =
+    {|
+        .source_language = "hack"
+
+        declare f(int): void
+
+        declare g(int): int
+
+        define main($a: int, $b: int): void {
+            #b0:
+                n0 = f((if g($b) then g(0) else g($a)))
+                n1 = f((if g($a) then g(2) else g($b)))
+                ret null
+        }
+
+
+        define if_terminal($a: int, $b: int): int {
+            #b0:
+                if g($b) && g($a) then ret 0 else ret 1
+        }
+    |}
+  in
+  let module_, _ = parse_module source |> remove_effects_in_subexprs Hack in
+  show module_ ;
+  [%expect
+    {|
+    .source_language = "hack" @[2:8]
+
+    declare f(int) : void
+
+    declare g(int) : int
+
+    define main($a: int, $b: int) : void {
+      #b0: @[9:12]
+          n2:int = load &$b @[10:16]
+          n3 = g(n2) @[10:16]
+          jmp if_exp1, if_exp2 @[10:16]
+
+      #if_exp2: @[10:16]
+          prune __sil_lnot(n3) @[10:16]
+          n8:int = load &$a @[10:16]
+          n9 = g(n8) @[10:16]
+          jmp if_exp0(n9) @[10:16]
+
+      #if_exp1: @[10:16]
+          prune n3 @[10:16]
+          n10 = g(0) @[10:16]
+          jmp if_exp0(n10) @[10:16]
+
+      #if_exp0(n4: *void): @[10:16]
+          n0 = f(n4) @[10:16]
+          n5:int = load &$a @[11:16]
+          n6 = g(n5) @[11:16]
+          jmp if_exp4, if_exp5 @[11:16]
+
+      #if_exp5: @[11:16]
+          prune __sil_lnot(n6) @[11:16]
+          n11:int = load &$b @[11:16]
+          n12 = g(n11) @[11:16]
+          jmp if_exp3(n12) @[11:16]
+
+      #if_exp4: @[11:16]
+          prune n6 @[11:16]
+          n13 = g(2) @[11:16]
+          jmp if_exp3(n13) @[11:16]
+
+      #if_exp3(n7: *void): @[11:16]
+          n1 = f(n7) @[11:16]
+          ret null @[12:16]
+
+    } @[13:9]
+
+    define if_terminal($a: int, $b: int) : int {
+      #b0: @[17:12]
+          n0:int = load &$b @[18:16]
+          n1 = g(n0) @[18:16]
+          jmp if2, if0, if1 @[18:16]
+
+      #if2: @[18:16]
+          prune n1 @[18:16]
+          n2:int = load &$a @[18:16]
+          n3 = g(n2) @[18:16]
+          prune n3 @[18:16]
+          ret 0 @[18:16]
+
+      #if0: @[18:16]
+          prune __sil_lnot(n1) @[18:16]
+          ret 1 @[18:16]
+
+      #if1: @[18:16]
+          n4:int = load &$a @[18:16]
+          n5 = g(n4) @[18:16]
+          prune __sil_lnot(n5) @[18:16]
+          ret 1 @[18:16]
+
+    } @[19:9]
+    |}]
+
+
+let%expect_test "hackc fix - self in closures" =
+  let source =
+    {|
+.source_language = "hack"
+
+define Closure$Closures::ClosuresAndDict2_with_self::init.__invoke($this: .notnull *Closure$Closures::ClosuresAndDict2_with_self::init) : *HackMixed {
+local $captured: *void, $o: *void
+#b0:
+  n0: *HackMixed = load &$this
+  n1: *HackMixed = load n0.?.captured
+  store &$captured <- n1: *HackMixed
+  n2: *HackMixed = load &$this
+  n3: *HackMixed = load n2.?.o
+  store &$o <- n3: *HackMixed
+  n4: *HackMixed = load &$this
+  n5: *HackMixed = load n4.?.this
+  store &$this <- n5: *HackMixed
+  n6: *HackMixed = load &$captured
+  n7: *HackMixed = load &$o
+  n8: *Closure$Closures::ClosuresAndDict2_with_self::init = load &$this
+  n9 = Closure$Closures::ClosuresAndDict2_with_self::init.get_unsafe(n8, n6, n7)
+  ret n9
+}
+
+declare Closure$Closures::ClosuresAndDict2_with_self::init.get_unsafe(...): *HackMixed
+|}
+  in
+  let module_ = parse_module source |> TextualTransform.fix_hackc_mistranslations in
+  show module_ ;
+  [%expect
+    {|
+    .source_language = "hack" @[2:0]
+
+    define Closure$Closures::ClosuresAndDict2_with_self::init.__invoke($this: .notnull *Closure$Closures::ClosuresAndDict2_with_self::init) : *HackMixed {
+      local $captured: *void, $o: *void
+      #b0: @[6:0]
+          n0:*HackMixed = load &$this @[7:2]
+          n1:*HackMixed = load n0.?.captured @[8:2]
+          store &$captured <- n1:*HackMixed @[9:2]
+          n2:*HackMixed = load &$this @[10:2]
+          n3:*HackMixed = load n2.?.o @[11:2]
+          store &$o <- n3:*HackMixed @[12:2]
+          n4:*HackMixed = load &$this @[13:2]
+          n5:*HackMixed = load n4.?.this @[14:2]
+          store &$this <- n5:*HackMixed @[15:2]
+          n6:*HackMixed = load &$captured @[16:2]
+          n7:*HackMixed = load &$o @[17:2]
+          n8 = __sil_lazy_class_initialize(<Closures::ClosuresAndDict2_with_self>) @[18:2]
+          n9 = Closures::ClosuresAndDict2_with_self$static.get_unsafe(n8, n6, n7) @[19:2]
+          ret n9 @[20:2]
+
+    } @[21:1]
+
+    declare Closures::ClosuresAndDict2_with_self$static.get_unsafe(...) : *HackMixed
+    |}]
+
+
+let%expect_test "hackc fix - async self in closures" =
+  let source =
+    {|
+.source_language = "hack"
+
+define .async Closure$Closures::ClosuresAndDict2_with_self_async::init.__invoke($this: .notnull *Closure$Closures::ClosuresAndDict2_with_self_async::init) : *HackMixed {
+local $captured: *void, $o: *void
+#b0:
+  n0: *HackMixed = load &$this
+  n1: *HackMixed = load n0.?.captured
+  store &$captured <- n1: *HackMixed
+  n2: *HackMixed = load &$this
+  n3: *HackMixed = load n2.?.o
+  store &$o <- n3: *HackMixed
+  n4: *HackMixed = load &$this
+  n5: *HackMixed = load n4.?.this
+  store &$this <- n5: *HackMixed
+  n6: *HackMixed = load &$captured
+  n7: *HackMixed = load &$o
+  n8: *Closure$Closures::ClosuresAndDict2_with_self_async::init = load &$this
+  n9 = Closure$Closures::ClosuresAndDict2_with_self_async::init.get_unsafe(n8, n6, n7)
+  n10 = $builtins.hhbc_await(n9)
+  ret n10
+}
+
+declare Closure$Closures::ClosuresAndDict2_with_self_async::init.get_unsafe(...): *HackMixed
+|}
+  in
+  let module_ = parse_module source |> TextualTransform.fix_hackc_mistranslations in
+  show module_ ;
+  [%expect
+    {|
+    .source_language = "hack" @[2:0]
+
+    define .async Closure$Closures::ClosuresAndDict2_with_self_async::init.__invoke($this: .notnull *Closure$Closures::ClosuresAndDict2_with_self_async::init) : *HackMixed {
+      local $captured: *void, $o: *void
+      #b0: @[6:0]
+          n0:*HackMixed = load &$this @[7:2]
+          n1:*HackMixed = load n0.?.captured @[8:2]
+          store &$captured <- n1:*HackMixed @[9:2]
+          n2:*HackMixed = load &$this @[10:2]
+          n3:*HackMixed = load n2.?.o @[11:2]
+          store &$o <- n3:*HackMixed @[12:2]
+          n4:*HackMixed = load &$this @[13:2]
+          n5:*HackMixed = load n4.?.this @[14:2]
+          store &$this <- n5:*HackMixed @[15:2]
+          n6:*HackMixed = load &$captured @[16:2]
+          n7:*HackMixed = load &$o @[17:2]
+          n8 = __sil_lazy_class_initialize(<Closures::ClosuresAndDict2_with_self_async>) @[18:2]
+          n9 = Closures::ClosuresAndDict2_with_self_async$static.get_unsafe(n8, n6, n7) @[19:2]
+          n10 = $builtins.hhbc_await(n9) @[20:2]
+          ret n10 @[21:2]
+
+    } @[22:1]
+
+    declare Closures::ClosuresAndDict2_with_self_async$static.get_unsafe(...) : *HackMixed
+    |}]

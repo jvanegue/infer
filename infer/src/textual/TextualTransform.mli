@@ -25,9 +25,11 @@ val remove_effects_in_subexprs :
      n2 = m(n0, n3, n4)
 
    return the new Textual unit and a boolean true iff new decls where introduced during transformation
+
+   At the very end, performs a pass of if elimination whenever.
 *)
 
-val remove_if_terminator : Textual.Module.t -> Textual.Module.t
+val remove_if_exp_and_terminator : Textual.Module.t -> Textual.Module.t
 [@@warning "-unused-value-declaration"]
 
 val let_propagation : Textual.Module.t -> Textual.Module.t [@@warning "-unused-value-declaration"]
@@ -42,6 +44,4 @@ val run : Textual.Lang.t -> Textual.Module.t -> Textual.Module.t * TextualDecls.
    4) out_of_ssa in
 *)
 
-module ClassGetTS : sig
-  val transform : Textual.Module.t -> Textual.Module.t
-end
+val fix_hackc_mistranslations : Textual.Module.t -> Textual.Module.t
