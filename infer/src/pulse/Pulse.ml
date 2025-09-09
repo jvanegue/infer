@@ -1466,7 +1466,6 @@ let pp_space_specialization fmt =
                    (astate, ValueOrigin.unknown addr_hist)
              in
              let rhs_addr = ValueOrigin.value rhs_vo in
-             (* L.debug Analysis Quiet "JV: Calling and_is_int_if_integer_type from deref_rhs/Pulse.ml \n"; *)
              and_is_int_if_integer_type typ rhs_addr astate
              >>|| PulseOperations.hack_propagates_type_on_load tenv path loc rhs_exp rhs_addr
              >>|| PulseOperations.add_static_type_objc_swift_class tenv typ rhs_addr loc
@@ -1534,8 +1533,6 @@ let pp_space_specialization fmt =
             in
 
             let hist = ValueHistory.sequence event rhs_history in
-
-            (* L.debug Analysis Quiet "JV: Calling and_is_int_if_integer_type from exec_instr/STORE \n"; *)
 
             let** astate = and_is_int_if_integer_type typ rhs_addr astate in
             let** astate =
@@ -1666,42 +1663,20 @@ let pp_space_specialization fmt =
       | Metadata (VariableLifetimeBegins {pvar; typ; loc; is_cpp_structured_binding})
            when not (Pvar.is_global pvar) ->
 
-         (* L.debug Analysis Quiet "exec_instr: Metadata VariableLifetimeBegins \n"; *)
-
           let set_uninitialized = (not is_cpp_structured_binding) && not (Typ.is_folly_coro typ) in
           ( [ PulseOperations.realloc_pvar tenv path ~set_uninitialized pvar typ loc astate
               |> ExecutionDomain.continue ]
           , path
           , astate_n )
           
-      | Metadata (Abstract _) ->
-         (* L.debug Analysis Quiet "exec_instr: Metadata Abstract \n"; *)
-         ([ContinueProgram astate], path, astate_n)
-
-      | Metadata (CatchEntry _) ->
-         (* L.debug Analysis Quiet "exec_instr: Metadata CatchEntry \n"; *)
-         ([ContinueProgram astate], path, astate_n)
-
-      | Metadata (Nullify _) ->
-         (* L.debug Analysis Quiet "exec_instr: Metadata Nullify \n"; *)
-         ([ContinueProgram astate], path, astate_n)
-          
-       | Metadata (Skip) ->
-          (* L.debug Analysis Quiet "exec_instr: Skip \n"; *)
-         ([ContinueProgram astate], path, astate_n)
-
-       | Metadata (TryEntry _) ->
-          (* L.debug Analysis Quiet "exec_instr: TryEntry \n"; *)
-         ([ContinueProgram astate], path, astate_n)
-
-       | Metadata (TryExit _) ->
-          (* L.debug Analysis Quiet "exec_instr: Metadata TryExit \n"; *)
-         ([ContinueProgram astate], path, astate_n)
-
-       | Metadata (VariableLifetimeBegins _) ->
-          (* L.debug Analysis Quiet "exec_instr: Metadata VariableLifetimeBegins 2 \n"; *)
-          ([ContinueProgram astate], path, astate_n)
-    ) 
+      | Metadata ( Abstract _
+                   | CatchEntry _
+                 | Nullify _
+                 | Skip
+                 | TryEntry _
+                 | TryExit _
+                 | VariableLifetimeBegins _ ) ->
+         ([ContinueProgram astate], path, astate_n) )
 
   let exec_instr_with_oom_protection_and_path_update ~limit ((astate, path), astate_n) analysis_data
       cfg_node instr : DisjDomain.t list * NonDisjDomain.t =
@@ -2049,9 +2024,6 @@ let analyze specialization ({InterproceduralAnalysis.tenv; proc_desc} as analysi
     List.for_all pre_post_list ~f
   in
   let process_postconditions node posts_opt ~convert_normal_to_exceptional =
-
-    (* L.debug Analysis Quiet "PULSEINF: process_postconditions \n"; *)
-    
     match posts_opt with
     | Some (posts, non_disj_astate) ->
         let node_loc = Procdesc.Node.get_loc node in
@@ -2090,13 +2062,9 @@ let analyze specialization ({InterproceduralAnalysis.tenv; proc_desc} as analysi
           report_unnecessary_parameter_copies analysis_data non_disj_astate ) ;
         summary
     | None ->
-       (* L.debug Analysis Quiet "PULSEINF: process_postconditions EMPTY case \n"; *)
         PulseSummary.empty
   in
   let report_on_and_return_summaries summary =
-
-    (* L.debug Analysis Quiet "PULSEINF: report_on_and_return_summaries \n"; *)
-    
     if Config.trace_topl then
       L.debug Analysis Quiet "ToplTrace: dropped %d disjuncts in %a@\n"
         (PulseTopl.Debug.get_dropped_disjuncts_count ())

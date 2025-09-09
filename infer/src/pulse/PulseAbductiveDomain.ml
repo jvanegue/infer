@@ -123,8 +123,6 @@ let pp_ ~is_summary f
 let pp = pp_ ~is_summary:false
 
 let get_path_condition astate = astate.path_condition
-
-(* let get_termination_condition astate = astate.get_terminal_condition *)
        
 let set_path_condition path_condition astate = {astate with path_condition}
 
