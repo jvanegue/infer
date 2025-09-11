@@ -389,15 +389,10 @@ module PulseTransferFunctions = struct
     let do_one_exec_state (exec_state : ExecutionDomain.t) : ExecutionDomain.t =
       match exec_state with
       | ContinueProgram astate ->
-          ContinueProgram (do_astate astate)
-      | AbortProgram _
-      | LatentAbortProgram _
-      | ExitProgram _
-      | ExceptionRaised _
-      | InfiniteLoop _
-      | LatentInvalidAccess _
-      | LatentSpecializedTypeIssue _ ->
-          exec_state
+         ContinueProgram (do_astate astate)
+      | AbortProgram _  | LatentAbortProgram _  | ExitProgram _ | ExceptionRaised _
+        | InfiniteLoop _ | LatentInvalidAccess _  | LatentSpecializedTypeIssue _ ->
+         exec_state
     in
     List.map ~f:(PulseResult.map ~f:do_one_exec_state) exec_state_res
 
@@ -1460,8 +1455,6 @@ module PulseTransferFunctions = struct
           in
           (astates, path, astate_n)
       | Load {id= lhs_id; e= rhs_exp; loc; typ} ->
-          (* L.debug Analysis Quiet "exec_instr: Load \n"; *)
-
           (* [lhs_id := *rhs_exp] *)
           let model_opt = PulseLoadInstrModels.dispatch ~load:rhs_exp in
           let deref_rhs astate =
@@ -1517,8 +1510,6 @@ module PulseTransferFunctions = struct
           in
           (List.take astates limit, path, non_disj)
       | Store {e1= lhs_exp; e2= rhs_exp; loc; typ} ->
-          (* L.debug Analysis Quiet "exec_instr: Store \n"; *)
-
           (* [*lhs_exp := rhs_exp] *)
           let event =
             match lhs_exp with
@@ -1585,7 +1576,6 @@ module PulseTransferFunctions = struct
           let astates = PulseReport.report_results analysis_data path loc results in
           (List.take astates limit, path, astate_n)
       | Call (ret, call_exp, actuals, loc, call_flags) ->
-          (* L.debug Analysis Quiet "exec_instr: Call \n"; *)
           let astate_n = check_modified_before_destructor actuals call_exp astate astate_n in
           let astates, astate_n =
             List.fold actuals ~init:([astate], astate_n) ~f:(fun (astates, astate_n) (exp, typ) ->
@@ -1645,7 +1635,6 @@ module PulseTransferFunctions = struct
           in
           (astates, path, astate_n)
       | Prune (condition, loc, _is_then_branch, _if_kind) ->
-          (* L.debug Analysis Quiet "exec_instr: Prune \n"; *)
           let prune_result =
             let=* astate = check_config_usage analysis_data loc condition astate in
             PulseOperations.prune proc_desc path loc ~condition astate
