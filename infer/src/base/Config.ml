@@ -1139,9 +1139,10 @@ and compaction_if_heap_greater_equal_to_GB =
 
 
 and compaction_if_heap_greater_equal_to_GB_multicore =
-  CLOpt.mk_int ~long:"compaction-if-heap-greater-equal-to-GB-multicore" ~default:40 ~meta:"int"
+  CLOpt.mk_int_opt ~long:"compaction-if-heap-greater-equal-to-GB-multicore"
     "Multicore analysis will trigger compaction if the total heap size is equal or great to this \
-     value in Gigabytes. Defaults to 40"
+     value in Gigabytes. Defaults to the amount of available memory on startup, or 40Gb if that \
+     can not be determined."
 
 
 and compilation_database =
@@ -1975,6 +1976,12 @@ and llvm_bitcode_sources =
   CLOpt.mk_string_list ~long:"llvm-bitcode-source"
     "[EXPERIMENTAL] Specify source files for llvm bitcode capture"
     ~in_help:InferCommand.[(Capture, manual_generic)]
+
+
+and llvm_translate_global_init =
+  CLOpt.mk_bool ~long:"llvm-translate-global-init" ~default:false
+    ~in_help:InferCommand.[(Capture, manual_pulse)]
+    "Translates the initializers of globals in the llvm frontend."
 
 
 and lock_model =
@@ -3512,7 +3519,7 @@ and timeout =
     ?default:(if is_running_unit_test then None else Some 120.0)
     ~in_help:[(Analyze, manual_generic); (Run, manual_generic)]
     "Time after which any checker should give up analysing the current function or method, in \
-     seconds. Not implemented for multicore mode"
+     seconds. Defaults to 120 seconds."
 
 
 and top_longest_proc_duration_size =
@@ -3995,7 +4002,8 @@ and classpath = !classpath
 and compaction_if_heap_greater_equal_to_GB = !compaction_if_heap_greater_equal_to_GB
 
 and compaction_if_heap_greater_equal_to_GB_multicore =
-  !compaction_if_heap_greater_equal_to_GB_multicore
+  Option.value_or_thunk !compaction_if_heap_greater_equal_to_GB_multicore ~default:(fun () ->
+      match Utils.get_available_memory_MB () with None -> 40 | Some mem_Mb -> mem_Mb / 1024 )
 
 
 and complete_capture_from = !complete_capture_from
@@ -4299,6 +4307,8 @@ and llair_source_file = !llair_source_file
 and llvm_bitcode_file = !llvm_bitcode_file
 
 and llvm_bitcode_sources = RevList.to_list !llvm_bitcode_sources
+
+and llvm_translate_global_init = !llvm_translate_global_init
 
 and lock_model = !lock_model
 

@@ -1162,6 +1162,11 @@ OPTIONS
            [EXPERIMENTAL] Specify source files for llvm bitcode capture
            See also infer-capture(1).
 
+       --llvm-translate-global-init
+           Activates: Translates the initializers of globals in the llvm
+           frontend. (Conversely: --no-llvm-translate-global-init)
+           See also infer-capture(1).
+
        --lock-model json
            Specify custom lock models for starvation analysis.
            Example for pthreads (already included in infer):
@@ -2322,7 +2327,7 @@ OPTIONS
 
        --timeout float
            Time after which any checker should give up analysing the current
-           function or method, in seconds. Not implemented for multicore mode
+           function or method, in seconds. Defaults to 120 seconds.
            See also infer-analyze(1) and infer-run(1).
 
        --top-longest-proc-duration-size int

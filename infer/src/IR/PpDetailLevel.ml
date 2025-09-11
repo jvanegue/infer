@@ -4,10 +4,9 @@
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
  *)
+
 open! IStd
-open PulseModelsImport
 
-val matchers : matcher list
+type t = FullNameOnly | NameOnly | Non_verbose | Simple | Verbose
 
-val builtins_matcher :
-  SwiftProcname.builtin -> PulseModelsDSL.aval list -> unit -> unit PulseModelsDSL.model_monad
+let is_verbose v = match v with Verbose -> true | _ -> false
