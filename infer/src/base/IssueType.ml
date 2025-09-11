@@ -837,9 +837,11 @@ let pure_function =
   register ~category:NoCategory ~id:"PURE_FUNCTION" Error PurityChecker
     ~user_documentation:[%blob "./documentation/issues/PURE_FUNCTION.md"]
 
+
 let pulse_infinite =
   register ~category:NoCategory ~enabled:true ~id:"INFINITE_LOOP" Error Pulse
     ~user_documentation:"None yet"
+
 
 let readonly_shared_ptr_param =
   register ~category:PerfRegression ~id:"PULSE_READONLY_SHARED_PTR_PARAM" Error Pulse

@@ -169,8 +169,8 @@ module BackwardNodeTransferFunction (T : TransferFunctions) = struct
 end
 
 module DisjunctiveMetadata = struct
-
-  (** information about the analysis of a single procedure with [MakeDisjunctiveTransferFunctions] *)
+  (** information about the analysis of a single procedure with [MakeDisjunctiveTransferFunctions]
+  *)
   type t =
     { dropped_disjuncts: int
           (** how many disjuncts were discarded due to hitting the max disjuncts limit *)
@@ -183,6 +183,7 @@ module DisjunctiveMetadata = struct
     F.fprintf fmt "dropped_disjuncts= %d;@ interrupted_loops= %d" dropped_disjuncts
       interrupted_loops
 
+
   (* The metadata for a procedure is kept in a reference to make it easier to keep an accurate track
      of metadata since otherwise we would need to carry the metadata around the analysis while being
      careful to avoid double-counting. With a reference this is simpler to achieve as we can simply
@@ -192,28 +193,41 @@ module DisjunctiveMetadata = struct
   (* This is used to remember the CFG node otherwise we would need to carry the node around in widen
      and join as well as other places that may need to access the current CFG node during analysis *)
 
-  let cfg_node = AnalysisGlobalState.make_dls ~init:(fun () -> (Procdesc.Node.dummy Procname.empty_block)) 
-                    
-  let record_cfg_node (cfgnode: Procdesc.Node.t) =
-    Utils.with_dls cfg_node ~f:(fun cfg_node -> let _ = cfg_node in cfgnode)
+  let cfg_node =
+    AnalysisGlobalState.make_dls ~init:(fun () -> Procdesc.Node.dummy Procname.empty_block)
+
+
+  let record_cfg_node (cfgnode : Procdesc.Node.t) =
+    Utils.with_dls cfg_node ~f:(fun cfg_node ->
+        let _ = cfg_node in
+        cfgnode )
+
 
   let get_cfg_node () = DLS.get cfg_node
 
-  let alert_node = AnalysisGlobalState.make_dls ~init:(fun () -> (Procdesc.Node.dummy Procname.empty_block))
+  let alert_node =
+    AnalysisGlobalState.make_dls ~init:(fun () -> Procdesc.Node.dummy Procname.empty_block)
+
+
   (* End CFG node tracking for alerts *)
-                                        
-  let record_alert_node (alertnode: Procdesc.Node.t) =
-    Utils.with_dls alert_node ~f:(fun alert_node -> let _ = alert_node in alertnode)
+
+  let record_alert_node (alertnode : Procdesc.Node.t) =
+    Utils.with_dls alert_node ~f:(fun alert_node ->
+        let _ = alert_node in
+        alertnode )
+
 
   let get_alert_node () = DLS.get alert_node
-                   
+
   let add_dropped_disjuncts dropped_disjuncts =
     Utils.with_dls proc_metadata ~f:(fun proc_metadata ->
         {proc_metadata with dropped_disjuncts= proc_metadata.dropped_disjuncts + dropped_disjuncts} )
 
+
   let incr_interrupted_loops () =
     Utils.with_dls proc_metadata ~f:(fun proc_metadata ->
         {proc_metadata with interrupted_loops= proc_metadata.interrupted_loops + 1} )
+
 
   let record_cfg_stats {dropped_disjuncts; interrupted_loops} =
     Stats.add_pulse_disjuncts_dropped dropped_disjuncts ;
@@ -267,22 +281,21 @@ struct
         | hd :: tl when n_acc < limit ->
             (* check with respect to the original [into] and not [acc] as we assume lists of
                disjuncts are already deduplicated *)
-           if has_geq_disj ~leq ~than:hd into then
-             (* [hd] implies one of the states in [into]; skip it
-                 ([(a=>b) => (a\/b <=> b)]) *) 
-             aux acc n_acc tl 
-           else
-             aux (hd :: acc) (n_acc + 1) tl
+            if has_geq_disj ~leq ~than:hd into then
+              (* [hd] implies one of the states in [into]; skip it
+                 ([(a=>b) => (a\/b <=> b)]) *)
+              aux acc n_acc tl
+            else aux (hd :: acc) (n_acc + 1) tl
         | _ ->
-           (* [from] is empty or [n_acc ≥ limit], either way we are done *)
-           (acc, n_acc, from, List.length from)
+            (* [from] is empty or [n_acc ≥ limit], either way we are done *)
+            (acc, n_acc, from, List.length from)
       in
       aux into into_length from
 
 
     let length_and_cap_to_limit n l =
       let length = List.length l in
-      let n_dropped = max 0 (length - n) in 
+      let n_dropped = max 0 (length - n) in
       let dropped, kept = List.split_n l n_dropped in
       (kept, dropped, min length n)
 
@@ -292,12 +305,13 @@ struct
     let join_up_to_with_leq ~limit leq ~into:lhs rhs =
       let lhs, dropped_from_lhs, lhs_length = length_and_cap_to_limit limit lhs in
       if phys_equal lhs rhs || lhs_length >= limit then (lhs, lhs_length, dropped_from_lhs)
-      else 
+      else
         (* this filters only in one direction for now, could be worth doing both ways *)
         let kept, kept_length, dropped, _ =
           append_no_duplicates_up_to leq ~limit (List.rev rhs) ~into:lhs ~into_length:lhs_length
         in
         (kept, kept_length, dropped_from_lhs @ dropped)
+
 
     let join_up_to ~limit ~into:lhs rhs =
       join_up_to_with_leq ~limit (fun ~lhs ~rhs -> T.DisjDomain.equal_fast lhs rhs) ~into:lhs rhs
@@ -319,30 +333,38 @@ struct
       | _, [] ->
           false
 
+
     let leq ~lhs ~rhs =
       phys_equal lhs rhs
       || is_trivial_subset (fst lhs) ~of_:(fst rhs)
          && T.NonDisjDomain.leq ~lhs:(snd lhs) ~rhs:(snd rhs)
 
+
     let widen ~prev ~next ~num_iters =
       let max_iter =
         match DConfig.widen_policy with UnderApproximateAfterNumIterations max_iter -> max_iter
       in
-      if num_iters > max_iter then ( DisjunctiveMetadata.incr_interrupted_loops (); prev )
-      else 
-        let back_edges (prev: T.DisjDomain.t list) (next: T.DisjDomain.t list) (num_iters:int) : T.DisjDomain.t list * int =
-          (T.back_edge prev next num_iters) in
-        let dbe,_ = (back_edges (fst prev) (fst next) num_iters) in
-        let hasnew = not (phys_equal (fst prev) dbe) in
-        let post_disj,_,dropped =
-          join_up_to_with_leq ~limit:disjunct_limit T.DisjDomain.leq ~into:(if hasnew then dbe else (fst prev)) (fst next)
+      if num_iters > max_iter then (
+        DisjunctiveMetadata.incr_interrupted_loops () ;
+        prev )
+      else
+        let back_edges (prev : T.DisjDomain.t list) (next : T.DisjDomain.t list) (num_iters : int) :
+            T.DisjDomain.t list * int =
+          T.back_edge prev next num_iters
         in
-         let next_non_disj = (T.NonDisjDomain.widen ~prev:(snd prev) ~next:(snd next) ~num_iters) in
-         if leq ~lhs:(post_disj, next_non_disj) ~rhs:prev then prev 
-         else (post_disj, add_dropped_disjuncts dropped next_non_disj)
+        let dbe, _ = back_edges (fst prev) (fst next) num_iters in
+        let hasnew = not (phys_equal (fst prev) dbe) in
+        let post_disj, _, dropped =
+          join_up_to_with_leq ~limit:disjunct_limit T.DisjDomain.leq
+            ~into:(if hasnew then dbe else fst prev)
+            (fst next)
+        in
+        let next_non_disj = T.NonDisjDomain.widen ~prev:(snd prev) ~next:(snd next) ~num_iters in
+        if leq ~lhs:(post_disj, next_non_disj) ~rhs:prev then prev
+        else (post_disj, add_dropped_disjuncts dropped next_non_disj)
+
 
     let pp_ (pp_kind : Pp.print_kind) f (disjuncts, non_disj) =
-
       let pp_disjuncts f disjuncts =
         List.iteri (List.rev disjuncts) ~f:(fun i disjunct ->
             F.fprintf f "#%d: @[%a@]@;" i (T.pp_disjunct pp_kind) disjunct )
@@ -350,6 +372,7 @@ struct
       F.fprintf f "@[<v>%d disjuncts:@;%a%a@]" (List.length disjuncts) pp_disjuncts disjuncts
         (Pp.html_collapsible_block ~name:"Non-disjunctive state" pp_kind (T.pp_non_disj pp_kind))
         non_disj
+
 
     let pp = pp_ TEXT
   end
@@ -428,7 +451,6 @@ struct
     let global_limit = Option.value_exn (AnalysisState.get_remaining_disjuncts ()) in
     let nb_pre = List.length pre_disjuncts in
     let (disjuncts, non_disj_astates), dropped, _, _ =
-
       List.foldi (List.rev pre_disjuncts)
         ~init:(([], []), [], 0, 0)
         ~f:(fun
@@ -660,7 +682,8 @@ module AbstractInterpreterCommon (TransferFunctions : NodeTransferFunctions) = s
     (* hack to ensure that we call [exec_instr] on a node even if it has no instructions *)
     let instrs = if Instrs.is_empty instrs then Instrs.singleton Sil.skip_instr else instrs in
     TransferFunctions.exec_node_instrs old_state_opt ~exec_instr pre instrs
-    
+
+
   (* Note on narrowing operations: we defines the narrowing operations simply to take a smaller one.
      So, as of now, the termination of narrowing is not guaranteed in general. *)
   let exec_node ~pp_instr analysis_data node ~is_loop_head ~is_narrowing astate_pre inv_map =
@@ -920,8 +943,7 @@ module MakeWTONode (TransferFunctions : NodeTransferFunctions) = struct
       | Empty ->
           inv_map (* empty cfg *)
       | Node {node= start_node; next} as wto ->
-         if Config.write_html then debug_wto wto start_node ;
-         
+          if Config.write_html then debug_wto wto start_node ;
           let inv_map, _did_not_reach_fix_point =
             exec_node ~pp_instr proc_data start_node ~is_loop_head:false
               ~is_narrowing:(is_narrowing_of mode) initial inv_map

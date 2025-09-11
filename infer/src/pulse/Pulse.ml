@@ -176,13 +176,13 @@ let pp_space_specialization fmt =
          F.fprintf fmt " (specialized: %a)" Specialization.Pulse.pp specialization )
 
 
-  module PulseTransferFunctions = struct
+module PulseTransferFunctions = struct
   module CFG = ProcCfg.ExceptionalNoSinkToExitEdge
   module DisjDomain = AbstractDomain.PairDisjunct (ExecutionDomain) (PathContext)
   module NonDisjDomain = NonDisjDomain
-                 
+
   type analysis_data = PulseSummary.t InterproceduralAnalysis.t
-                     
+
   (* Call on back_edge from widen in AbstractInterpreter.ml *)
   (* JVan: I thought this was equivalent to the verbose version below, but it seems to
      bring a significant additional amount of FP to enable. (openssl: 18 -> 26 alerts)
@@ -227,55 +227,65 @@ let pp_space_specialization fmt =
                  prev
      in (res,-1)
    *)
-     
+
   (* Call on back_edge from widen in AbstractInterpreter.ml *)
   (* JVan: Correct version albeit quite verbose *)
-   let back_edge (prev:DisjDomain.t list) (next:DisjDomain.t list) (num_iters:int)  : DisjDomain.t list * int =
-
-        (* let plen,nlen = List.length(prev), List.length(next) in 
+  let back_edge (prev : DisjDomain.t list) (next : DisjDomain.t list) (num_iters : int) :
+      DisjDomain.t list * int =
+    (* let plen,nlen = List.length(prev), List.length(next) in 
     L.debug Analysis Quiet "PULSEINF: BACKEDGE NUMITER %d Number of Prev state = %d Number of Post states = %d \n" num_iters plen nlen; *)
-
-    let rec listpair_split (l:DisjDomain.t list) (o1:ExecutionDomain.t list) (o2:PathContext.t list) =
-      match l with
-      | [] -> (o1,o2)
-      | (ed,pc)::tail -> listpair_split tail (ed::o1) (pc::o2)
+    let rec listpair_split (l : DisjDomain.t list) (o1 : ExecutionDomain.t list)
+        (o2 : PathContext.t list) =
+      match l with [] -> (o1, o2) | (ed, pc) :: tail -> listpair_split tail (ed :: o1) (pc :: o2)
     in
-    let listpair_combine (l1:ExecutionDomain.t list) (l2: PathContext.t list) : (ExecutionDomain.t * PathContext.t) list =
-      let l1len,l2len = (List.length l1),(List.length l2) in
+    let listpair_combine (l1 : ExecutionDomain.t list) (l2 : PathContext.t list) :
+        (ExecutionDomain.t * PathContext.t) list =
+      let l1len, l2len = (List.length l1, List.length l2) in
       (* L.debug Analysis Quiet "JV: listpair_combine L1 len = %u L2 len = %u \n" l1len l2len; *)
-      if (l1len <> l2len) then [] else
-
-        let rec listpair_combine_int (l1:ExecutionDomain.t list) (l2: PathContext.t list) (out: (ExecutionDomain.t * PathContext.t) list)
-                : (ExecutionDomain.t * PathContext.t) list =
-          match (l1,l2) with
-          | hd::tl, hd2::tl2  -> let p = (hd,hd2) in listpair_combine_int tl tl2 (out @ [p])
-          | [],[]             -> out
-          | _                 -> L.debug Analysis Quiet "PULSEINF: BACKEDGE MISMATCH in list size to recombine. Should never happen! \n"; out
-        in listpair_combine_int l1 l2 []
+      if l1len <> l2len then []
+      else
+        let rec listpair_combine_int (l1 : ExecutionDomain.t list) (l2 : PathContext.t list)
+            (out : (ExecutionDomain.t * PathContext.t) list) :
+            (ExecutionDomain.t * PathContext.t) list =
+          match (l1, l2) with
+          | hd :: tl, hd2 :: tl2 ->
+              let p = (hd, hd2) in
+              listpair_combine_int tl tl2 (out @ [p])
+          | [], [] ->
+              out
+          | _ ->
+              L.debug Analysis Quiet
+                "PULSEINF: BACKEDGE MISMATCH in list size to recombine. Should never happen! \n" ;
+              out
+        in
+        listpair_combine_int l1 l2 []
     in
-    let plist,rplist = listpair_split prev [] [] in
-    let nlist,rnlist = listpair_split next [] [] in
-    let dbe,cnt      = (ExecutionDomain.back_edge plist nlist num_iters) in
-    let _,_       = (PathContext.back_edge rplist rnlist num_iters) in
-    let (pathctx: PathContext.t option) = (List.nth rnlist cnt) in
-
-    let used,pts =
-      match (pathctx) with
-      | Some p -> 1, p
+    let plist, rplist = listpair_split prev [] [] in
+    let nlist, rnlist = listpair_split next [] [] in
+    let dbe, cnt = ExecutionDomain.back_edge plist nlist num_iters in
+    let _, _ = PathContext.back_edge rplist rnlist num_iters in
+    let (pathctx : PathContext.t option) = List.nth rnlist cnt in
+    let used, pts =
+      match pathctx with
+      | Some p ->
+          (1, p)
       | _ ->
-         L.debug Analysis Quiet "PULSEINF: PATHCTX DEBUG: not finding back pathctx at provided index  - this should never happen \n";
-         0, PathContext.initial (* pathctx is None *)
-
+          L.debug Analysis Quiet
+            "PULSEINF: PATHCTX DEBUG: not finding back pathctx at provided index  - this should \
+             never happen \n" ;
+          (0, PathContext.initial (* pathctx is None *))
     in
     (* L.debug Analysis Quiet "JV PATHCTX: dbe len = %u pts len = 1 \n" (List.length dbe); *)
     (* L.debug Analysis Quiet "PULSEINF: Prev MODIFIED %b (if true added Infinite state) \n" (used > 0 && cnt >= 0); *)
-    let res = if (used > 0 && cnt >= 0) then
-                listpair_combine (plist @ dbe) (rplist @ [pts])
-              else prev (* listpair_combine plist rplist *)
+    let res =
+      if used > 0 && cnt >= 0 then listpair_combine (plist @ dbe) (rplist @ [pts])
+      else prev (* listpair_combine plist rplist *)
     in
-    (res,-1)
-   (* END OF BACK-EDGE CODE *)
-                     
+    (res, -1)
+
+
+  (* END OF BACK-EDGE CODE *)
+
   let get_pvar_formals pname =
     IRAttributes.load pname |> Option.map ~f:ProcAttributes.get_pvar_formals
 
@@ -356,9 +366,10 @@ let pp_space_specialization fmt =
     | ExitProgram _
     | LatentAbortProgram _
     | LatentInvalidAccess _
-    | LatentSpecializedTypeIssue _ 
-    | InfiniteLoop _ -> 
+    | LatentSpecializedTypeIssue _
+    | InfiniteLoop _ ->
         Sat (Ok exec_state)
+
 
   let topl_small_step tenv loc procname arguments (return, return_type) exec_state_res =
     let arguments =
@@ -384,7 +395,7 @@ let pp_space_specialization fmt =
       | ExitProgram _
       | ExceptionRaised _
       | InfiniteLoop _
-      | LatentInvalidAccess _ 
+      | LatentInvalidAccess _
       | LatentSpecializedTypeIssue _ ->
           exec_state
     in
@@ -1062,15 +1073,13 @@ let pp_space_specialization fmt =
                          astate )
             in
             ContinueProgram astate
-
         | ExceptionRaised astate ->
             (* clear any builder attributes if we threw so as not to over-report *)
             L.d_printfln "clearing builder attributes on exception" ;
             let astate = AbductiveDomain.finalize_all_hack_builders astate in
             Ok (ExceptionRaised astate)
-        | InfiniteLoop _
-        | ( ExitProgram _
-
+        | ( InfiniteLoop _
+          | ExitProgram _
           | AbortProgram _
           | LatentAbortProgram _
           | LatentInvalidAccess _
@@ -1426,17 +1435,18 @@ let pp_space_specialization fmt =
       (astate_n : NonDisjDomain.t) ({InterproceduralAnalysis.tenv; proc_desc} as analysis_data)
       cfg_node (instr : Sil.instr) : ExecutionDomain.t list * PathContext.t * NonDisjDomain.t =
     match astate with
-    | AbortProgram _ | LatentAbortProgram _ | LatentInvalidAccess _ | InfiniteLoop _
-    | LatentSpecializedTypeIssue _
-      ->
+    | AbortProgram _
+    | LatentAbortProgram _
+    | LatentInvalidAccess _
+    | InfiniteLoop _
+    | LatentSpecializedTypeIssue _ ->
         ([astate], path, astate_n)
     (* an exception has been raised, we skip the other instructions until we enter in
        exception edge *)
     | ExceptionRaised _
     (* program already exited, simply propagate the exited state upwards  *)
-      | ExitProgram _ ->
-       (* L.debug Analysis Quiet "exec_instr: ExceptionRaised/ExitProgram \n"; *)
-
+    | ExitProgram _ ->
+        (* L.debug Analysis Quiet "exec_instr: ExceptionRaised/ExitProgram \n"; *)
         ([astate], path, astate_n)
     | ContinueProgram astate -> (
       match instr with
@@ -1450,7 +1460,7 @@ let pp_space_specialization fmt =
           in
           (astates, path, astate_n)
       | Load {id= lhs_id; e= rhs_exp; loc; typ} ->
-         (* L.debug Analysis Quiet "exec_instr: Load \n"; *)
+          (* L.debug Analysis Quiet "exec_instr: Load \n"; *)
 
           (* [lhs_id := *rhs_exp] *)
           let model_opt = PulseLoadInstrModels.dispatch ~load:rhs_exp in
@@ -1507,7 +1517,7 @@ let pp_space_specialization fmt =
           in
           (List.take astates limit, path, non_disj)
       | Store {e1= lhs_exp; e2= rhs_exp; loc; typ} ->
-         (* L.debug Analysis Quiet "exec_instr: Store \n"; *)
+          (* L.debug Analysis Quiet "exec_instr: Store \n"; *)
 
           (* [*lhs_exp := rhs_exp] *)
           let event =
@@ -1527,13 +1537,10 @@ let pp_space_specialization fmt =
               PulseOperations.eval_to_value_origin path NoAccess loc rhs_exp astate
             in
             let rhs_addr, rhs_history = ValueOrigin.addr_hist rhs_value_origin in
-
             let** astate, ((lhs_addr, _) as lhs_addr_hist) =
               PulseOperations.eval path Write loc lhs_exp astate
             in
-
             let hist = ValueHistory.sequence event rhs_history in
-
             let** astate = and_is_int_if_integer_type typ rhs_addr astate in
             let** astate =
               PulseOperations.cleanup_attribute_store proc_desc path loc astate ~lhs_exp ~rhs_exp
@@ -1578,8 +1585,7 @@ let pp_space_specialization fmt =
           let astates = PulseReport.report_results analysis_data path loc results in
           (List.take astates limit, path, astate_n)
       | Call (ret, call_exp, actuals, loc, call_flags) ->
-         (* L.debug Analysis Quiet "exec_instr: Call \n"; *)
-
+          (* L.debug Analysis Quiet "exec_instr: Call \n"; *)
           let astate_n = check_modified_before_destructor actuals call_exp astate astate_n in
           let astates, astate_n =
             List.fold actuals ~init:([astate], astate_n) ~f:(fun (astates, astate_n) (exp, typ) ->
@@ -1638,20 +1644,16 @@ let pp_space_specialization fmt =
                 NonDisjDomain.set_captured_variables exp astate_n )
           in
           (astates, path, astate_n)
-
       | Prune (condition, loc, _is_then_branch, _if_kind) ->
-         (* L.debug Analysis Quiet "exec_instr: Prune \n"; *)
-
+          (* L.debug Analysis Quiet "exec_instr: Prune \n"; *)
           let prune_result =
             let=* astate = check_config_usage analysis_data loc condition astate in
             PulseOperations.prune proc_desc path loc ~condition astate
           in
-
           let results =
             let<++> astate, _ = prune_result in
             astate
           in
-
           let astates = PulseReport.report_exec_results analysis_data path loc results in
           (List.take astates limit, path, astate_n)
       | Metadata (ExitScope (vars, location)) ->
@@ -1659,24 +1661,23 @@ let pp_space_specialization fmt =
             exit_scope limit vars location path astate astate_n analysis_data
           in
           (exec_states, path, non_disj)
-
       | Metadata (VariableLifetimeBegins {pvar; typ; loc; is_cpp_structured_binding})
-           when not (Pvar.is_global pvar) ->
-
+        when not (Pvar.is_global pvar) ->
           let set_uninitialized = (not is_cpp_structured_binding) && not (Typ.is_folly_coro typ) in
           ( [ PulseOperations.realloc_pvar tenv path ~set_uninitialized pvar typ loc astate
               |> ExecutionDomain.continue ]
           , path
           , astate_n )
-          
-      | Metadata ( Abstract _
-                   | CatchEntry _
-                 | Nullify _
-                 | Skip
-                 | TryEntry _
-                 | TryExit _
-                 | VariableLifetimeBegins _ ) ->
-         ([ContinueProgram astate], path, astate_n) )
+      | Metadata
+          ( Abstract _
+          | CatchEntry _
+          | Nullify _
+          | Skip
+          | TryEntry _
+          | TryExit _
+          | VariableLifetimeBegins _ ) ->
+          ([ContinueProgram astate], path, astate_n) )
+
 
   let exec_instr_with_oom_protection_and_path_update ~limit ((astate, path), astate_n) analysis_data
       cfg_node instr : DisjDomain.t list * NonDisjDomain.t =

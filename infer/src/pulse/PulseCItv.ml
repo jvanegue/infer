@@ -321,11 +321,11 @@ let intersection a1 a2 =
       Option.first_some inter1_opt inter2_opt |> Option.value ~default:a1 |> Option.some
 
 
-let has_empty_intersection a1 a2 = Option.is_none (intersection a1 a2) 
+let has_empty_intersection a1 a2 = Option.is_none (intersection a1 a2)
 
 let abduce_ne (a1 : t) (a2 : t) =
   if has_empty_intersection a1 a2 then Satisfiable (None, None)
-  else 
+  else
     match (to_singleton a1, to_singleton a2) with
     | Some _, Some _ ->
         (* non-empty intersection between 2 singletons => they are the same singleton and hence the
@@ -335,14 +335,13 @@ let abduce_ne (a1 : t) (a2 : t) =
         (* non-empty intersection and each predicate can be satisfied by ≥2 elements => we cannot
            know if they are disequal or not *)
         Satisfiable (None, None)
-    | Some e1, None ->
-       ( match remove_element e1 a2 with
+    | Some e1, None -> (
+      match remove_element e1 a2 with
       | Some _ as abduced2 ->
           Satisfiable (None, abduced2)
       | None ->
           Satisfiable (None, None) )
-    | None, Some e2 ->
-       (
+    | None, Some e2 -> (
       match remove_element e2 a1 with
       | Some _ as abduced1 ->
           Satisfiable (abduced1, None)
@@ -425,7 +424,6 @@ let abduce_binop_constraints ~negated (bop : Binop.t) (a1 : t) (a2 : t) =
 
 
 let abduce_binop_is_true ~negated bop v1 v2 =
-
   match (v1, v2) with
   | None, None ->
       (* two existential variables: no way to express in the non-relational domain *)

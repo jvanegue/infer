@@ -169,7 +169,8 @@ module BackwardNodeTransferFunction (T : TransferFunctions) = struct
 end
 
 module DisjunctiveMetadata = struct
-  (** information about the analysis of a single procedure with [MakeDisjunctiveTransferFunctions] *)
+  (** information about the analysis of a single procedure with [MakeDisjunctiveTransferFunctions]
+  *)
   type t =
     { dropped_disjuncts: int
           (** how many disjuncts were discarded due to hitting the max disjuncts limit *)

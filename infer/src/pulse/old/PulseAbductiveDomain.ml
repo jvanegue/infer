@@ -97,17 +97,23 @@ let pp_ ~is_summary f
   (* print pre then post if it's a summary, other print the post (aka current abstract state) first
      *)
   let pp_pre_post f =
-    if is_summary
-    then F.fprintf f "PRE=@[%a@] \n @;POST=@[%a@]\n" PreDomain.pp pre PostDomain.pp post
+    if is_summary then
+      F.fprintf f "PRE=@[%a@] \n @;POST=@[%a@]\n" PreDomain.pp pre PostDomain.pp post
     else F.fprintf f "POST=@[%a@]\n @;PRE=[%a]\n" PostDomain.pp post PreDomain.pp pre
   in
   F.fprintf f
-    "@[<v>PATHCOND=%a@;\ \n
-     %t@;\ \n
-     %tneed_dynamic_type_specialization=%a@;\ \n
-     transitive_info=%a@;\ \n
-     skipped_calls=%a@;\ \n
-     Topl=%a@] \n --------------------------------------------------- \n"
+    "@[<v>PATHCOND=%a@;\
+    \ \n\n\
+    \     %t@;\
+    \ \n\n\
+    \     %tneed_dynamic_type_specialization=%a@;\
+    \ \n\n\
+    \     transitive_info=%a@;\
+    \ \n\n\
+    \     skipped_calls=%a@;\
+    \ \n\n\
+    \     Topl=%a@] \n\
+    \ --------------------------------------------------- \n"
     Formula.pp path_condition pp_pre_post pp_decompiler AbstractValue.Set.pp
     need_dynamic_type_specialization TransitiveInfo.pp transitive_info SkippedCalls.pp skipped_calls
     PulseTopl.pp_state topl
@@ -118,7 +124,7 @@ let pp = pp_ ~is_summary:false
 let get_path_condition astate = astate.path_condition
 
 (* let get_termination_condition astate = astate.get_terminal_condition *)
-       
+
 let set_path_condition path_condition astate = {astate with path_condition}
 
 let record_transitive_access location astate =
@@ -1879,7 +1885,7 @@ module Summary = struct
        canonicalize *before* garbage collecting unused addresses in case we detect any last-minute
        contradictions about addresses we are about to garbage collect *)
     let* path_condition, new_eqs = Formula.normalize ~location astate.path_condition in
-    let astate = {astate with path_condition=path_condition} in
+    let astate = {astate with path_condition} in
     let* astate, error = incorporate_new_eqs astate new_eqs in
     let astate_before_filter = astate in
     (* do not store the decompiler in the summary and make sure we only use the original one by
@@ -1903,39 +1909,41 @@ module Summary = struct
       | Error (unreachable_location, JavaResource class_name, trace) ->
           Error
             (`JavaResourceLeak
-              ( astate
-              , astate_before_filter
-              , class_name
-              , trace
-              , Option.value unreachable_location ~default:location ) )
+               ( astate
+               , astate_before_filter
+               , class_name
+               , trace
+               , Option.value unreachable_location ~default:location ) )
       | Error (unreachable_location, HackAsync, trace) ->
           Error
             (`HackUnawaitedAwaitable
-              ( astate
-              , astate_before_filter
-              , trace
-              , Option.value unreachable_location ~default:location ) )
+               ( astate
+               , astate_before_filter
+               , trace
+               , Option.value unreachable_location ~default:location ) )
       | Error (unreachable_location, CSharpResource class_name, trace) ->
           Error
             (`CSharpResourceLeak
-              ( astate
-              , astate_before_filter
-              , class_name
-              , trace
-              , Option.value unreachable_location ~default:location ) )
+               ( astate
+               , astate_before_filter
+               , class_name
+               , trace
+               , Option.value unreachable_location ~default:location ) )
       | Error (unreachable_location, allocator, trace) ->
           Error
             (`MemoryLeak
-              ( astate
-              , astate_before_filter
-              , allocator
-              , trace
-              , Option.value unreachable_location ~default:location ) ) )
+               ( astate
+               , astate_before_filter
+               , allocator
+               , trace
+               , Option.value unreachable_location ~default:location ) ) )
     | Some (address, must_be_valid) ->
         Error
           (`PotentialInvalidAccessSummary
-            (astate, astate_before_filter, Decompiler.find address astate0.decompiler, must_be_valid)
-            )
+             ( astate
+             , astate_before_filter
+             , Decompiler.find address astate0.decompiler
+             , must_be_valid ) )
 
 
   let of_post proc_name proc_attrs location astate0 =

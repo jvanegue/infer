@@ -19,6 +19,7 @@ module Var :
      and module Map = PulseAbstractValue.Map
 
 (* Pulse-infinite added *)
+
 (** Linear Arithmetic *)
 module LinArith : sig
   (** linear combination of variables, eg [2·x + 3/4·y + 12] *)
@@ -55,23 +56,23 @@ module Term : sig
     | StringConcat of t * t
     | IsInstanceOf of {var: Var.t; typ: Typ.t; nullable: bool}
     | IsInt of t
- [@@deriving compare, equal, yojson_of]
+  [@@deriving compare, equal, yojson_of]
 
- module Set : Stdlib.Set.S [@@deriving compare]
-             
+  module Set : Stdlib.Set.S [@@deriving compare]
 end
-     
+
 module Atom : sig
   type t =
     | LessEqual of Term.t * Term.t
     | LessThan of Term.t * Term.t
     | Equal of Term.t * Term.t
     | NotEqual of Term.t * Term.t
-   [@@deriving compare, equal, yojson_of]
+  [@@deriving compare, equal, yojson_of]
 
   val equal : Term.t -> Term.t -> t
-                
+
   module Set : Stdlib.Set.S [@@deriving compare]
+
   module Map : Stdlib.Map.S [@@deriving compare]
 end
 
@@ -86,10 +87,7 @@ type t =
             them so normalization w.r.t. [phi] would make them trivially true most of the time. *)
   ; phi: Formula.t
         (** the arithmetic constraints of the current symbolic state; true in both the pre and post
-            since abstract values [Var.t] have immutable semantics *)
-           (* ; term_conds: Atom.Set.t *)
-        (** Termination conditions: currently set to the unpruned version of the path conditions *)
-  }
+            since abstract values [Var.t] have immutable semantics *) }
 [@@deriving compare, equal, yojson_of]
 
 val extract_path_cond : t -> int Atom.Map.t
@@ -102,12 +100,11 @@ val map_is_empty : int Atom.Map.t -> bool
 
 val set_is_empty : Atom.Set.t -> bool
 
-val termset_is_empty : Term.Set.t -> bool  
+val termset_is_empty : Term.Set.t -> bool
 
 val formula_is_empty : t -> bool
 (* End pulse-infinite *)
 
-               
 (** {2 Arithmetic solver}
 
     Build formulas from SIL and tries to decide if they are (mostly un-)satisfiable. *)
@@ -176,7 +173,15 @@ val and_equal_string_concat : Var.t -> operand -> operand -> t -> (t * new_eqs) 
 
 val and_is_int : Var.t -> t -> (t * new_eqs) SatUnsat.t
 
-val prune_binop : ?depth:int -> negated:bool -> Binop.t -> ?ifk:bool -> operand -> operand -> t -> (t * new_eqs) SatUnsat.t
+val prune_binop :
+     ?depth:int
+  -> negated:bool
+  -> Binop.t
+  -> ?ifk:bool
+  -> operand
+  -> operand
+  -> t
+  -> (t * new_eqs) SatUnsat.t
 
 (** {3 Operations} *)
 

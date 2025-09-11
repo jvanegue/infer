@@ -76,7 +76,7 @@ val prune_binop :
   -> operand
   -> AbductiveDomain.t
   -> AbductiveDomain.t AccessResult.t SatUnsat.t
-  
+
 val prune_eq_zero :
   AbstractValue.t -> AbductiveDomain.t -> AbductiveDomain.t AccessResult.t SatUnsat.t
 (** helper function wrapping [prune_binop] *)
