@@ -108,26 +108,35 @@ let pp_with_kind kind path_opt fmt exec_state =
 let pp fmt (exec_state : 'abductive_domain_t base_t) =
   F.fprintf fmt "%a%a" (pp_header TEXT) exec_state AbductiveDomain.pp (to_astate exec_state)
 
+(* Pulse infinite: INFINITE LOOP checker *)
 
-(* Pulse infinite *)
-
+(* This TermKey allows to identify loop states based on four components: CFG Node, Path Condition, Termination Atoms and Termination Terms. *)
+(* Termination atoms are collected from inter-procedural propagation *)
+(* termination terms are solely from intra-procedural if/else/loop conditions *)
+module TermKey = struct
+  type t = Procdesc.Node.t * int PulseFormula.Atom.Map.t * PulseFormula.Atom.Set.t * PulseFormula.Term.Set.t [@@deriving compare]                
+  module Set = struct
+    include Stdlib.Set.Make (struct
+                type nonrec t = t [@@deriving compare]
+              end)
+  end          
+end
+               
 let widenstate = AnalysisGlobalState.make_dls ~init:(fun () -> Some (Stdlib.Hashtbl.create 16))
 
 let get_widenstate () = DLS.get widenstate
 
-let add_widenstate key =
+let add_widenstate (key:Procdesc.Node.t) (data:TermKey.Set.t) =
   Utils.with_dls widenstate ~f:(fun widenstate ->
       match widenstate with
       | None ->
           widenstate
       | Some state ->
-          Stdlib.Hashtbl.add state key () ;
+          Stdlib.Hashtbl.add state key data ;
           widenstate )
-
-
+  
 let has_infinite_state (lst : t list) : bool =
   List.exists ~f:(fun x -> match x with InfiniteLoop _ -> true | _ -> false) lst
-
 
 let back_edge (prev : t list) (next : t list) (num_iters : int) : t list * int =
   (* L.debug Analysis Quiet "PULSEINF: Entered EXECDOM BACK-EDGE NUMITER %u \n" num_iters; *)
@@ -136,7 +145,6 @@ let back_edge (prev : t list) (next : t list) (num_iters : int) : t list * int =
       []
     , -1 )
   else
-    let _ = num_iters in
     let cfgnode = AnalysisState.get_node () |> Option.value_exn in
     let same = phys_equal prev next in
     let rec compute_workset prev next newset nextit : (t * int) list =
@@ -205,9 +213,7 @@ let back_edge (prev : t list) (next : t list) (num_iters : int) : t list * int =
         phys_equal a e && phys_equal b f && phys_equal c g && phys_equal d h
       in
       (* end 30% FP diminish *)
-      (* let phys_equal4 _ _ = false in  *)
 
-      (* let curlen = (List.length ws) in *)
       match ws with
       | [] ->
           -1
@@ -216,7 +222,7 @@ let back_edge (prev : t list) (next : t list) (num_iters : int) : t list * int =
           let pathcond = Formula.extract_path_cond cond in
           let termcond = Formula.extract_term_cond cond in
           let termcond2 = Formula.extract_term_cond2 cond in
-          let key = (cfgnode, termcond, pathcond, termcond2) in
+          let (key: TermKey.t) = (cfgnode, pathcond, termcond, termcond2) in
           let dl_ws = get_widenstate () in
           match dl_ws with
           | None ->
@@ -224,31 +230,46 @@ let back_edge (prev : t list) (next : t list) (num_iters : int) : t list * int =
                 "PULSEINF: widenstate htable NONE - should never happen! num_iter %u \n" num_iters ;
               -1
           | Some ws -> (
-              let prevstate = Stdlib.Hashtbl.find_opt ws key in
-              match prevstate with
+            let prevstate = Stdlib.Hashtbl.find_opt ws cfgnode in
+            match prevstate with
               | None ->
-                  (* L.debug Analysis Quiet "PULSEINF: Recorded pathcond NOT in htable (ADDING) idx %d numiter %u \n" idx num_iters; *)
-                  let _ = add_widenstate key in
-                  record_pathcond tl ([key] @ kl)
-              | Some _ -> (
-                match
-                  ( Formula.set_is_empty termcond
-                  , Formula.map_is_empty pathcond
-                  , Formula.termset_is_empty termcond2 )
-                with
-                | true, true, true ->
-                    idx (* -2 *)
-                | _ ->
-                    let test = List.mem ~equal:phys_equal4 kl key in
+                 (* L.debug Analysis Quiet "PULSEINF: Recorded pathcond NOT in htable (ADDING - A) idx %d numiter %u \n" idx num_iters; *)
+                 let newset = (TermKey.Set.add key TermKey.Set.empty) in
+                 let _ = (add_widenstate cfgnode newset) in
+                 record_pathcond tl ([key] @ kl)
+              | Some tkset ->
+                 let p = TermKey.Set.find_opt key tkset in
+                 match p with
+                 | None ->
+                    (* L.debug Analysis Quiet "PULSEINF: Recorded pathcond NOT in htable (ADDING - B) idx %d numiter %u \n" idx num_iters; *)
+                    let _ = (add_widenstate cfgnode (TermKey.Set.add key tkset)) in
+                    record_pathcond tl ([key] @ kl)
+                 | Some _ -> 
+                    match
+                      ( Formula.set_is_empty termcond
+                      , Formula.map_is_empty pathcond
+                      , Formula.termset_is_empty termcond2 )
+                    with
+                    | true, true, true ->
+                       idx (* -2 *)
+                    | _ ->
+                    let test = (List.mem ~equal:phys_equal4 kl key) in
                     if test then
                       (* (L.debug Analysis Quiet "PULSEINF: Recorded pathcond ALREADY in htable (SAME ITER NO BUG) idx %d numiter %u \n" idx num_iters; *)
+                      (* TODO: here may want to continue instead of returning -2 (short circuiting) : *)
+                      (* record_pathcond tl kl *)
                       -2
                     else
                       (* L.debug Analysis Quiet "PULSEINF: Recorded pathcond ALREADY in htable! (NON-TERM BUG) idx %d numiter %u \n" idx num_iters; *)
-                      idx ) ) )
-    in
+                      idx ) ) 
+in
     let _ = print_workset workset in
-    let (repeated_wsidx : int) = if Bool.equal same true then -1 else record_pathcond workset [] in
+    let (repeated_wsidx : int) = if Bool.equal same true then -1 else
+                                   (* In the first widening iteration, always set the cfgnode state set to empty to prevent staled state if function
+                                    and loop are analyzed multiple times due to inter-procedural constraint propagation *)
+                                   (let _ = (if (Int.equal num_iters 0) then (add_widenstate cfgnode TermKey.Set.empty; ()) else ()) in
+                                    record_pathcond workset [])
+    in
     let create_infinite_state (hd : t) (cnt : int) : t =
       (* Only create infinite state from a non-error state that is not already an infinite state *)
       match hd with

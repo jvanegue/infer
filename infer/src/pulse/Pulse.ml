@@ -1430,12 +1430,9 @@ module PulseTransferFunctions = struct
       (astate_n : NonDisjDomain.t) ({InterproceduralAnalysis.tenv; proc_desc} as analysis_data)
       cfg_node (instr : Sil.instr) : ExecutionDomain.t list * PathContext.t * NonDisjDomain.t =
     match astate with
-    | AbortProgram _
-    | LatentAbortProgram _
-    | LatentInvalidAccess _
-    | InfiniteLoop _
-    | LatentSpecializedTypeIssue _ ->
-        ([astate], path, astate_n)
+    | AbortProgram _ | LatentAbortProgram _ | LatentInvalidAccess _
+      | InfiniteLoop _ | LatentSpecializedTypeIssue _ ->
+       ([astate], path, astate_n)
     (* an exception has been raised, we skip the other instructions until we enter in
        exception edge *)
     | ExceptionRaised _
