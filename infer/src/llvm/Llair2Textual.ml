@@ -64,10 +64,20 @@ let reg_to_annot_typ lang ~struct_map reg =
   Type.to_annotated_textual_typ lang ~struct_map (Reg.typ reg)
 
 
-let to_textual_loc {Loc.line; col} =
+let to_textual_loc ?proc_state {Loc.line; col} =
   if Int.equal line 0 && Int.equal col 0 then
     let line =
-      if Config.debug_mode || Config.frontend_tests then ProcState.get_fresh_fake_line () else line
+      if Config.frontend_tests then ProcState.get_fresh_fake_line ()
+      else
+        match proc_state with
+        | Some proc_state -> (
+          match proc_state.ProcState.loc with
+          | Textual.Location.Known {line= proc_line; _} ->
+              proc_line
+          | _ ->
+              line )
+        | None ->
+            line
     in
     Textual.Location.Known {line; col}
   else Textual.Location.Known {line; col}
@@ -82,7 +92,7 @@ let is_loc_default loc =
 
 
 let to_textual_loc_instr ~(proc_state : ProcState.t) loc =
-  let loc = to_textual_loc loc in
+  let loc = to_textual_loc ~proc_state loc in
   if is_loc_default loc then proc_state.loc else loc
 
 
@@ -338,6 +348,12 @@ let rec to_textual_exp ~(proc_state : ProcState.t) loc ?generate_typ_exp (exp : 
         Textual.Instr.Store {exp1= index_exp; exp2= elt_exp_deref; typ= None; loc}
       in
       (rcd_exp, Some textual_typ, List.append (List.append rcd_instrs elt_instrs) [store_instr])
+  | Ap3 (Conditional, _typ, cond_exp, then_exp, else_exp) ->
+      let cond_exp, _, cond_instrs = to_textual_bool_exp loc ~proc_state cond_exp in
+      let then_exp, _, then_instrs = to_textual_exp loc ~proc_state then_exp in
+      let else_exp, _, else_instrs = to_textual_exp loc ~proc_state else_exp in
+      let exp = Textual.Exp.If {cond= cond_exp; then_= then_exp; else_= else_exp} in
+      (exp, None, cond_instrs @ then_instrs @ else_instrs)
   | ApN (Record, typ, _elements) -> (
       let textual_typ = Type.to_textual_typ proc_state.lang ~struct_map typ in
       let type_name_opt =
@@ -381,6 +397,11 @@ let rec to_textual_exp ~(proc_state : ProcState.t) loc ?generate_typ_exp (exp : 
       undef_exp exp
 
 
+and to_textual_bool_exp ~proc_state loc exp =
+  let textual_exp, textual_typ_opt, instrs = to_textual_exp loc ~proc_state exp in
+  (Textual.BoolExp.Exp textual_exp, textual_typ_opt, instrs)
+
+
 and to_textual_call_aux ~proc_state ~kind ?exp_opt proc return ?generate_typ_exp
     (args : Llair.Exp.t list) (loc : Textual.Location.t) =
   let args_instrs, args =
@@ -418,7 +439,7 @@ and to_textual_call_aux ~proc_state ~kind ?exp_opt proc return ?generate_typ_exp
 
 
 and to_textual_call ~proc_state (call : 'a Llair.call) =
-  let loc = to_textual_loc call.loc in
+  let loc = to_textual_loc ~proc_state call.loc in
   let proc, kind, exp_opt =
     match call.callee with
     | Direct {func} ->
@@ -516,7 +537,7 @@ let cmnd_to_instrs ~(proc_state : ProcState.t) block =
         textual_instrs
     | Free {ptr; loc} ->
         let proc = Textual.ProcDecl.free_name in
-        let loc = to_textual_loc loc in
+        let loc = to_textual_loc ~proc_state loc in
         let id, call_exp, call_textual_instrs =
           to_textual_call_aux ~proc_state ~kind:Textual.Exp.NonVirtual proc None [ptr] loc
         in
@@ -533,7 +554,7 @@ let cmnd_to_instrs ~(proc_state : ProcState.t) block =
           | None ->
               None
         in
-        let loc = to_textual_loc loc in
+        let loc = to_textual_loc ~proc_state loc in
         let call_textual_instrs =
           match builtin_name_opt with
           | Some builtin_name ->
@@ -544,7 +565,7 @@ let cmnd_to_instrs ~(proc_state : ProcState.t) block =
         List.append call_textual_instrs textual_instrs
     | Builtin {reg; name; args; loc} when Llair.Builtin.equal name `malloc -> (
         let proc = Textual.ProcDecl.malloc_name in
-        let loc = to_textual_loc loc in
+        let loc = to_textual_loc ~proc_state loc in
         match StdUtils.iarray_to_list args with
         | [((Llair.Exp.Integer _ | Llair.Exp.Float _) as exp)] ->
             let id, call_exp, args_instrs =
@@ -558,7 +579,7 @@ let cmnd_to_instrs ~(proc_state : ProcState.t) block =
     | Builtin {reg; name; args; loc}
       when Textual.Lang.is_swift proc_state.ProcState.lang && Llair.Builtin.equal name `memset -> (
         let args = StdUtils.iarray_to_list args in
-        let loc = to_textual_loc loc in
+        let loc = to_textual_loc ~proc_state loc in
         match args with
         | [_; arg2; _; _] when Textual.Exp.is_zero_exp (fst3 (to_textual_exp loc ~proc_state arg2))
           ->
@@ -569,7 +590,7 @@ let cmnd_to_instrs ~(proc_state : ProcState.t) block =
             List.append call_textual_instrs textual_instrs )
     | Builtin {reg; name; args; loc= loc_} when Llair.Builtin.equal name `expect -> (
         let args = StdUtils.iarray_to_list args in
-        let loc = to_textual_loc loc_ in
+        let loc = to_textual_loc ~proc_state loc_ in
         match args with
         | [arg1; _] ->
             let exp, _, exp_instrs = to_textual_exp loc ~proc_state arg1 in
@@ -584,7 +605,7 @@ let cmnd_to_instrs ~(proc_state : ProcState.t) block =
         | _ ->
             assert false )
     | Builtin {reg; name; args; loc} ->
-        let loc = to_textual_loc loc in
+        let loc = to_textual_loc ~proc_state loc in
         let name = Llair.Builtin.to_name name in
         let args = StdUtils.iarray_to_list args in
         let call_textual_instrs = to_textual_builtin ~proc_state reg name args loc in
@@ -608,13 +629,13 @@ let cmnd_to_instrs ~(proc_state : ProcState.t) block =
         in
         List.append instrs textual_instrs
     | AtomicRMW {reg; ptr; exp; loc} ->
-        let loc = to_textual_loc loc in
+        let loc = to_textual_loc ~proc_state loc in
         let call_textual_instrs =
           to_textual_builtin ~proc_state (Some reg) "llvm_atomicRMW" [ptr; exp] loc
         in
         List.append call_textual_instrs textual_instrs
     | AtomicCmpXchg {reg; ptr; cmp; exp; loc} ->
-        let loc = to_textual_loc loc in
+        let loc = to_textual_loc ~proc_state loc in
         let call_textual_instrs =
           to_textual_builtin ~proc_state (Some reg) "llvm_atomicCmpXchg" [ptr; cmp; exp] loc
         in
@@ -634,11 +655,6 @@ let cmnd_to_instrs ~(proc_state : ProcState.t) block =
         (None, None)
   in
   (instrs, first_loc, last_loc)
-
-
-let to_textual_bool_exp ~proc_state loc exp =
-  let textual_exp, textual_typ_opt, _ = to_textual_exp loc ~proc_state exp in
-  (Textual.BoolExp.Exp textual_exp, textual_typ_opt)
 
 
 let rec to_textual_jump_and_succs ~proc_state ~seen_nodes jump =
@@ -683,7 +699,7 @@ and to_terminator_and_succs ~proc_state ~seen_nodes term :
       match StdUtils.iarray_to_list tbl with
       | [(exp, zero_jump)] when Exp.equal exp Exp.false_ ->
           (* if then else *)
-          let bexp = to_textual_bool_exp loc ~proc_state key |> fst in
+          let bexp, _, instrs = to_textual_bool_exp loc ~proc_state key in
           let else_, else_typ, zero_nodes =
             to_textual_jump_and_succs ~proc_state ~seen_nodes zero_jump
           in
@@ -691,7 +707,7 @@ and to_terminator_and_succs ~proc_state ~seen_nodes term :
           let term = Textual.Terminator.If {bexp; then_; else_} in
           let nodes = Textual.Node.Set.union zero_nodes els_nodes in
           let typ_opt = Type.join_typ if_typ else_typ in
-          ((term, typ_opt, nodes), Some loc, [])
+          ((term, typ_opt, nodes), Some loc, instrs)
       | [] when Exp.equal key Exp.false_ ->
           (* goto *)
           (to_textual_jump_and_succs ~proc_state ~seen_nodes els, Some loc, [])

@@ -79,10 +79,6 @@ module DisjunctiveMetadata : sig
 
   val pp : F.formatter -> t -> unit
 
-  val record_cfg_node : Procdesc.Node.t -> unit
-
-  val get_cfg_node : unit -> Procdesc.Node.t
-
   val record_alert_node : Procdesc.Node.t -> unit
 
   val get_alert_node : unit -> Procdesc.Node.t

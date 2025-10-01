@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Bloomberg L.P.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -436,7 +436,7 @@ void benchmark_cook06_ok() {
 /* pulseinf: works good - no bug */
 // Cook et al. 2006 proves termination with non determinism
 // #include <stdlib.h>
-// int	nondet() { return (rand()); }
+// int nondet() { return (rand()); }
 void benchmark_simple_cook06_ok() {
   int x = nondet(), y = nondet(), z = nondet();
   if (y > 0) {
@@ -516,7 +516,7 @@ void loop_non_terminating_harris10_bad(int x, int d, int z) {
 /* TO me: there is no bug here! problem in chen14 paper - the nondet() should
  * eventually make it break */
 // #include <stdlib.h>
-// int	nondet() { return (rand()); }
+// int nondet() { return (rand()); }
 void nondet_nonterminate_chen14_bad(int k, int i) {
   if (k >= 0)
     ;
@@ -752,41 +752,36 @@ void allocate_all_in_array_ok(int* array[]) {
 }
 
 /* Infinite Goto in loop */
-/* Pulseinf: FN */ 
-void FN_goto_in_loop_bad()
-{
+/* Pulseinf: FN */
+void FN_goto_in_loop_bad() {
   int i = 0;
 
-  while (i < 10)
-    {
-    retry:
-      if (i == 5)
-	goto retry;
-      i++;
-    }
+  while (i < 10) {
+  retry:
+    if (i == 5)
+      goto retry;
+    i++;
+  }
 }
-
 
 /* Goto in loop */
 /* Pulseinf: find bug in CAV version */
-/* Upstream merged version would not find bug if we integrate the low FP fix for "same iteration lasso" */
-void goto_cross_loop_bad()
-{
+/* Upstream merged version would not find bug if we integrate the low FP fix for
+ * "same iteration lasso" */
+void goto_cross_loop_bad() {
   int i = 0;
 
- retry:
-  while (i < 10)
-    {
-      if (i == 5)
-	goto retry;
-      i++;
-    }
+retry:
+  while (i < 10) {
+    if (i == 5)
+      goto retry;
+    i++;
+  }
 }
 
 /* Constant involved, on bug */
 #define defined_const 8
-int constant_loop_ok(int i, int j)
-{
+int constant_loop_ok(int i, int j) {
   for (i = 0; i < defined_const; i++)
     j++;
   return (j);

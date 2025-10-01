@@ -37,7 +37,7 @@ type 'abductive_domain_t base_t =
 type t = AbductiveDomain.t base_t
 
 include AbstractDomain.Disjunct with type t := t
-      
+
 val pp_with_kind : Pp.print_kind -> PulsePathContext.t option -> F.formatter -> t -> unit
 
 val pp : F.formatter -> t -> unit
@@ -50,4 +50,4 @@ val pp_summary : Pp.print_kind -> F.formatter -> summary -> unit
 
 val to_name : 'a base_t -> string
 
-val back_edge : t list -> t list -> int -> t list * int
+val back_edge : t list -> t list -> int option

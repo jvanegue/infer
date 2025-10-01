@@ -177,7 +177,7 @@ val prune_binop :
      ?depth:int
   -> negated:bool
   -> Binop.t
-  -> ?ifk:bool
+  -> ?need_atom:bool
   -> operand
   -> operand
   -> t

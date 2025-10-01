@@ -32,10 +32,6 @@ let read_string_value address astate = PulseArithmetic.as_constant_string astate
 
 let replace_backslash_with_colon s = String.tr s ~target:'\\' ~replacement:':'
 
-let hh_this_rootname = "HH\\\\this"
-
-let this_localvar_name = "$this"
-
 let read_string_value_dsl aval : string option DSL.model_monad =
   let open PulseModelsDSL.Syntax in
   let* inner_val = load_access aval (FieldAccess string_val_field) in
@@ -1139,6 +1135,31 @@ let hh_type_structure clsobj constnameobj : model =
   assign_ret retval
 
 
+let read_string_field_from_ts fieldname tdict =
+  let open DSL.Syntax in
+  let field = TextualSil.wildcard_sil_fieldname Textual.Lang.Hack fieldname in
+  let* field_boxed_string = load_access tdict (FieldAccess field) in
+  let* field_string_val = load_access field_boxed_string (FieldAccess string_val_field) in
+  as_constant_string field_string_val
+
+
+let hh_type_structure_class clsobj constnameobj : model =
+  let open DSL.Syntax in
+  start_model
+  @@ fun () ->
+  let* constname = load_access constnameobj (FieldAccess string_val_field) in
+  constinit_existing_class_object clsobj
+  @@>
+  let* tdict = internal_hack_field_get clsobj constname in
+  let* classname = read_string_field_from_ts "classname" tdict in
+  match classname with
+  | Some classname ->
+      let* ret = make_hack_string classname in
+      assign_ret ret
+  | None ->
+      ret ()
+
+
 let hack_set_static_prop this prop obj : model =
   let open DSL.Syntax in
   start_model
@@ -1406,14 +1427,6 @@ let read_nullable_field_from_ts tdict =
   as_constant_bool nullable_bool_val
 
 
-let read_string_field_from_ts fieldname tdict =
-  let open DSL.Syntax in
-  let field = TextualSil.wildcard_sil_fieldname Textual.Lang.Hack fieldname in
-  let* field_boxed_string = load_access tdict (FieldAccess field) in
-  let* field_string_val = load_access field_boxed_string (FieldAccess string_val_field) in
-  as_constant_string field_string_val
-
-
 let read_access_from_ts tdict =
   let open DSL.Syntax in
   let field = TextualSil.wildcard_sil_fieldname Textual.Lang.Hack "access_list" in
@@ -1428,44 +1441,6 @@ let read_access_from_ts tdict =
     load_access type_prop_name_boxed_string (FieldAccess string_val_field)
   in
   as_constant_string type_prop_name_string_val
-
-
-(* We handle two cases:
-   (1) rootname is HH\this, in this case it returns this object
-   (2) rootname is something else, in this case returns None *)
-let get_cls_obj (rootname, _) : DSL.aval option DSL.model_monad =
-  let open DSL.Syntax in
-  let* opt_str_rootname = exec_pure_operation (read_string_value rootname) in
-  match opt_str_rootname with
-  | Some rootname when String.equal rootname hh_this_rootname ->
-      let* {analysis_data= {proc_desc}} = get_data in
-      let proc_name = Procdesc.get_proc_name proc_desc in
-      let this_var = Pvar.mk_local (Mangled.from_string this_localvar_name) proc_name in
-      let* this_v = load_exp (Exp.Lvar this_var) in
-      ret (Some this_v)
-  | _ ->
-      ret None
-
-
-let hack_get_class_from_type rootname constname : model =
-  let open DSL.Syntax in
-  start_model
-  @@ fun () ->
-  let* clsobj = get_cls_obj rootname in
-  match clsobj with
-  | None ->
-      ret ()
-  | Some clsobj -> (
-      constinit_existing_class_object clsobj
-      @@>
-      let* tdict = internal_hack_field_get clsobj constname in
-      let* classname = read_string_field_from_ts "classname" tdict in
-      match classname with
-      | Some classname ->
-          let* ret = make_hack_string classname in
-          assign_ret ret
-      | None ->
-          ret () )
 
 
 (* returns a fresh value equated to the SIL result of the comparison *)
@@ -1594,6 +1569,11 @@ let hhbc_verify_type_pred _dummy pred : model =
   assign_ret zero
 
 
+let hhbc_cast_int arg : model =
+  let open DSL.Syntax in
+  start_model @@ fun () -> assign_ret arg
+
+
 let hhbc_cast_string arg : model =
   (* https://github.com/facebook/hhvm/blob/605ac5dde604ded7f25e9786032a904f28230845/hphp/doc/bytecode.specification#L1087
      Cast to string ((string),(binary)). Pushes (string)$1 onto the stack. If $1
@@ -1672,6 +1652,7 @@ let matchers : matcher list =
     $--> hhbc_lazy_class_from_class
   ; -"$builtins" &:: "hack_field_get" <>$ capt_arg_payload $+ capt_arg_payload $--> hack_field_get
   ; -"$builtins" &:: "hhbc_cast_string" <>$ capt_arg_payload $--> hhbc_cast_string
+  ; -"$builtins" &:: "hhbc_cast_int" <>$ capt_arg_payload $--> hhbc_cast_int
   ; -"$builtins" &:: "hhbc_class_get_c" <>$ capt_arg_payload $--> hhbc_class_get_c
     (* we should be able to model that directly in Textual once specialization will be stronger *)
   ; -"$builtins" &:: "hhbc_cmp_same" <>$ capt_arg_payload $+ capt_arg_payload $--> hhbc_cmp_same
@@ -1714,8 +1695,8 @@ let matchers : matcher list =
     $--> hack_await_static
   ; -"$root" &:: "HH::type_structure" <>$ any_arg $+ capt_arg_payload $+ capt_arg_payload
     $--> hh_type_structure
-  ; -"$builtins" &:: "hack_get_class_from_type" <>$ capt_arg_payload $+ capt_arg_payload
-    $--> hack_get_class_from_type
+  ; -"$root" &:: "HH::type_structure_class" <>$ any_arg $+ capt_arg_payload $+ capt_arg_payload
+    $--> hh_type_structure_class
   ; -"$builtins" &:: "hhbc_iter_base" <>$ capt_arg_payload $--> hhbc_iter_base
   ; -"$builtins" &:: "hhbc_iter_init" <>$ capt_arg_payload $+ capt_arg_payload $--> hhbc_iter_init
   ; -"$builtins" &:: "hhbc_iter_get_key" <>$ capt_arg_payload $+ capt_arg_payload

@@ -53,11 +53,10 @@ jobs:
       fail-fast: false
       matrix:
         os:
-          - macOS-latest
-          - macOS-13
+          # - macOS-latest
           - ubuntu-latest
         ocaml-compiler:
-          - ocaml-variants.5.2.1+options,ocaml-option-flambda
+          - ocaml-variants.5.3.0+options,ocaml-option-flambda
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -123,7 +122,7 @@ jobs:
         run: ./build-infer.sh --yes --user-opam-switch
 
       - if: runner.os == 'macOS'
-        run: ./build-infer.sh --yes --user-opam-switch -- --disable-python-analyzers
+        run: ./build-infer.sh --yes --user-opam-switch -- --disable-python-analyzers --disable-swift-analyzers
 
       - name: Install ocamlformat
         run: |

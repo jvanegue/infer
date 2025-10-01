@@ -1204,7 +1204,7 @@ let get_issue_type ~latent issue_type =
   | AccessToInvalidAddress {invalidation; must_be_valid_reason}, _ ->
       Invalidation.issue_type_of_cause ~latent invalidation must_be_valid_reason
   | InfiniteLoopError _, _ ->
-      IssueType.pulse_infinite
+      IssueType.infinite_loop
   | ConfigUsage _, false ->
       IssueType.pulse_config_usage
   | ConstRefableParameter _, false ->
