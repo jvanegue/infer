@@ -969,7 +969,8 @@ OPTIONS
        --issues-tests-fields ,-separated sequence of { bug_type | bucket |
        qualifier | suggestion | severity | line | column | procedure |
        procedure_start_line | file | bug_trace | key | hash | line_offset |
-       qualifier_contains_potential_exception_note | taint_extra |
+       qualifier_contains_potential_exception_note |
+       may_depend_on_an_unknown_value | taint_extra |
        transitive_callees_extra | suppressed | autofix }
            Fields to emit with --issues-tests
            See also infer-report(1).
@@ -3017,10 +3018,17 @@ INTERNAL OPTIONS
            Cancel the effect of --pulse-cut-to-one-path-procedures-pattern.
 
        --pulse-experimental-infinite-loop-checker
-           Activates: Enable the INFITE_LOOP checker during analysis phase.
+           Activates: Enable the INFINITE_LOOP checker during analysis phase.
            This is a temporary flag in order to strictly gate this
            experimental checker. You may also need to activate reporting if
            needed (Conversely: --no-pulse-experimental-infinite-loop-checker)
+
+       --pulse-experimental-infinite-loop-checker-v2
+           Activates: Enable the INFINITE_LOOP (2nd version) checker during
+           analysis phase. This is a temporary flag in order to strictly gate
+           this experimental checker. You may also need to activate reporting
+           if needed (Conversely:
+           --no-pulse-experimental-infinite-loop-checker-v2)
 
        --no-pulse-final-types-are-exact
            Deactivates: Make Pulse understand that final types are exact

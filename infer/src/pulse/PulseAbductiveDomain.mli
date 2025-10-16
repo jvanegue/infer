@@ -70,6 +70,8 @@ type t = private
             reached so far *)
   ; transitive_info: TransitiveInfo.t  (** record transitive information inter-procedurally *)
   ; recursive_calls: PulseMutualRecursion.Set.t
+  ; loop_header_info: PulseLoopHeaderInfo.t
+  ; unknown_values: bool  (** did we generate at least one unknown abstract value on this path? *)
   ; skipped_calls: SkippedCalls.t  (** metadata: procedure calls for which no summary was found *)
   }
 [@@deriving equal]
@@ -92,6 +94,8 @@ val mk_join_state :
   -> PulseTopl.state
   -> TransitiveInfo.t
   -> PulseMutualRecursion.Set.t
+  -> PulseLoopHeaderInfo.t
+  -> unknown_values:bool
   -> SkippedCalls.t
   -> t
 
@@ -380,9 +384,13 @@ val add_skipped_calls : SkippedCalls.t -> t -> t
 
 val add_missed_captures : Typ.Name.Set.t -> t -> t
 
+val declare_unknown_values : t -> t
+
 val get_path_condition : t -> Formula.t
 
 val set_path_condition : Formula.t -> t -> t
+
+val push_loop_header_info : Procdesc.Node.id -> Timestamp.t -> t -> t
 
 val record_transitive_access : Location.t -> t -> t
 
@@ -478,6 +486,8 @@ module Summary : sig
     summary -> AbstractValue.t Specialization.HeapPath.Map.t
 
   val get_recursive_calls : summary -> PulseMutualRecursion.Set.t
+
+  val contains_unknown_values : summary -> bool
 
   val get_skipped_calls : summary -> SkippedCalls.t
 

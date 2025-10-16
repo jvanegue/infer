@@ -116,6 +116,7 @@ let unknown_call tenv ({PathContext.timestamp} as path) call_loc (reason : CallE
   let astate = add_returned_from_unknown callee_pname_opt ret_val actuals astate0 in
   let astate = PulseOperations.write_id (fst ret) (ret_val, hist) astate in
   let astate = Decompiler.add_call_source ret_val reason actuals astate in
+  let astate = AbductiveDomain.declare_unknown_values astate in
   (* set to [false] if we think the procedure called does not behave "purely", i.e. return the same
      value for the same inputs *)
   let is_pure = ref true in
@@ -474,6 +475,8 @@ let apply_callee ({InterproceduralAnalysis.tenv; proc_desc} as analysis_data)
                                        ; invalidation
                                        ; invalidation_trace
                                        ; access_trace
+                                       ; may_depend_on_an_unknown_value=
+                                           AbductiveDomain.Summary.contains_unknown_values astate
                                        ; must_be_valid_reason }
                                  ; astate= astate_post_call }
                              , astate_summary )

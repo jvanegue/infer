@@ -27,10 +27,14 @@ func setWeight( _ weight: Int) {
 
 struct Employee {
     let age: Int
-    var weight: Int
+    private var _weight: Int
+    var weight: Int {
+        get { _weight }
+        set { _weight = newValue }
+    }
     init(age: Int, weight: Int) {
         self.age = age
-        self.weight = weight
+        self._weight = weight
     }
 }
 
@@ -47,7 +51,53 @@ func test_employee_allocation_good() {
 }
 
 
-func setEmployeeWeight( _ weight: Int) {
+func setEmployeeWeight( _ weight: Int) -> Int {
     var john = Employee(age: 30, weight: 60)
     john.weight = weight
+    return john.weight
+}
+
+func test_employee_getter_setter_bad() {
+    assert(setEmployeeWeight(70) == 75)
+}
+
+func test_employee_getter_setter_good() {
+    assert(setEmployeeWeight(70) == 70)
+}
+
+class Person {
+    let age: Int
+    var spouse: Person
+    init(age: Int) {
+        self.age = age
+        self.spouse = Person(age: 0)
+    }
+}
+
+func set_spouses(_ john: Person, _ jane: Person) {
+    john.spouse = jane
+    jane.spouse = john
+}
+
+func test_retain_cycle_bad() {
+    let john = Person(age: 30)
+    let jane = Person(age: 35)
+    set_spouses(john, jane)
+}
+
+class Individual {
+    let age: Int
+    weak var spouse: Individual?
+    init(age: Int) {
+        self.age = age
+    }
+}
+func set_spouses(_ john: Individual, _ jane: Individual) {
+    john.spouse = jane
+    jane.spouse = john
+}
+func test_retain_cycle1_bad() {
+    let john = Individual(age: 30)
+    let jane = Individual(age: 35)
+    set_spouses(john, jane)
 }
