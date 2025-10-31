@@ -18,16 +18,12 @@ let parse_string_and_verify sourcefile text =
 
 
 let parse_module ?(verify = true) text =
-  let result =
-    if verify then parse_string_and_verify sourcefile text
-    else TextualParser.parse_string sourcefile text
-  in
-  match result with
-  | Ok m ->
-      m
-  | Error es ->
-      List.iter es ~f:(fun e -> F.printf "%a@\n" (TextualParser.pp_error sourcefile) e) ;
-      raise (Failure "Couldn't parse a module")
+  if verify then parse_string_and_verify sourcefile text
+  else TextualParser.parse_string sourcefile text
+
+
+let parse_module_ok ?(verify = true) text =
+  parse_module ~verify text |> Result.ok |> Option.value_exn
 
 
 let parse_module_print_errors text =
@@ -41,6 +37,24 @@ let parse_module_print_errors text =
 let remove_effects_in_subexprs lang module_ =
   let _, decls = TextualDecls.make_decls module_ in
   TextualTransform.remove_effects_in_subexprs lang decls module_
+
+
+let test_restore_ssa text =
+  let module_ = TextualParser.parse_string sourcefile text |> Result.ok |> Option.value_exn in
+  match TextualVerification.verify_keep_going module_ with
+  | Ok (module_, errors) when List.length errors > 0 ->
+      F.printf "%a\n" (Textual.Module.pp ~show_location:false) module_ ;
+      F.printf "TYPE ERRORS AFTER TRANSFORMATION:@\n" ;
+      List.iter errors ~f:(fun err -> F.printf "%a\n" TextualVerification.pp_error err)
+  | Ok (module_, _) ->
+      F.printf "%a\n" (Textual.Module.pp ~show_location:false) module_ ;
+      let lang = Module.lang module_ in
+      let module_, _ = TextualTransform.run lang module_ in
+      F.printf "AFTER COMPLETE TRANSFORMATION:\n%a\n"
+        (Textual.Module.pp ~show_location:false)
+        module_
+  | Error errs ->
+      List.iter errs ~f:(F.printf "%a@\n" (TextualVerification.pp_error_with_sourcefile sourcefile))
 
 
 let type_check module_ =
@@ -74,3 +88,12 @@ let parse_string_and_verify_keep_going text =
   | Error errors ->
       F.printf "verification failed - %d errors@\n------@\n" (List.length errors) ;
       List.iter errors ~f:(F.printf "%a@\n" (TextualParser.pp_error sourcefile))
+
+
+let show module_ = F.printf "%a" (Module.pp ~show_location:true) module_
+
+let show_result = function
+  | Ok module_ ->
+      show module_
+  | Error errs ->
+      List.iter errs ~f:(fun e -> F.printf "%a@\n" (TextualParser.pp_error sourcefile) e)

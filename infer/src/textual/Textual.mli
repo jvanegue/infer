@@ -67,7 +67,13 @@ module FieldName : NAME (* field names, without their enclosing types *)
 
 module NodeName : NAME (* node names, also called labels *)
 
-module BaseTypeName : NAME
+module BaseTypeName : sig
+  include NAME
+
+  val swift_tuple_class_name : t
+
+  val swift_type_name : t
+end
 
 module TypeName : sig
   (* structured value type name *)
@@ -79,6 +85,8 @@ module TypeName : sig
   val of_string_no_dot_escape : string -> t
 
   val mk_swift_tuple_type_name : t list -> t
+
+  val mk_swift_type_name : ?plain_name:string -> string -> t
 
   val pp : F.formatter -> t -> unit
 
@@ -138,6 +146,8 @@ module Attr : sig
 
   val mk_static : t
 
+  val mk_weak : t
+
   val mk_final : t
 
   val is_async : t -> bool
@@ -155,6 +165,8 @@ module Attr : sig
   val is_notnull : t -> bool
 
   val is_static : t -> bool
+
+  val is_weak : t -> bool
 
   val is_interface : t -> bool
 
@@ -230,6 +242,8 @@ module Ident : sig
   val fresh : Set.t -> t
 
   val to_ssa_var : t -> VarName.t
+
+  val to_temp_var : t -> VarName.t
 
   val pp : F.formatter -> t -> unit
 end

@@ -141,8 +141,9 @@ let pp_error fmt error =
         (if at_least then "at least " else "")
         expected
   | IdentAssignedTwice {id; typ1; typ2; loc2; _} ->
-      F.fprintf fmt "ident %a is given the type %a, but it has already been given the type %a at %a"
-        Ident.pp id Typ.pp typ1 Typ.pp typ2 Location.pp_line loc2
+      F.fprintf fmt
+        "ident %a is assigned (with type %a), but it has already been assigned at %a (with type %a)"
+        Ident.pp id Typ.pp typ1 Location.pp_line loc2 Typ.pp typ2
   | BranchesWithDifferentTypes {typ1; typ2; loc} ->
       F.fprintf fmt
         "branch at location %a is given the type %a, but the other branch is given a different \
@@ -216,6 +217,8 @@ type state =
   ; idents: (Typ.t * Location.t) Ident.Map.t
         (** the type of each ident seen so far, together with the location were the ident was
             assigned *)
+  ; assigned_at_least_twice: (Typ.t * Location.t) list Ident.Map.t
+        (** idents with at least two distinct assignments *)
   ; vars: Typ.t VarName.Map.t  (** the type of each variable seen so far *)
   ; nodes_from_label: Node.t NodeName.Map.t
   ; typechecked_nodes: Node.t NodeName.Map.t
@@ -359,19 +362,19 @@ let typeof_field field : Typ.t monad =
 
 
 let set_ident_type id typ : unit monad =
- fun state ->
+ fun ({assigned_at_least_twice} as state) ->
   let otyp = Ident.Map.find_opt id state.idents in
   match otyp with
   | None ->
       (Value (), {state with idents= Ident.Map.add id (typ, state.loc) state.idents})
-  | Some (typ0, _) when Typ.equal typ0 typ ->
-      (Value (), state)
   | Some (typ0, loc0) ->
-      let loc1 = state.loc in
-      ( Abort
-      , { state with
-          errors= IdentAssignedTwice {id; typ1= typ; typ2= typ0; loc1; loc2= loc0} :: state.errors
-        } )
+      let loc = state.loc in
+      let assigned_at_least_twice =
+        Ident.Map.update id
+          (function None -> Some [(typ0, loc0); (typ, loc)] | Some l -> Some ((typ, loc) :: l))
+          assigned_at_least_twice
+      in
+      (Abort, {state with assigned_at_least_twice})
 
 
 let dfs_push (label : NodeName.t) : unit monad =
@@ -885,7 +888,19 @@ and visit_next () : unit monad =
       typecheck_node next_node
 
 
-let typecheck_procdesc decls globals_types (pdesc : ProcDesc.t) errors : ProcDesc.t * error list =
+let restore_ssa_transform pdesc assigned_at_least_twice =
+  Ident.Map.map
+    (function
+      | [] ->
+          L.die InternalError "assigned_at_least_twice map should never contain empty lists"
+      | (typ0, _) :: l ->
+          Textual.Typ.(if List.for_all l ~f:(fun (typ, _) -> equal typ0 typ) then typ0 else Ptr Void) )
+    assigned_at_least_twice
+  |> TextualTransform.restore_ssa pdesc
+
+
+let rec typecheck_procdesc ~restore_ssa_fuel decls globals_types (pdesc : ProcDesc.t) errors :
+    ProcDesc.t * error list =
   let vars_with_params =
     match
       List.fold2 pdesc.params (ProcDesc.formals pdesc)
@@ -903,30 +918,49 @@ let typecheck_procdesc decls globals_types (pdesc : ProcDesc.t) errors : ProcDes
     List.fold pdesc.locals ~init:vars_with_params ~f:(fun map (vname, {Typ.typ}) ->
         VarName.Map.add vname typ map )
   in
-  let init : state =
-    { decls
-    ; pdesc
-    ; loc= Location.Unknown
-    ; typechecked_nodes= NodeName.Map.empty
-    ; nodes_from_label=
-        List.fold pdesc.nodes ~init:NodeName.Map.empty ~f:(fun map (node : Node.t) ->
-            NodeName.Map.add node.label node map )
-    ; idents= Ident.Map.empty
-    ; vars= vars_with_locals
-    ; dfs_stack= [pdesc.start]
-    ; errors }
+  let typecheck_nodes () =
+    let init : state =
+      { decls
+      ; pdesc
+      ; loc= Location.Unknown
+      ; typechecked_nodes= NodeName.Map.empty
+      ; nodes_from_label=
+          List.fold pdesc.nodes ~init:NodeName.Map.empty ~f:(fun map (node : Node.t) ->
+              NodeName.Map.add node.label node map )
+      ; idents= Ident.Map.empty
+      ; assigned_at_least_twice= Ident.Map.empty
+      ; vars= vars_with_locals
+      ; dfs_stack= [pdesc.start]
+      ; errors }
+    in
+    visit_next () init
   in
-  let _, {errors; typechecked_nodes} = visit_next () init in
-  let nodes =
-    (* note: this filter also removes nodes that are not reachable from the entry node *)
-    List.filter_map pdesc.nodes ~f:(fun node ->
-        NodeName.Map.find_opt node.Node.label typechecked_nodes )
-  in
-  let pdesc = {pdesc with nodes} in
-  (pdesc, errors)
+  let _, {errors= new_errors; typechecked_nodes; assigned_at_least_twice} = typecheck_nodes () in
+  if (not (Ident.Map.is_empty assigned_at_least_twice)) && restore_ssa_fuel > 0 then
+    let pdesc = restore_ssa_transform pdesc assigned_at_least_twice in
+    let restore_ssa_fuel = restore_ssa_fuel - 1 in
+    typecheck_procdesc ~restore_ssa_fuel decls globals_types pdesc errors
+  else
+    let errors =
+      Ident.Map.fold
+        (fun id l errors ->
+          match l with
+          | (typ2, loc2) :: (typ1, loc1) :: _ ->
+              IdentAssignedTwice {id; typ1; typ2; loc1; loc2} :: errors
+          | _ ->
+              errors )
+        assigned_at_least_twice new_errors
+    in
+    let nodes =
+      (* note: this filter also removes nodes that are not reachable from the entry node *)
+      List.filter_map pdesc.nodes ~f:(fun node ->
+          NodeName.Map.find_opt node.Node.label typechecked_nodes )
+    in
+    let pdesc = {pdesc with nodes} in
+    (pdesc, errors)
 
 
-let run (module_ : Module.t) decls_env : (Module.t, error list * Module.t) Result.t =
+let run ~restore_ssa (module_ : Module.t) decls_env : (Module.t, error list * Module.t) Result.t =
   let globals_type =
     TextualDecls.fold_globals decls_env ~init:VarName.Map.empty ~f:(fun map varname global ->
         VarName.Map.add varname global.typ map )
@@ -937,13 +971,13 @@ let run (module_ : Module.t) decls_env : (Module.t, error list * Module.t) Resul
         | Global _ | Struct _ | Procdecl _ ->
             (decl :: decls, errors)
         | Proc pdesc ->
-            let ({ProcDesc.procdecl} as pdesc), new_errors =
-              typecheck_procdesc decls_env globals_type pdesc errors
+            let restore_ssa_fuel =
+              if restore_ssa then 1 (* we don't want to recurse more than once *) else 0
             in
-            let decls =
-              if List.length new_errors > List.length errors then Module.Procdecl procdecl :: decls
-              else Module.Proc pdesc :: decls
+            let ({ProcDesc.procdecl= _} as pdesc), new_errors =
+              typecheck_procdesc ~restore_ssa_fuel decls_env globals_type pdesc errors
             in
+            let decls = Module.Proc pdesc :: decls in
             (decls, new_errors) )
   in
   let decls = List.rev decls in
@@ -956,11 +990,11 @@ type type_check_result =
   | Decl_errors of TextualDecls.error list
   | Type_errors of error list
 
-let type_check module_ =
+let type_check ~restore_ssa module_ =
   let decls_errors, decls_env = TextualDecls.make_decls module_ in
   if not (List.is_empty decls_errors) then Decl_errors decls_errors
   else
-    match run module_ decls_env with
+    match run ~restore_ssa module_ decls_env with
     | Ok module_ ->
         Ok module_
     | Error (errors, _) ->

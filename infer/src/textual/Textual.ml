@@ -140,7 +140,10 @@ module Name : NAME = struct
 
   include T
 
-  let replace_dot_with_2colons str = String.substr_replace_all str ~pattern:"." ~with_:"::"
+  let replace_dot_with_2colons =
+    let pattern = String.Search_pattern.create ~case_sensitive:true "." in
+    fun str -> String.Search_pattern.replace_all pattern ~in_:str ~with_:"::"
+
 
   let of_string ?loc str =
     let loc = Option.value loc ~default:Location.Unknown in
@@ -200,6 +203,8 @@ module BaseTypeName : sig
 
   val swift_tuple_class_name : t
 
+  val swift_type_name : t
+
   val is_hack_closure_generated_type : t -> bool
 end = struct
   include Name
@@ -215,6 +220,8 @@ end = struct
   let hack_generics = {value= "HackGenerics"; loc= Location.Unknown}
 
   let swift_tuple_class_name = {value= "__infer_tuple_class"; loc= Location.Unknown}
+
+  let swift_type_name = {value= "__infer_swift_type"; loc= Location.Unknown}
 
   let is_hack_closure_generated_type {value} = String.is_prefix ~prefix:"Closure$" value
 end
@@ -248,6 +255,8 @@ module TypeName : sig
 
   val mk_swift_tuple_type_name : t list -> t
 
+  val mk_swift_type_name : ?plain_name:string -> string -> t
+
   val is_hack_closure_generated_type : t -> bool
 end = struct
   module T = struct
@@ -265,6 +274,16 @@ end = struct
 
 
   let mk_swift_tuple_type_name args = {name= BaseTypeName.swift_tuple_class_name; args}
+
+  let mk_swift_type_name ?plain_name mangled_name =
+    let fst_arg = {name= BaseTypeName.of_string mangled_name; args= []} in
+    let snd_arg =
+      Option.value_map ~default:[]
+        ~f:(fun plain_name -> [{name= BaseTypeName.of_string plain_name; args= []}])
+        plain_name
+    in
+    {name= BaseTypeName.swift_type_name; args= fst_arg :: snd_arg}
+
 
   let rec pp fmt {name; args} =
     if List.is_empty args then BaseTypeName.pp fmt name
@@ -399,6 +418,8 @@ module Attr = struct
 
   let mk_trait = {name= "kind"; values= ["trait"]; loc= Location.Unknown}
 
+  let mk_weak = {name= "weak"; values= []; loc= Location.Unknown}
+
   let is_async {name; values} = String.equal name "async" && List.is_empty values
 
   let is_hack_wrapper {name; values} = String.equal name "wrapper" && List.is_empty values
@@ -430,6 +451,8 @@ module Attr = struct
   let is_static {name; values} = String.equal name "static" && List.is_empty values
 
   let is_variadic {name; values} = String.equal name "variadic" && List.is_empty values
+
+  let is_weak {name; values} = String.equal name "weak" && List.is_empty values
 
   let mk_python_args values = {name= "args"; values; loc= Location.Unknown}
 
@@ -522,6 +545,8 @@ module Ident : sig
 
   val to_ssa_var : t -> VarName.t
 
+  val to_temp_var : t -> VarName.t
+
   val of_int : int -> t
 
   val to_int : t -> int
@@ -542,6 +567,8 @@ end = struct
   type t = int [@@deriving equal]
 
   let to_ssa_var id = Printf.sprintf "__SSA%d" id |> VarName.of_string
+
+  let to_temp_var id = Printf.sprintf "__TEMP%d" id |> VarName.of_string
 
   let of_int id = id
 

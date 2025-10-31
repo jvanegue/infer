@@ -118,7 +118,7 @@ module type NodeTransferFunctions = sig
   (** specifies how to symbolically execute the instructions of a node, using [exec_instr] to go
       over a single instruction *)
 
-  val mark_loop_header : CFG.Node.t -> Domain.t -> Domain.t
+  val mark_loop_header : analysis_data -> CFG.Node.t -> Domain.t -> Domain.t
 
   val pp_domain : Pp.print_kind -> F.formatter -> Domain.t -> unit
   (** some checkers may want to do custom pretty printing for HTML debug *)
@@ -148,7 +148,7 @@ module SimpleNodeTransferFunctions (T : TransferFunctions.SIL) = struct
     Instrs.foldi ~init:pre instrs ~f:exec_instr
 
 
-  let mark_loop_header _ x = x
+  let mark_loop_header _ _ x = x
 end
 
 module BackwardNodeTransferFunction (T : TransferFunctions) = struct
@@ -173,7 +173,7 @@ module BackwardNodeTransferFunction (T : TransferFunctions) = struct
     Instrs.foldi ~init:pre instrs ~f
 
 
-  let mark_loop_header _ x = x
+  let mark_loop_header _ _ x = x
 end
 
 module DisjunctiveMetadata = struct
@@ -368,7 +368,9 @@ struct
     let pp = pp_ TEXT
   end
 
-  let mark_loop_header node (disjs, non_disj) = (T.mark_loop_header node disjs, non_disj)
+  let mark_loop_header analysis_data node (disjs, non_disj) =
+    (T.mark_loop_header analysis_data node disjs, non_disj)
+
 
   let pp_domain = Domain.pp_
 
@@ -557,42 +559,30 @@ module AbstractInterpreterCommon (TransferFunctions : NodeTransferFunctions) = s
 
   let pp_domain_html = TransferFunctions.pp_domain HTML
 
-  let debug_absint_operation op =
-    let pp_op fmt op =
-      match op with
-      | `Join _ ->
-          F.pp_print_string fmt "JOIN"
-      | `Widen (num_iters, _) ->
-          F.fprintf fmt "WIDEN(num_iters= %d)" num_iters
-    in
-    let left, right, result = match op with `Join lrr | `Widen (_, lrr) -> lrr in
-    let pp_right f =
-      if phys_equal right left then F.pp_print_string f "= LEFT" else pp_domain_html f right
+  let debug_absint_widen_operation num_iters ~prev ~next ~result =
+    let pp_next f =
+      if phys_equal next prev then F.pp_print_string f "= PREV" else pp_domain_html f next
     in
     let pp_result f =
-      if phys_equal result left then F.pp_print_string f "= LEFT"
-      else if phys_equal result right then F.pp_print_string f "= RIGHT"
+      if phys_equal result prev then F.pp_print_string f "= PREV"
+      else if phys_equal result next then F.pp_print_string f "= NEXT"
       else pp_domain_html f result
     in
-    L.d_printfln "%a@\n@\nLEFT:   %a@\nRIGHT:  %t@\nRESULT: %t@." pp_op op pp_domain_html left
-      pp_right pp_result
+    L.d_printfln "WIDEN(num_iters= %d)@\n@\nPREV:   %a@\nNEXT:  %t@\nRESULT: %t@." num_iters
+      pp_domain_html prev pp_next pp_result
 
 
   let debug_absint_join_operation (`Join (inputs, into, result)) =
-    match (inputs, into) with
-    | [(_, left); (_, right)], None ->
-        debug_absint_operation (`Join (left, right, result))
-    | _, _ ->
-        let pp_into f =
-          Option.iter into ~f:(fun into -> F.fprintf f "@[<2>INTO:@ %a@]@\n@\n" pp_domain_html into)
-        in
-        (* We set the max number of [inputs] as 99, which is the number of predecessor nodes, but we
+    let pp_into f =
+      Option.iter into ~f:(fun into -> F.fprintf f "@[<2>INTO:@ %a@]@\n@\n" pp_domain_html into)
+    in
+    (* We set the max number of [inputs] as 99, which is the number of predecessor nodes, but we
            do not expect it to be hit in usual CFGs. *)
-        L.d_printfln "JOIN@\n@\n@[<v>INPUTS:@,%a@]@\n@\n%t@[<2>RESULT:@ %a@]@\n"
-          (IList.pp_print_list ~max:99 (fun f (node, astate) ->
-               F.fprintf f "@[<2>FROM Node %a:@ @[%a@]@]" Procdesc.Node.pp
-                 (Node.underlying_node node) pp_domain_html astate ) )
-          inputs pp_into pp_domain_html result
+    L.d_printfln "JOIN@\n@\n@[<v>INPUTS:@,%a@]@\n@\n%t@[<2>RESULT:@ %a@]@\n"
+      (IList.pp_print_list ~max:99 (fun f (node, astate) ->
+           F.fprintf f "@[<2>FROM Node %a:@ @[%a@]@]" Procdesc.Node.pp (Node.underlying_node node)
+             pp_domain_html astate ) )
+      inputs pp_into pp_domain_html result
 
 
   (** reference to log errors only at the innermost recursive call *)
@@ -701,10 +691,10 @@ module AbstractInterpreterCommon (TransferFunctions : NodeTransferFunctions) = s
           if is_loop_head && not is_narrowing then (
             let num_iters = (old_state.State.visit_count :> int) in
             let prev = old_state.State.pre in
-            let next = TransferFunctions.mark_loop_header node astate_pre in
-            let res = Domain.widen ~prev ~next ~num_iters in
-            if Config.write_html then debug_absint_operation (`Widen (num_iters, (prev, next, res))) ;
-            res )
+            let next = TransferFunctions.mark_loop_header analysis_data node astate_pre in
+            let result = Domain.widen ~prev ~next ~num_iters in
+            if Config.write_html then debug_absint_widen_operation num_iters ~prev ~next ~result ;
+            result )
           else astate_pre
         in
         if
@@ -721,7 +711,8 @@ module AbstractInterpreterCommon (TransferFunctions : NodeTransferFunctions) = s
       else
         (* first time visiting this node *)
         let astate_pre =
-          if is_loop_head then TransferFunctions.mark_loop_header node astate_pre else astate_pre
+          if is_loop_head then TransferFunctions.mark_loop_header analysis_data node astate_pre
+          else astate_pre
         in
         (update_inv_map inv_map astate_pre None, DidNotReachFixPoint)
     in
@@ -913,7 +904,8 @@ module MakeWTONode (TransferFunctions : NodeTransferFunctions) = struct
         let inv_map =
           match mode with
           | Widen when is_first_visit ->
-              do_widen_then_narrow ~pp_instr cfg proc_data inv_map head ~is_first_visit rest
+              exec_wto_component ~pp_instr cfg proc_data inv_map head ~is_loop_head:true ~mode:Widen
+                ~is_first_visit rest
           | Widen | Narrow ->
               exec_wto_component ~pp_instr cfg proc_data inv_map head ~is_loop_head:false ~mode
                 ~is_first_visit rest

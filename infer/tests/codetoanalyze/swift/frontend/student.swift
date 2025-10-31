@@ -92,12 +92,31 @@ class Individual {
         self.age = age
     }
 }
+
 func set_spouses(_ john: Individual, _ jane: Individual) {
     john.spouse = jane
     jane.spouse = john
 }
+
 func test_retain_cycle1_bad() {
     let john = Individual(age: 30)
     let jane = Individual(age: 35)
     set_spouses(john, jane)
+}
+
+func test_optional(_ age : Int?) -> Int {
+    if let actualAge = age {
+        return actualAge
+    }
+    else {
+        return 0
+    }
+}
+
+func test_optional_good_fp() {
+    assert(test_optional(30) == 30)
+}
+
+func test_optional_bad() {
+    assert(test_optional(30) == 35)
 }

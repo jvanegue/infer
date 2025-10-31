@@ -10,8 +10,6 @@ module F = Format
 open Textual
 open TextualTestHelpers
 
-let show module_ = F.printf "%a" (Module.pp ~show_location:true) module_
-
 (* Inspired by the following Python program:
 
    def f(x, y, z, t):
@@ -91,7 +89,7 @@ let%test_module "remove_effects_in_subexprs transformation" =
 
     let%expect_test _ =
       let lang = Lang.Hack in
-      let module_, _ = parse_module input_text |> remove_effects_in_subexprs lang in
+      let module_, _ = parse_module_ok input_text |> remove_effects_in_subexprs lang in
       show module_ ;
       [%expect
         {|
@@ -227,7 +225,7 @@ let%test_module "remove_if_terminator transformation" =
 
 
     let%expect_test _ =
-      let module_ = parse_module input_text |> TextualTransform.remove_if_exp_and_terminator in
+      let module_ = parse_module_ok input_text |> TextualTransform.remove_if_exp_and_terminator in
       show module_ ;
       [%expect
         {|
@@ -518,7 +516,7 @@ let%test_module "remove_if_terminator transformation" =
 
     let%expect_test _ =
       let module_ =
-        parse_module python_inspired_text |> TextualTransform.remove_if_exp_and_terminator
+        parse_module_ok python_inspired_text |> TextualTransform.remove_if_exp_and_terminator
       in
       show module_ ;
       [%expect
@@ -567,6 +565,54 @@ let%test_module "remove_if_terminator transformation" =
   end )
 
 
+let%test_module "remove_if_terminator transformation" =
+  ( module struct
+    let input_text =
+      {|
+        .source_language = "c"
+        define main(var1: int, var2: int) : int {
+          local temp: int
+          #b0:
+              n4 = load &var2
+              if __sil_cast(<int>, n4) then jmp b10 else jmp b7
+          #b10:
+              n7 = 0
+              jmp b11
+           #b11:
+               ret n7
+           #b7:
+               n6 = load &var1
+               n5 = n6
+               jmp b8
+           #b8:
+               store &temp <- n5
+               jmp b811
+           #b811:
+               n7 = n5
+               jmp b11
+
+        } |}
+
+
+    let%expect_test _ =
+      let module_ = parse_module input_text in
+      show_result module_ ;
+      match module_ with
+      | Ok module_ ->
+          let _, decls_env = TextualDecls.make_decls module_ in
+          let module_, _ = module_ |> TextualTransform.remove_effects_in_subexprs C decls_env in
+          print_endline "BEFORE let_propagation" ;
+          show module_ ;
+          let module_ = TextualTransform.let_propagation module_ in
+          print_endline "AFTER let_propagation" ;
+          show module_
+      | Error _ ->
+          () ;
+          [%expect
+            {| dummy.sil, line 9, column 14: textual type error: ident n7 is assigned (with type int), but it has already been assigned at line 21 (with type int) |}]
+  end )
+
+
 let%test_module "let_propagation transformation" =
   ( module struct
     let input_text =
@@ -588,7 +634,7 @@ let%test_module "let_propagation transformation" =
 
 
     let%expect_test _ =
-      let module_ = parse_module input_text |> TextualTransform.let_propagation in
+      let module_ = parse_module_ok input_text |> TextualTransform.let_propagation in
       show module_ ;
       [%expect
         {|
@@ -631,7 +677,7 @@ let%test_module "out-of-ssa transformation" =
 
 
     let%expect_test _ =
-      let module_ = parse_module input_text |> TextualTransform.out_of_ssa in
+      let module_ = parse_module_ok input_text |> TextualTransform.out_of_ssa in
       show module_ ;
       [%expect
         {|
@@ -671,8 +717,8 @@ let%test_module "out-of-ssa transformation" =
 
     let%expect_test _ =
       let module_ =
-        parse_module python_inspired_text |> TextualTransform.remove_if_exp_and_terminator
-        |> TextualTransform.out_of_ssa
+        parse_module_ok python_inspired_text
+        |> TextualTransform.remove_if_exp_and_terminator |> TextualTransform.out_of_ssa
       in
       show module_ ;
       [%expect
@@ -746,7 +792,7 @@ let%expect_test "closures" =
         }
     |}
   in
-  let module_ = parse_module source in
+  let module_ = parse_module_ok source in
   show module_ ;
   [%expect
     {|
@@ -838,7 +884,7 @@ let%expect_test "toplevel if expression" =
         }
     |}
   in
-  let module_ = parse_module source |> TextualTransform.remove_if_exp_and_terminator in
+  let module_ = parse_module_ok source |> TextualTransform.remove_if_exp_and_terminator in
   show module_ ;
   [%expect
     {|
@@ -897,7 +943,7 @@ let%expect_test "if expression in subexpr" =
         }
     |}
   in
-  let module_, _ = parse_module source |> remove_effects_in_subexprs Hack in
+  let module_, _ = parse_module_ok source |> remove_effects_in_subexprs Hack in
   show module_ ;
   [%expect
     {|
@@ -1001,7 +1047,7 @@ local $captured: *void, $o: *void
 declare Closure$Closures::ClosuresAndDict2_with_self::init.get_unsafe(...): *HackMixed
 |}
   in
-  let module_ = parse_module source |> TextualTransform.fix_hackc_mistranslations in
+  let module_ = parse_module_ok source |> TextualTransform.fix_hackc_mistranslations in
   show module_ ;
   [%expect
     {|
@@ -1059,7 +1105,7 @@ local $captured: *void, $o: *void
 declare Closure$Closures::ClosuresAndDict2_with_self_async::init.get_unsafe(...): *HackMixed
 |}
   in
-  let module_ = parse_module source |> TextualTransform.fix_hackc_mistranslations in
+  let module_ = parse_module_ok source |> TextualTransform.fix_hackc_mistranslations in
   show module_ ;
   [%expect
     {|

@@ -347,8 +347,11 @@ module Subst = struct
         Field {f with exp= of_exp_one f.exp ~id ~by}
     | Index (exp1, exp2) ->
         Index (of_exp_one exp1 ~id ~by, of_exp_one exp2 ~id ~by)
-    | If _ ->
-        L.die InternalError "TODO: Textual If statement"
+    | If {cond; then_; else_} ->
+        let cond = of_bexp_one cond ~id ~by in
+        let then_ = of_exp_one then_ ~id ~by in
+        let else_ = of_exp_one else_ ~id ~by in
+        If {cond; then_; else_}
     | Call f ->
         Call {f with args= List.map f.args ~f:(fun exp -> of_exp_one exp ~id ~by)}
     | Closure {proc; captured; params; attributes} ->
@@ -361,6 +364,19 @@ module Subst = struct
         Apply
           { closure= of_exp_one closure ~id ~by
           ; args= List.map args ~f:(fun exp -> of_exp_one exp ~id ~by) }
+
+
+  and of_bexp_one bexp ~id ~by =
+    let open BoolExp in
+    match bexp with
+    | Exp exp ->
+        Exp (of_exp_one exp ~id ~by)
+    | Not bexp ->
+        Not (of_bexp_one bexp ~id ~by)
+    | And (bexp1, bexp2) ->
+        And (of_bexp_one bexp1 ~id ~by, of_bexp_one bexp2 ~id ~by)
+    | Or (bexp1, bexp2) ->
+        Or (of_bexp_one bexp1 ~id ~by, of_bexp_one bexp2 ~id ~by)
 
 
   let rec of_exp exp eqs =
@@ -387,24 +403,61 @@ module Subst = struct
         Apply {closure= of_exp closure eqs; args= List.map args ~f:(fun exp -> of_exp exp eqs)}
 
 
-  let of_instr instr eqs =
+  and of_bexp bexp eqs =
+    let open BoolExp in
+    match bexp with
+    | Exp exp ->
+        Exp (of_exp exp eqs)
+    | Not bexp ->
+        Not (of_bexp bexp eqs)
+    | And (bexp1, bexp2) ->
+        And (of_bexp bexp1 eqs, of_bexp bexp2 eqs)
+    | Or (bexp1, bexp2) ->
+        Or (of_bexp bexp1 eqs, of_bexp bexp2 eqs)
+
+
+  (* varification : turn an Ident into a var, in otder to restore SSA invariants *)
+  let may_insert_store ~varify eqs id loc ~default ~mk_rhs =
+    if varify then
+      Textual.Ident.Map.find_opt id eqs
+      |> Option.value_map ~default ~f:(function
+           | Exp.(Load {exp= Lvar var; typ= Some typ}) ->
+               let typ = Some typ in
+               let exp2 = mk_rhs typ in
+               Instr.Store {exp1= Exp.Lvar var; typ; exp2; loc}
+           | exp ->
+               L.die InternalError "varify is not compatible with equation %a=%a" Textual.Ident.pp
+                 id Exp.pp exp )
+    else default
+
+
+  let of_instr ~varify instr eqs =
     let open Instr in
     match instr with
-    | Load args ->
-        Load {args with exp= of_exp args.exp eqs}
+    | Load ({id; exp; loc} as args) ->
+        let exp = of_exp exp eqs in
+        may_insert_store ~varify eqs id loc
+          ~default:(Load {args with exp})
+          ~mk_rhs:(fun typ -> Load {exp; typ})
     | Store args ->
         Store {args with exp1= of_exp args.exp1 eqs; exp2= of_exp args.exp2 eqs}
     | Prune args ->
         Prune {args with exp= of_exp args.exp eqs}
+    | Let ({id= Some id; exp; loc} as args) ->
+        let exp = of_exp exp eqs in
+        may_insert_store ~varify eqs id loc ~default:(Let {args with exp}) ~mk_rhs:(fun _typ -> exp)
     | Let args ->
         Let {args with exp= of_exp args.exp eqs}
 
 
-  let of_terminator t eqs =
+  let rec of_terminator t eqs =
     let open Terminator in
     match t with
-    | If _ ->
-        L.die InternalError "subst should not be called on If terminator"
+    | If {bexp; then_; else_} ->
+        let bexp = of_bexp bexp eqs in
+        let then_ = of_terminator then_ eqs in
+        let else_ = of_terminator else_ eqs in
+        If {bexp; then_; else_}
     | Ret exp ->
         Ret (of_exp exp eqs)
     | Jump node_call_list ->
@@ -418,25 +471,40 @@ module Subst = struct
         t
 
 
-  let of_node node eqs =
+  let of_node ~varify node eqs =
     let open Node in
     let rev_instrs =
       List.fold node.instrs ~init:[] ~f:(fun rev_instrs (instr : Instr.t) ->
           match instr with
-          | Let {id= Some id} when Ident.Map.mem id eqs ->
+          | Let {id= Some id} when (not varify) && Ident.Map.mem id eqs ->
               rev_instrs
           | _ ->
-              of_instr instr eqs :: rev_instrs )
+              of_instr ~varify instr eqs :: rev_instrs )
     in
     let instrs = List.rev rev_instrs in
     {node with last= of_terminator node.last eqs; instrs}
 
 
-  let of_procdesc pdesc eqs =
+  let of_procdesc ~varify pdesc eqs =
     let open ProcDesc in
     (* no need to update fresh_ident *)
-    {pdesc with nodes= List.map pdesc.nodes ~f:(fun node -> of_node node eqs)}
+    {pdesc with nodes= List.map pdesc.nodes ~f:(fun node -> of_node ~varify node eqs)}
 end
+
+let restore_ssa pdesc typed_ids =
+  let equations =
+    Ident.Map.mapi
+      (fun id typ -> Exp.(Load {exp= Lvar (Textual.Ident.to_temp_var id); typ= Some typ}))
+      typed_ids
+  in
+  let pdesc = Subst.of_procdesc ~varify:true pdesc equations in
+  let locals =
+    Ident.Map.fold
+      (fun id typ locals -> (Textual.Ident.to_temp_var id, Typ.mk_without_attributes typ) :: locals)
+      typed_ids pdesc.locals
+  in
+  {pdesc with locals}
+
 
 module State = struct
   module ClosureDeclarations = struct
@@ -1144,7 +1212,7 @@ let let_propagation module_ =
           in
           Ident.Map.add id saturated_eq saturated_equations )
     in
-    Subst.of_procdesc pdesc saturated_equations
+    Subst.of_procdesc ~varify:false pdesc saturated_equations
   in
   module_map_procs ~f:transform module_
 
