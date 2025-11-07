@@ -9,6 +9,10 @@
 set -e
 set -o pipefail
 
+if [ -n "$C2_FBSOURCE_DIR" ] ; then
+  exit 0
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SHASUM=${SHASUM:-shasum -a 256}
 PATCH=${PATCH:-patch}
@@ -33,8 +37,8 @@ fi
 
 if [ ! -f "${LLVM_FILE}" ]; then
     curl -L "${LLVM_URL}" --output "${LLVM_FILE}"
+    echo "${LLVM_SHA}  ${LLVM_FILE}" | $SHASUM -c
 fi
-echo "${LLVM_SHA}  ${LLVM_FILE}" | $SHASUM -c
 
 rm -rf "llvm-project-${LLVM_VER}.src" "llvm-project"
 

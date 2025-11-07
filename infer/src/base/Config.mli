@@ -302,6 +302,8 @@ val dotty_cfg_libs : bool
 
 val dump_duplicate_symbols : bool
 
+val dump_json_summaries : bool
+
 val dump_llair : bool
 
 val dump_llair_text : bool
@@ -665,6 +667,8 @@ val pulse_report_assert : bool
 val pulse_report_flows_from_taint_source : string option
 
 val pulse_report_flows_to_taint_sink : string option
+
+val pulse_report_issues_reachable_from : Str.regexp list
 
 val pulse_report_issues_for_tests : bool
 

@@ -730,6 +730,12 @@ OPTIONS
            more than one file. (Conversely: --no-dump-duplicate-symbols)
            See also infer-capture(1).
 
+       --dump-json-summaries
+           Activates: Directly output the json export of each analyzed
+           procedures in <output-dir>/all_summaries.json (Conversely:
+           --no-dump-json-summaries)
+           See also infer-debug(1).
+
        --dynamic-dispatch-json-file-path path
            Dynamic dispatch file path to get the JSON used for method name
            substitution
@@ -1661,6 +1667,11 @@ OPTIONS
        --pulse-report-flows-to-taint-sink procname
            Report data flows which pass through taint sink procname
            See also infer-report(1).
+
+       --pulse-report-issues-reachable-from +regex
+           Re-raise issues that Pulse was able to propagate all the way to
+           procedures matching one of the given regexes
+           See also infer-report(1) and infer-run(1).
 
        --pulse-retain-cycle-blocklist-pattern string
            Skip reporting retain cycles which include an expression that
