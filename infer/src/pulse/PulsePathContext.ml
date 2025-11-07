@@ -30,7 +30,7 @@ let is_executable _ = true
 let exceptional_to_normal x = x
 
 (* pulse-infinite do nothing *)
-let back_edge _ _ _ = ([], -1)
+(* let back_edge _ _ _ = ([], -1) *)
 
 let pp fmt ({timestamp; is_non_disj} [@warning "+missing-record-field-pattern"]) =
   F.fprintf fmt "timestamp= %a%s" Timestamp.pp timestamp

@@ -930,3 +930,22 @@ int constant_loop_ok(int i, int j) {
     j++;
   return (j);
 }
+
+int repeated_loop_sequence_ok(int k) {
+  int i;
+  int r = 0;
+  for (i=0; i < k; i++)
+    r++;
+  for(i=0; i < k; i++)
+    r++;
+  return (r);
+}
+
+int repeated_loop_nested_ok(int k) {
+  int i;
+  int r = 0;
+  for (i=0; i < k; i++)
+    for(i=0; i < k; i++)
+      r++;
+  return (r);
+}

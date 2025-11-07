@@ -75,3 +75,51 @@ void recursion_on_fields_bad(struct data* x) {
 #include "recursion2.h"
 
 void across_file_1() { across_file_2(); }
+
+
+typedef struct s_ex {
+  int field1;
+  int field2;
+}	ex_t;
+
+void epoint() {
+  ex_t ex;
+  ex.field1 = 1;
+  ex.field2 = 0;
+  rec_on_field_infinite(&ex);
+  rec_on_field_infinite2(&ex);
+}
+
+void rec_on_field_latent(ex_t *ex)
+{
+  if (ex->field1 == 0)
+    {
+      ex->field2 = 0;
+      rec_on_field_latent(ex);
+    }
+}
+
+
+void rec_on_field_ok(ex_t *ex)
+{
+  if (ex->field1 == 1)
+    {
+      ex->field1 = 0;
+      rec_on_field_ok(ex);
+    }
+}
+
+
+void rec_on_field_infinite(ex_t *ex)
+{
+  if (ex->field1 == 0)
+    {
+      ex->field2 = 0;
+      rec_on_field_infinite(ex);
+    }
+  else if (ex->field2 == 0)
+    {
+      ex->field1 = 0;
+      rec_on_field_infinite(ex);
+    }
+}
