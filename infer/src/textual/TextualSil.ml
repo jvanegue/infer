@@ -540,7 +540,7 @@ module ProcDeclBridge = struct
               let builtin =
                 SwiftProcname.builtin_from_string method_name
                 |> Option.value_or_thunk ~default:(fun () ->
-                       L.internal_error "unknown swift builtin name %s, using NonDet" method_name ;
+                       L.internal_error "unknown swift builtin name %s, using NonDet@\n" method_name ;
                        SwiftProcname.NonDet )
               in
               SilProcname.Swift (SwiftProcname.mk_builtin builtin)
@@ -1453,7 +1453,7 @@ module ModuleBridge = struct
       (not (TypeName.Set.mem tname types_used_as_enclosing_but_not_defined))
       && TextualDecls.get_struct decls_env tname |> Option.is_none
     in
-    if not (Lang.equal lang Python) then
+    if not (Lang.equal lang Python || Lang.equal lang Swift) then
       TextualDecls.get_undefined_types decls_env
       |> Seq.iter (fun tname ->
              if is_undefined_type tname then

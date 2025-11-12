@@ -129,11 +129,13 @@ and to_textual_field_decls lang ?struct_map ~tuple struct_name fields =
     let textual_typ = to_textual_typ lang ?struct_map typ in
     let attributes, textual_typ =
       match textual_typ with
-      | Textual.Typ.(Ptr (Struct {name})) ->
-          if String.equal (Textual.BaseTypeName.to_string name) "swift::weak" then
-            let textual_typ = Textual.Typ.(Ptr Textual.Typ.any_type_llvm) in
+      | Textual.Typ.(Ptr (Struct name)) -> (
+        match mangled_name_of_type_name name with
+        | Some mangled_name when String.equal mangled_name "swift::weak" ->
+            let textual_typ = Textual.Typ.(Ptr Textual.Typ.any_type_swift) in
             ([Textual.Attr.mk_weak], textual_typ)
-          else ([], textual_typ)
+        | _ ->
+            ([], textual_typ) )
       | _ ->
           ([], textual_typ)
     in
@@ -354,17 +356,24 @@ let rec update_type ~update_struct_name typ =
 let update_type_field_decl ~update_struct_name fields =
   let update_field_decl field =
     let typ = update_type ~update_struct_name field.Textual.FieldDecl.typ in
-    {field with Textual.FieldDecl.typ}
+    let enclosing_class =
+      update_struct_name field.Textual.FieldDecl.qualified_name.enclosing_class
+    in
+    { field with
+      Textual.FieldDecl.typ
+    ; qualified_name= Textual.{enclosing_class; name= field.FieldDecl.qualified_name.name} }
   in
   List.map ~f:update_field_decl fields
 
 
 let update_struct_map struct_map =
   let update_struct_map struct_name (Textual.Struct.{fields: _} as struct_) struct_map =
+    let new_struct_name = update_struct_name struct_name in
     let struct_ =
-      {struct_ with Textual.Struct.fields= update_type_field_decl ~update_struct_name fields}
+      { struct_ with
+        Textual.Struct.fields= update_type_field_decl ~update_struct_name fields
+      ; name= new_struct_name }
     in
-    let struct_name = update_struct_name struct_name in
-    Textual.TypeName.Map.add struct_name struct_ struct_map
+    Textual.TypeName.Map.add new_struct_name struct_ struct_map
   in
   Textual.TypeName.Map.fold update_struct_map struct_map Textual.TypeName.Map.empty

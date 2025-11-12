@@ -74,16 +74,23 @@ class Person {
     }
 }
 
-func set_spouses(_ john: Person, _ jane: Person) {
+func test_retain_cycle_bad(_ john: Person, _ jane: Person) {
     john.spouse = jane
     jane.spouse = john
 }
 
-func test_retain_cycle_bad() {
-    let john = Person(age: 30)
-    let jane = Person(age: 35)
-    set_spouses(john, jane)
+func createPerson() -> Person {
+    fatalError("Fail here")
 }
+
+
+func test_retain_cycle_person1_bad_FN(_ jane: Person) {
+    let john = createPerson()
+    john.spouse = jane
+    jane.spouse = john
+}
+
+
 
 class Individual {
     let age: Int
