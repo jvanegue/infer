@@ -63,6 +63,10 @@ and t =
   | UnknownCall of {f: CallEvent.t; actuals: t list; location: Location.t; timestamp: Timestamp.t}
 [@@deriving compare, equal]
 
+let yojson_of_event = [%yojson_of: _]
+
+let yojson_of_t = [%yojson_of: _]
+
 module EventSet = Stdlib.Set.Make (struct
   type t = event [@@deriving compare]
 end)
@@ -310,10 +314,6 @@ and rev_iter (history : t) ~f =
 
 
 let iter history ~f = Iter.rev (Iter.from_labelled_iter (rev_iter history)) f
-
-let yojson_of_event = [%yojson_of: _]
-
-let yojson_of_t = [%yojson_of: _]
 
 let pp_fields =
   let pp_sep fmt () = Format.pp_print_char fmt '.' in

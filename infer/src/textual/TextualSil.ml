@@ -19,6 +19,8 @@ module SilStruct = Struct
 module SilTyp = Typ
 open Textual
 
+let textual_transformation_error loc msg = raise (TextualTransformError [{msg; loc}])
+
 module LocationBridge = struct
   open Location
 
@@ -110,8 +112,7 @@ module TypeNameBridge = struct
 
   let to_swift_class_name value : SwiftClassName.t =
     match value with
-    | {TypeName.name; args}
-      when Textual.BaseTypeName.equal name Textual.BaseTypeName.swift_type_name ->
+    | {name; args} when Textual.BaseTypeName.equal name Textual.BaseTypeName.swift_type_name ->
         let mangled_name, plain_name =
           match args with
           | [mangled_name] ->
@@ -127,11 +128,15 @@ module TypeNameBridge = struct
             plain_name
         in
         SwiftClassName.of_string ?plain_name (Textual.BaseTypeName.to_string mangled_name.name)
-    | {TypeName.name}
-      when Textual.BaseTypeName.equal name Textual.BaseTypeName.swift_tuple_class_name ->
+    | {name} when Textual.BaseTypeName.equal name Textual.BaseTypeName.swift_tuple_class_name ->
         SwiftClassName.of_string (Textual.BaseTypeName.to_string name)
-    | _ ->
-        assert false
+    | {name= {loc}} ->
+        let msg =
+          lazy
+            (F.asprintf "TextualSil: to_swift_class_name called with illegal type name %a%a" pp
+               value Location.pp loc )
+        in
+        textual_transformation_error loc msg
 
 
   let to_sil (lang : Lang.t) ({name= {value}; args} as typ) : SilTyp.Name.t =
@@ -540,7 +545,8 @@ module ProcDeclBridge = struct
               let builtin =
                 SwiftProcname.builtin_from_string method_name
                 |> Option.value_or_thunk ~default:(fun () ->
-                       L.internal_error "unknown swift builtin name %s, using NonDet@\n" method_name ;
+                       L.internal_error "Textual: Swift: unknown builtin %s, using NonDet@\n"
+                         method_name ;
                        SwiftProcname.NonDet )
               in
               SilProcname.Swift (SwiftProcname.mk_builtin builtin)
@@ -556,7 +562,9 @@ module ProcDeclBridge = struct
 
   let call_to_sil (lang : Lang.t) (callsig : ProcSig.t) t : SilProcname.t =
     match lang with
-    | Java ->
+    | Java | Python | C | Swift ->
+        to_sil lang t
+    | Hack when Option.is_some t.formals_types ->
         to_sil lang t
     | Hack ->
         (* When we translate function calls in Hack, the ProcDecl we get from TextualDecls may have
@@ -565,16 +573,9 @@ module ProcDeclBridge = struct
            procname with its definition from a different translation unit during the analysis
            phase. *)
         let arity = ProcSig.arity callsig in
-        let improved_match name_to_sil make =
-          if Option.is_some t.formals_types then to_sil lang t
-          else
-            let class_name = name_to_sil t.qualified_name.enclosing_class in
-            let function_name = t.qualified_name.name.value in
-            make ~class_name ~function_name ~arity
-        in
-        improved_match hack_class_name_to_sil Procname.make_hack
-    | Python | C | Swift ->
-        to_sil lang t
+        let class_name = hack_class_name_to_sil t.qualified_name.enclosing_class in
+        let function_name = t.qualified_name.name.value in
+        Procname.make_hack ~class_name ~function_name ~arity
     | Rust ->
         L.die InternalError "<NOT YET SUPPORTED>"
 end
@@ -866,16 +867,26 @@ module InstrBridge = struct
   let to_sil lang decls_env procname i : Sil.instr =
     let sourcefile = TextualDecls.source_file decls_env in
     match i with
-    | Load {typ= None} ->
-        L.die InternalError "to_sil should come after type inference"
+    | Load {typ= None; loc} ->
+        let msg =
+          lazy
+            (F.asprintf "to_sil should come after type inference: %a in %a"
+               (Instr.pp ~show_location:true) i ProcDecl.pp procname )
+        in
+        textual_transformation_error loc msg
     | Load {id; exp; typ= Some typ; loc} ->
         let typ = TypBridge.to_sil lang typ in
         let id = IdentBridge.to_sil id in
         let e = ExpBridge.to_sil lang decls_env procname exp in
         let loc = LocationBridge.to_sil sourcefile loc in
         Load {id; e; typ; loc}
-    | Store {typ= None} ->
-        L.die InternalError "to_sil should come after type inference"
+    | Store {typ= None; loc} ->
+        let msg =
+          lazy
+            (F.asprintf "to_sil should come after type inference: %a in %a"
+               (Instr.pp ~show_location:true) i ProcDecl.pp procname )
+        in
+        textual_transformation_error loc msg
     | Store {exp1; typ= Some typ; exp2; loc} ->
         let e1 = ExpBridge.to_sil lang decls_env procname exp1 in
         let typ = TypBridge.to_sil lang typ in
@@ -888,7 +899,8 @@ module InstrBridge = struct
         Prune (e, loc, true, Ik_if)
     | Let {id= None} ->
         L.die InternalError
-          "to_sil should come after type transformation remove_effects_in_subexprs"
+          "to_sil should come after type transformation remove_effects_in_subexprs: %a in %a"
+          (Instr.pp ~show_location:true) i Textual.SourceFile.pp sourcefile
     | Let {id= Some id; exp= Call {proc; args= [Typ typ]}; loc}
       when ProcDecl.is_allocate_object_builtin proc
            || ProcDecl.is_malloc_builtin proc

@@ -92,7 +92,7 @@ module Location = struct
 end
 
 module SourceFile = struct
-  type t = {file: SourceFile.t; line_map: LineMap.t option}
+  type t = {file: SourceFile.t; line_map: LineMap.t option [@ignore]} [@@deriving compare]
 
   let create ?line_map filename = {file= SourceFile.create filename; line_map}
 
@@ -101,13 +101,19 @@ module SourceFile = struct
   let file {file} = file
 
   let pp fmt {file} = SourceFile.pp fmt file
+
+  module Map = PrettyPrintable.MakePPMap (struct
+    type nonrec t = t [@@deriving compare]
+
+    let pp = pp
+  end)
 end
 
 type transform_error = {loc: Location.t; msg: string Lazy.t}
 
 let pp_transform_error sourcefile fmt {loc; msg} =
-  F.fprintf fmt "%a, %a: transformation error: %s" SourceFile.pp sourcefile Location.pp loc
-    (Lazy.force msg)
+  F.fprintf fmt "Textual Transformation Error: %s: %a, %a" (Lazy.force msg) SourceFile.pp sourcefile
+    Location.pp loc
 
 
 exception TextualTransformError of transform_error list
@@ -1085,26 +1091,26 @@ end = struct
 
 
   let vars exp =
-    let rec aux acc exp =
+    let rec vars_aux acc exp =
       match exp with
       | Var id ->
           Ident.Set.add id acc
       | Lvar _ | Const _ | Typ _ ->
           acc
       | Load {exp} | Field {exp} ->
-          aux acc exp
-      | If _ ->
-          L.die InternalError "TODO: Textual If statement"
+          vars_aux acc exp
+      | If {cond; then_; else_} ->
+          Ident.Set.union acc (vars_aux (vars_aux (BoolExp.vars cond) then_) else_)
       | Index (exp1, exp2) ->
-          aux (aux acc exp1) exp2
+          vars_aux (vars_aux acc exp1) exp2
       | Apply {closure; args} ->
-          List.fold args ~init:(aux acc closure) ~f:aux
+          List.fold args ~init:(vars_aux acc closure) ~f:vars_aux
       | Call {args} ->
-          List.fold args ~init:acc ~f:aux
+          List.fold args ~init:acc ~f:vars_aux
       | Closure {captured} ->
-          List.fold captured ~init:acc ~f:aux
+          List.fold captured ~init:acc ~f:vars_aux
     in
-    aux Ident.Set.empty exp
+    vars_aux Ident.Set.empty exp
 end
 
 and BoolExp : sig
@@ -1113,6 +1119,8 @@ and BoolExp : sig
   val contain_regular_call : t -> bool
 
   val pp : F.formatter -> t -> unit [@@warning "-unused-value-declaration"]
+
+  val vars : t -> Ident.Set.t
 end = struct
   type t = Exp of Exp.t | Not of t | And of t * t | Or of t * t
 
@@ -1136,6 +1144,19 @@ end = struct
         contain_regular_call bexp
     | Or (bexp1, bexp2) | And (bexp1, bexp2) ->
         contain_regular_call bexp1 || contain_regular_call bexp2
+
+
+  let vars bexp =
+    let rec vars_aux acc bexp =
+      match bexp with
+      | Exp exp ->
+          Ident.Set.union acc (Exp.vars exp)
+      | Not bexp ->
+          vars_aux acc bexp
+      | And (bexp1, bexp2) | Or (bexp1, bexp2) ->
+          vars_aux (vars_aux acc bexp1) bexp2
+    in
+    vars_aux Ident.Set.empty bexp
 end
 
 module Instr = struct
@@ -1329,7 +1350,7 @@ module ProcDesc = struct
     in
     if not (List.is_empty t.locals) then
       F.fprintf fmt "@\n@[<v 4>local %a@]" (pp_list_with_comma pp_local) t.locals ;
-    List.iter ~f:(F.fprintf fmt "%a" (Node.pp ~show_location)) t.nodes ;
+    List.iter ~f:(Node.pp ~show_location fmt) t.nodes ;
     F.fprintf fmt "@]\n}%a@\n@\n" (Location.pp_optional show_location) t.exit_loc
 end
 

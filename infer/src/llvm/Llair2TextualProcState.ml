@@ -15,18 +15,43 @@ type structMap = Textual.Struct.t Textual.TypeName.Map.t
 
 type globalMap = Llair.GlobalDefn.t Textual.VarName.Map.t
 
+type procMap = Textual.ProcDecl.t Textual.QualifiedProcName.Map.t
+
+type classMethodIndex = (Textual.QualifiedProcName.t * int) list Textual.TypeName.Map.t ref
+
+let class_method_index : classMethodIndex = ref Textual.TypeName.Map.empty
+
+type methodClassIndex = Textual.TypeName.t Textual.ProcName.Map.t ref
+
+let method_class_index : methodClassIndex = ref Textual.ProcName.Map.empty
+
+module ClassNameOffset = struct
+  type t = {class_name: Textual.TypeName.t; offset: int} [@@deriving compare]
+end
+
+module ClassNameOffsetMap = Stdlib.Map.Make (ClassNameOffset)
+
+type classNameOffsetMap = Textual.QualifiedProcName.t ClassNameOffsetMap.t
+
 type t =
   { qualified_name: Textual.QualifiedProcName.t
   ; loc: Textual.Location.t
   ; mutable locals: Textual.Typ.annotated VarMap.t
-  ; mutable formals: Textual.Typ.annotated VarMap.t
-  ; mutable ids: Textual.Typ.annotated IdentMap.t
+  ; mutable formals: (Textual.Typ.annotated * Textual.VarName.t option) VarMap.t
+  ; mutable ids_move: Textual.Typ.annotated IdentMap.t
+  ; mutable ids_types: Textual.Typ.annotated IdentMap.t
+  ; mutable id_offset: (Textual.Ident.t * int) option
+  ; mutable get_element_ptr_offset: (Textual.VarName.t * int) option
   ; mutable reg_map: Textual.Ident.t RegMap.t
   ; mutable last_id: Textual.Ident.t
   ; mutable last_tmp_var: int
   ; struct_map: structMap
   ; globals: globalMap
-  ; lang: Textual.Lang.t }
+  ; lang: Textual.Lang.t
+  ; proc_map: procMap
+  ; class_name_offset_map: classNameOffsetMap }
+
+let get_element_ptr_offset_prefix = "getelementptr_offset"
 
 let mk_fresh_id ?reg proc_state =
   let fresh_id ?reg () =
@@ -69,6 +94,14 @@ let pp_vars fmt vars =
     (VarMap.bindings vars)
 
 
+let pp_formals fmt vars =
+  F.fprintf fmt "%a"
+    (Pp.comma_seq
+       (Pp.pair ~fst:Textual.VarName.pp
+          ~snd:(Pp.pair ~fst:Textual.Typ.pp_annotated ~snd:(Pp.option Textual.VarName.pp)) ) )
+    (VarMap.bindings vars)
+
+
 let pp_struct_map fmt struct_map =
   let pp_item key value =
     F.fprintf fmt "%a -> @\n%a@\n" Textual.TypeName.pp key Textual.Struct.pp value
@@ -78,9 +111,22 @@ let pp_struct_map fmt struct_map =
 
 let pp fmt ~print_types proc_state =
   F.fprintf fmt
-    "@[<v>@[<v>qualified_name: %a@]@;@[loc: %a@]@;@[locals: %a@]@;@[formals: %a@]@;@[ids: %a@]@;]@]"
+    "@[<v>@[<v>qualified_name: %a@]@;\
+     @[loc: %a@]@;\
+     @[locals: %a@]@;\
+     @[formals: %a@]@;\
+     @[ids_move: %a@]@;\
+     @[ids_types: %a@]@;\
+     @[id_offset: %a@]@;\
+     @[get_element_ptr_offset: %a@]@;\
+     ]@]"
     Textual.QualifiedProcName.pp proc_state.qualified_name Textual.Location.pp proc_state.loc
-    pp_vars proc_state.locals pp_vars proc_state.formals pp_ids proc_state.ids ;
+    pp_vars proc_state.locals pp_formals proc_state.formals pp_ids proc_state.ids_move pp_ids
+    proc_state.ids_types
+    (Pp.option (Pp.pair ~fst:Textual.Ident.pp ~snd:Int.pp))
+    proc_state.id_offset
+    (Pp.option (Pp.pair ~fst:Textual.VarName.pp ~snd:Int.pp))
+    proc_state.get_element_ptr_offset ;
   if print_types then F.fprintf fmt "types: %a@" pp_struct_map proc_state.struct_map
 
 
@@ -88,7 +134,53 @@ let update_locals ~proc_state varname typ =
   proc_state.locals <- VarMap.add varname typ proc_state.locals
 
 
-let update_ids ~proc_state id typ = proc_state.ids <- IdentMap.add id typ proc_state.ids
+let update_ids_move ~proc_state id typ =
+  proc_state.ids_move <- IdentMap.add id typ proc_state.ids_move
+
+
+(* debug_name = var1,
+debug_name is originally a local and var1 is originally a formal. We are
+removing this intruction and substituting var1 for debug_name in the code.
+Result of this: var1 -> debug_name is added to the formals  such that we can
+use the substitution in the code later on. *)
+let subst_formal_local ~proc_state ~formal ~local =
+  let formal_binding = VarMap.find_opt formal proc_state.formals in
+  match formal_binding with
+  | Some (formal_typ, _) ->
+      proc_state.formals <- VarMap.add formal (formal_typ, Some local) proc_state.formals
+  | _ ->
+      ()
+
+
+let compute_locals ~proc_state =
+  let remove_locals_in_formals _ (_, local) locals =
+    match local with Some local -> VarMap.remove local locals | None -> locals
+  in
+  let locals = VarMap.fold remove_locals_in_formals proc_state.formals proc_state.locals in
+  VarMap.fold (fun varname typ locals -> (varname, typ) :: locals) locals []
+
+
+let update_id_offset ~proc_state id exp =
+  match (exp, proc_state.get_element_ptr_offset) with
+  | Textual.Exp.Lvar varname, Some (var, offset) when Textual.VarName.equal var varname ->
+      proc_state.id_offset <- Some (id, offset)
+  | _ ->
+      ()
+
+
+let update_var_offset ~proc_state varname offset =
+  if String.is_prefix ~prefix:get_element_ptr_offset_prefix (Textual.VarName.to_string varname) then
+    proc_state.get_element_ptr_offset <- Some (varname, offset)
+
+
+let update_ids_types ~proc_state id typ =
+  proc_state.ids_types <- IdentMap.add id typ proc_state.ids_types
+
+
+let reset_offsets ~proc_state =
+  proc_state.id_offset <- None ;
+  proc_state.get_element_ptr_offset <- None
+
 
 let global_proc_state lang loc global_var =
   let global_init_name = Format.sprintf "global_init_%s" global_var in
@@ -100,10 +192,31 @@ let global_proc_state lang loc global_var =
   ; loc
   ; formals= VarMap.empty
   ; locals= VarMap.empty
-  ; ids= IdentMap.empty
+  ; ids_move= IdentMap.empty
+  ; ids_types= IdentMap.empty
+  ; id_offset= None
+  ; get_element_ptr_offset= None
   ; reg_map= RegMap.empty
   ; last_id= Textual.Ident.of_int 0
   ; last_tmp_var= 0
   ; struct_map= Textual.TypeName.Map.empty
   ; globals= VarMap.empty
-  ; lang }
+  ; lang
+  ; proc_map= Textual.QualifiedProcName.Map.empty
+  ; class_name_offset_map= ClassNameOffsetMap.empty }
+
+
+let find_method_with_offset ~proc_state struct_name offset =
+  let key = ClassNameOffset.{class_name= struct_name; offset} in
+  ClassNameOffsetMap.find_opt key proc_state.class_name_offset_map
+
+
+let fill_class_name_offset_map class_method_index =
+  let process_map class_name class_name_offset_map (proc, offset) =
+    let key = ClassNameOffset.{class_name; offset} in
+    ClassNameOffsetMap.add key proc class_name_offset_map
+  in
+  let process_class class_name procs class_name_offset_map =
+    List.fold procs ~init:class_name_offset_map ~f:(process_map class_name)
+  in
+  Textual.TypeName.Map.fold process_class !class_method_index ClassNameOffsetMap.empty

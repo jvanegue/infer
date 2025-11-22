@@ -176,6 +176,30 @@ void nested_external_ok(int y) {
   }
 }
 
+void FN_two_nested_fst_bad(int k) {
+  int r = 0;
+  for (int i = 0; i < k; r++)
+    for (int j = 0; j < k; j++)
+      r++;
+  return r;
+}
+
+void two_nested_snd_bad(int k) {
+  int r = 0;
+  for (int i = 0; i < k; i++)
+    for (int j = 0; j < k; r++)
+      r++;
+  return r;
+}
+
+void two_nested_ok(int k) {
+  int r = 0;
+  for (int i = 0; i < k; i++)
+    for (int j = 0; j < k; j++)
+      r++;
+  return r;
+}
+
 void nested_loop_cond_ok(int y) {
   int x = 42;
   while (y < 100) {
@@ -668,11 +692,12 @@ void nondet_nonterminate_chen14_bad(int k, int i) {
   i = 2;
 }
 
-// TNT fails to prove non-termination
-/* pulse-inf says there is no bug */
-/* To me: this will terminate because k >= 0 will eventually be false due to
- * integer wrap */
-void nestedloop2_chen14_ok(int k, int j) {
+/* TNT fails to prove non-termination
+   If we assume, bounded arithmetic, this will terminate because
+   k >= 0 will eventually be false due to integer wrap.
+   But Pulse assumes unbounded arithmetic so this should be
+   marked as an infinite recursion */
+void FN_nestedloop2_chen14_bad(int k, int j) {
   while (k >= 0) {
     k++;
     j = k;
@@ -916,7 +941,21 @@ void goto_in_loop_without_eqtest_bad() {
 }
 
 /* Goto in loop */
-void goto_cross_loop_bad() {
+/* FN is expected with pulse-widen-threshold < 4 */
+void FN_goto_cross_loop_stop_at_6_bad() {
+  int i = 0;
+
+retry:
+  while (i < 10) {
+    if (i == 6)
+      goto retry;
+    i++;
+  }
+}
+
+/* Goto in loop */
+/* Signal is expected with pulse-widen-threshold >= 3 */
+void goto_cross_loop_stop_at_5_bad() {
   int i = 0;
 
 retry:
@@ -952,4 +991,50 @@ int repeated_loop_nested_ok(int k) {
     for(i=0; i < k; i++)
       r++;
   return (r);
+
+/* in this example, the back-edge could also be considered as a loop-entry (if
+ * b1=false) */
+int nested_goto_bad(int b1, int b2, int b3, int b4) {
+  int x = 0;
+  if (b1) {
+  retry:
+    if (b2) {
+      x++;
+    }
+    if (b2) {
+      x++;
+    }
+  }
+  if (b3) {
+    if (b2) {
+      x++;
+    }
+    if (b4) {
+      goto retry;
+    }
+  }
+}
+
+void FP_no_incr_first_iterations_ok() {
+  int i = 0;
+  int j = 0;
+  while (i < 1) {
+    i += j / 2;
+    j++;
+  }
+}
+
+void incr_if_eq(int k1, int k2, int* x) {
+  if (k1 == k2) {
+    (*x)++;
+  }
+}
+
+void FP_no_incr_first_iterations_interproc_ok() {
+  int i = 0;
+  int j = 0;
+  while (i < 1) {
+    incr_if_eq(j, 2, &i);
+    j++;
+  }
 }

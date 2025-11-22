@@ -3250,6 +3250,12 @@ and semdiff_previous =
     "Previous python program to be analysed by semdiff"
 
 
+and semdiff_test_files_index =
+  CLOpt.mk_path_opt ~long:"semdiff-test-files-index" ~meta:"path"
+    ~in_help:InferCommand.[(SemDiff, manual_generic)]
+    "A file containing a list of newline-separated Python files to run SemDiff tests."
+
+
 and shrink_analysis_db =
   CLOpt.mk_bool ~long:"shrink-analysis-db"
     ~in_help:InferCommand.[(Analyze, manual_generic)]
@@ -3612,6 +3618,11 @@ and trace_ondemand =
 
 and trace_topl =
   CLOpt.mk_bool ~long:"trace-topl" "Detailed tracing information during Topl analysis"
+
+
+and trace_wto =
+  CLOpt.mk_bool ~long:"trace-wto"
+    "Emit debug information for the weak topological order computation."
 
 
 and unix_fork =
@@ -4800,6 +4811,8 @@ and semdiff_current = !semdiff_current
 
 and semdiff_previous = !semdiff_previous
 
+and semdiff_test_files_index = !semdiff_test_files_index
+
 and shrink_analysis_db = !shrink_analysis_db
 
 and siof_check_iostreams = !siof_check_iostreams
@@ -4924,6 +4937,8 @@ and trace_mutual_recursion_cycle_checker = !trace_mutual_recursion_cycle_checker
 and trace_ondemand = !trace_ondemand
 
 and trace_topl = !trace_topl
+
+and trace_wto = !trace_wto
 
 and unix_fork = !unix_fork
 

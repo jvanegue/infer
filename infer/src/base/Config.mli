@@ -804,6 +804,8 @@ val semdiff_current : string option
 
 val semdiff_previous : string option
 
+val semdiff_test_files_index : string option
+
 val shrink_analysis_db : bool
 
 val siof_check_iostreams : bool
@@ -913,6 +915,8 @@ val trace_mutual_recursion_cycle_checker : bool
 val trace_ondemand : bool
 
 val trace_topl : bool
+
+val trace_wto : bool
 
 val unix_fork : bool
 

@@ -25,6 +25,8 @@ end
 module Node = struct
   type id = int [@@deriving compare, equal, hash]
 
+  let unsafe_int_to_id id = id
+
   type destruction_kind =
     | DestrBreakStmt
     | DestrContinueStmt
@@ -688,6 +690,7 @@ let create_node_from_not_reversed pdesc loc kind instrs =
     ; code_block_exit= None }
   in
   pdesc.nodes <- node :: pdesc.nodes ;
+  pdesc.wto <- None ;
   node
 
 
@@ -698,6 +701,7 @@ let create_node pdesc loc kind instrs =
 let remove_node pdesc ({Node.preds; succs} as node) =
   List.iter preds ~f:(remove_succ_node ~to_remove:node) ;
   List.iter succs ~f:(remove_pred_node ~to_remove:node) ;
+  pdesc.wto <- None ;
   pdesc.nodes <- remove_node_from_list node pdesc.nodes
 
 
@@ -733,15 +737,53 @@ module PreProcCfg = struct
   end
 end
 
+module IdSet = PrettyPrintable.MakePPSet (struct
+  type t = Node.id [@@deriving compare]
+
+  let pp = Node.pp_id
+end)
+
+let add_loop_metadata pdesc wto =
+  let heads =
+    WeakTopologicalOrder.Partition.fold_heads wto ~init:IdSet.empty ~f:(fun heads head ->
+        IdSet.add head.Node.id heads )
+  in
+  let debug kind node succ =
+    let pp_node fmt node = Node.pp_id fmt node.Node.id in
+    let pname = get_proc_name pdesc in
+    L.debug Analysis Quiet "[WTO][%a] {%s=%a; header=%a}\n" Procname.pp_fullname_only pname kind
+      pp_node node pp_node succ
+  in
+  List.iter pdesc.nodes ~f:(fun node ->
+      List.iter (Node.get_succs node) ~f:(fun succ ->
+          if IdSet.mem succ.Node.id heads then
+            if node.Node.wto_index < succ.Node.wto_index then (
+              if Config.trace_wto then debug "entry" node succ ;
+              let header_id = succ.Node.id in
+              Node.append_instrs node [Sil.Metadata (LoopEntry {header_id})] )
+            else (
+              if Config.trace_wto then debug "loop_body_end" node succ ;
+              let header_id = succ.Node.id in
+              Node.append_instrs node [Sil.Metadata (LoopBackEdge {header_id})] ) ) )
+
+
 module WTO = WeakTopologicalOrder.Bourdoncle_SCC (PreProcCfg)
 
 let init_wto pdesc =
   let wto = WTO.make pdesc in
+  pdesc.wto <- None ;
+  let pp_node fmt node = Node.pp_id fmt node.Node.id in
+  let pname = get_proc_name pdesc in
+  if Config.trace_wto then
+    L.debug Analysis Quiet "[WTO][%a] %a@\n" Procname.pp_fullname_only pname
+      (WeakTopologicalOrder.Partition.pp ~pp_node)
+      wto ;
   let (_ : int) =
     WeakTopologicalOrder.Partition.fold_nodes wto ~init:0 ~f:(fun idx node ->
         node.Node.wto_index <- idx ;
         idx + 1 )
   in
+  if Config.pulse_experimental_infinite_loop_checker_v2 then add_loop_metadata pdesc wto ;
   pdesc.wto <- Some wto
 
 

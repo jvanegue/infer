@@ -933,24 +933,20 @@ and xlate_opcode : x -> Llvm.llvalue -> Llvm.Opcode.t -> Inst.t list * Exp.t =
       else if
         Poly.equal (Llvm.classify_type (Llvm.type_of llv)) Pointer
         && Poly.equal (Llvm.classify_type (Llvm.get_gep_source_element_type llv)) Struct
+        && len > 2
       then
         let lltyp1 = Llvm.get_gep_source_element_type llv in
         let op2 = Llvm.operand llv 2 in
-        let instrs, ptr = xlate_value x (Llvm.operand llv 0) in
+        let _, ptr = xlate_value x (Llvm.operand llv 0) in
         let typ = xlate_type x lltyp1 in
-        match typ with
-        | Typ.Struct {name} when String.equal name "swift.protocol_requirement" ->
-            (* don't know what to do with [swift.protocol_requirement] *)
-            (instrs, ptr)
-        | _ ->
-            let exp =
-              match Option.bind ~f:Int64.unsigned_to_int (Llvm.int64_of_const op2) with
-              | Some n ->
-                  Llair.Exp.select typ ptr n
-              | None ->
-                  Llair.Exp.nondet typ
-            in
-            ([], exp)
+        let exp =
+          match Option.bind ~f:Int64.unsigned_to_int (Llvm.int64_of_const op2) with
+          | Some n ->
+              Llair.Exp.select typ ptr n
+          | None ->
+              Llair.Exp.nondet typ
+        in
+        ([], exp)
       else if
         Poly.equal (Llvm.classify_type (Llvm.type_of llv)) Pointer
         && Poly.equal (Llvm.classify_type (Llvm.get_gep_source_element_type llv)) Pointer
@@ -1985,6 +1981,7 @@ let translate ?dump_bitcode : string -> Llair.program =
           String.prefix name ~pre:"__llair_"
           || String.prefix name ~pre:"llvm."
           || Option.is_some (Intrinsic.of_name name)
+          || Option.is_some (Builtin.of_name name)
         then functions
         else
           let typ = xlate_type x (Llvm.type_of llf) in

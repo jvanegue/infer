@@ -10,7 +10,6 @@ module F = Format
 module L = Logging
 module CItv = PulseCItv
 module SatUnsat = PulseSatUnsat
-module ValueHistory = PulseValueHistory
 
 module Var = struct
   include PulseAbstractValue
@@ -2114,7 +2113,7 @@ module Formula = struct
 
   let yojson_of_linear_eqs linear_eqs = Var.Map.yojson_of_t LinArith.yojson_of_t linear_eqs
 
-  type intervals = CItv.t Var.Map.t [@@deriving compare, equal]
+  type intervals = CItv.t Var.Map.t [@@deriving compare, equal, yojson_of]
 
   module Unsafe : sig
     (** opaque because we need to normalize variables in the co-domain of term equalities on the fly
@@ -2168,7 +2167,7 @@ module Formula = struct
                 "slack") variables; this is used for reasoning about inequalities, see \[2\]
 
                 INVARIANT: see {!Tableau} *)
-      ; intervals: (intervals[@yojson.opaque])
+      ; intervals: intervals
             (** A simple, non-relational domain of concrete integer intervals of the form [x∈[i,j]]
                 or [x∉[i,j]].
 
@@ -2324,8 +2323,6 @@ module Formula = struct
       -> tableau_occurrences:VarMapOccurrences.t
       -> term_eqs_occurrences:TermMapOccurrences.t
       -> atoms_occurrences:AtomMapOccurrences.t
-      -> term_conditions:Atom.Set.t
-      -> term_conditions2:Term.Set.t
       -> t
     (** escape hatch *)
   end = struct
@@ -2340,7 +2337,7 @@ module Formula = struct
       ; linear_eqs: linear_eqs
       ; term_eqs: term_eqs
       ; tableau: Tableau.t
-      ; intervals: (intervals[@yojson.opaque])
+      ; intervals: intervals
       ; atoms: Atom.Set.t
       ; linear_eqs_occurrences: VarMapOccurrences.t
       ; tableau_occurrences: VarMapOccurrences.t
@@ -2878,7 +2875,7 @@ module Formula = struct
 
     let unsafe_mk ~var_eqs ~const_eqs ~type_constraints ~linear_eqs ~term_eqs ~tableau ~intervals
         ~atoms ~linear_eqs_occurrences ~tableau_occurrences ~term_eqs_occurrences ~atoms_occurrences
-        ~term_conditions ~term_conditions2 =
+        =
       { var_eqs
       ; const_eqs
       ; type_constraints
@@ -2891,8 +2888,8 @@ module Formula = struct
       ; tableau_occurrences
       ; term_eqs_occurrences
       ; atoms_occurrences
-      ; term_conditions
-      ; term_conditions2 }
+      ; term_conditions= Atom.Set.empty
+      ; term_conditions2= Term.Set.empty }
 
 
     let join phi1 _phi2 =
@@ -4725,7 +4722,6 @@ end = struct
            at this point since they will be reconstructed by callers *)
       ~linear_eqs_occurrences:Var.Map.empty ~tableau_occurrences:Var.Map.empty
       ~term_eqs_occurrences:Var.Map.empty ~atoms_occurrences:Var.Map.empty
-      ~term_conditions:Atom.Set.empty ~term_conditions2:Term.Set.empty
 
 
   let extend_with_restricted_reps_of keep formula =
@@ -4918,7 +4914,6 @@ module DeadVariables = struct
              point since they will be reconstructed by callers *)
         ~linear_eqs_occurrences:Var.Map.empty ~tableau_occurrences:Var.Map.empty
         ~term_eqs_occurrences:Var.Map.empty ~atoms_occurrences:Var.Map.empty
-        ~term_conditions:Atom.Set.empty ~term_conditions2:Term.Set.empty
     in
     let phi = simplify_phi formula.phi in
     let conditions =
@@ -4988,25 +4983,26 @@ let as_constant_string formula v =
 
 (** for use in applying callee path conditions: we need to translate callee variables to make sense
     for the caller, thereby possibly extending the current substitution *)
-let subst_find_or_new subst addr_callee =
+let subst_find_or_new ~default subst addr_callee =
   match Var.Map.find_opt addr_callee subst with
   | None ->
       (* map restricted (≥0) values to restricted values to preserve their semantics *)
       let addr_caller = Var.mk_fresh_same_kind addr_callee in
       L.d_printfln "new subst %a <-> %a (fresh)" Var.pp addr_callee Var.pp addr_caller ;
-      let addr_hist_fresh = (addr_caller, ValueHistory.epoch) in
+      let addr_hist_fresh = (addr_caller, default) in
       (Var.Map.add addr_callee addr_hist_fresh subst, fst addr_hist_fresh)
   | Some addr_hist_caller ->
       (subst, fst addr_hist_caller)
 
 
-let and_callee_formula subst formula ~callee:formula_callee =
+let and_callee_formula ~default ~subst formula ~callee:formula_callee =
   let* subst, formula, new_eqs =
-    and_conditions_fold_subst_variables formula ~up_to_f:formula_callee ~f:subst_find_or_new
-      ~init:subst
+    and_conditions_fold_subst_variables formula ~up_to_f:formula_callee
+      ~f:(subst_find_or_new ~default) ~init:subst
   in
   let+ subst, formula, new_eqs' =
-    and_fold_subst_variables ~up_to_f:formula_callee ~f:subst_find_or_new ~init:subst formula
+    and_fold_subst_variables ~up_to_f:formula_callee ~f:(subst_find_or_new ~default) ~init:subst
+      formula
   in
   (subst, formula, RevList.append new_eqs' new_eqs)
 
