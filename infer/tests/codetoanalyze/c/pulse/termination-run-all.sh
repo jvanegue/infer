@@ -4,8 +4,8 @@
 # Change this to point to your infer build tree
 # You can disable this if you build infer from your real home folder
 
-#export ROOT=/huge/jvanegue/PUBLIC_GITHUB/infer
-export ROOT=/huge/jvanegue/PUBLIC_GITHUB/fbinfer/infer
+export ROOT=/huge/jvanegue/PUBLIC_GITHUB/infer
+#export ROOT=/huge/jvanegue/PUBLIC_GITHUB/fbinfer/infer
 
 rm -fr infer-out/ infinite.o infer-run.log
 
