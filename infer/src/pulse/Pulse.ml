@@ -1592,7 +1592,9 @@ module PulseTransferFunctions = struct
           let timestamp = path.PathContext.timestamp in
           let astate = AbductiveDomain.push_loop_header_info id timestamp astate in
           let {AbductiveDomain.loop_header_info} = astate in
-          if PulseLoopHeaderInfo.has_previous_iteration_same_path_stamp id loop_header_info then
+          let samepath = (PulseLoopHeaderInfo.has_previous_iteration_same_path_stamp id loop_header_info) in
+          let notempty = not (PulseLoopHeaderInfo.is_current_iteration_empty_path_stamp id loop_header_info) in
+          if (samepath && notempty) then
             let location = Procdesc.Node.get_loc cfg_node in
             (* typically we get back only one [AbortProgram] state but it could also be zero if
                we discover the summary is UNSAT *)

@@ -82,6 +82,20 @@ typedef struct s_ex {
   int field2;
 }	ex_t;
 
+void rec_on_field_infinite(ex_t *ex)
+{
+  if (ex->field1 == 0)
+    {
+      ex->field2 = 0;
+      rec_on_field_infinite(ex);
+    }
+  else if (ex->field2 == 0)
+    {
+      ex->field1 = 0;
+      rec_on_field_infinite(ex);
+    }
+}
+
 void epoint() {
   ex_t ex;
   ex.field1 = 1;
@@ -106,20 +120,5 @@ void rec_on_field_ok(ex_t *ex)
     {
       ex->field1 = 0;
       rec_on_field_ok(ex);
-    }
-}
-
-
-void rec_on_field_infinite(ex_t *ex)
-{
-  if (ex->field1 == 0)
-    {
-      ex->field2 = 0;
-      rec_on_field_infinite(ex);
-    }
-  else if (ex->field2 == 0)
-    {
-      ex->field1 = 0;
-      rec_on_field_infinite(ex);
     }
 }

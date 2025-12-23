@@ -991,10 +991,10 @@ int repeated_loop_nested_ok(int k) {
     for(i=0; i < k; i++)
       r++;
   return (r);
+}
 
-/* in this example, the back-edge could also be considered as a loop-entry (if
- * b1=false) */
-int nested_goto_bad(int b1, int b2, int b3, int b4) {
+/* In this ex, the back-edge could also be considered as a loop-entry if bl=false */
+void nested_goto_bad(int b1, int b2, int b3, int b4) {
   int x = 0;
   if (b1) {
   retry:
@@ -1036,5 +1036,58 @@ void FP_no_incr_first_iterations_interproc_ok() {
   while (i < 1) {
     incr_if_eq(j, 2, &i);
     j++;
+  }
+}
+
+
+void repeated_state_same_iter_ok(int i)
+{
+  while (i < 10)
+    if (i % 2) {
+      i++; 
+    }
+    else {
+      i++;
+    }
+}
+
+void nested_loop_feedback_empty_path_ok(int i)
+{
+  for (;;) {
+    if (i == 10)
+      break;
+    while (i < 10)
+      i++;
+  }
+}
+
+
+void nested_loop_feedback_nonempty_path_ok(int i)
+{
+  while (i != 10) {
+    while (i < 10)
+      i++;
+  }
+}
+
+void while_is_even(int x)
+{
+  while ((x % 2) == 0)
+    {
+      x += 2;
+    } 
+}
+
+
+int is_eos(char *s) {
+  if (*s == 0x00) return (1);
+  else return (0);
+}
+
+void string_parsing_ok(char *s) {
+  for (;;) {
+    if (is_eos(s))
+      break;
+    s++;
   }
 }

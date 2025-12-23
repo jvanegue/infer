@@ -3,7 +3,9 @@
 # This is for Julien's setup - you can do like me and store your build tree somewhere with a lot of space.
 # Change this to point to your infer build tree
 # You can disable this if you build infer from your real home folder
-export ROOT=/huge/jvanegue/PUBLIC_GITHUB/infer
+
+#export ROOT=/huge/jvanegue/PUBLIC_GITHUB/infer
+export ROOT=/huge/jvanegue/PUBLIC_GITHUB/fbinfer/infer
 
 rm -fr infer-out/ infinite.o infer-run.log
 
@@ -55,7 +57,10 @@ grep PULSEINF infer-out/logs
 # All tests in one file (Debug mode)
 #$ROOT/infer/bin/infer run --debug-level=2 --pulse-widen-threshold=5 -pulse-only --print-logs -g -- clang -c infinite.c 2> infer-run.log
 # All tests in one file (No Debug mode)
-time $ROOT/infer/bin/infer run --pulse-only --pulse-experimental-infinite-loop-checker-v2 --enable-issue-type INFINITE_LOOP --enable-issue-type INFINITE_RECURSION --pulse-widen-threshold 3 -- clang -c infinite.c 2> infer-run.log
+
+time $ROOT/infer/bin/infer run --pulse-only --pulse-experimental-infinite-loop-checker-v2 --enable-issue-type INFINITE_LOOP --enable-issue-type INFINITE_REC$URSION --pulse-widen-threshold 3 -- clang -c infinite.c 2> infer-run.log
+
+#time $ROOT/infer/bin/infer run --pulse-only --pulse-experimental-infinite-loop-checker --enable-issue-type INFINITE_LOOP --enable-issue-type INFINITE_RECURSION --pulse-widen-threshold 10 -- clang -c infinite2.c #2> infer-run.log
 
 #time $ROOT/infer/bin/infer run --pulse-only --pulse-experimental-infinite-loop-checker --enable-issue-type INFINITE_LOOP --enable-issue-type INFINITE_RECURSION --pulse-widen-threshold 20 -- clang -c infinite.c 2> infer-run.log
 
