@@ -15,11 +15,12 @@ async def await_global():
     global g
     await g
 
-#ok
+
+# ok
 asyncio.run(set_unwaited_global())
 asyncio.run(await_global())
 g = 0
 
-#bad
+# bad
 asyncio.run(set_unwaited_global())
 g = 0

@@ -54,12 +54,14 @@ BUILD_SYSTEM_TESTS += assembly
 endif
 
 DIRECT_TESTS += \
+  c_annotreach \
   c_bufferoverrun \
   c_performance \
   c_pulse \
   c_pulse-over-only \
   c_pulse-over-under \
   c_purity \
+  c_sil \
   c_starvation \
   c_topl \
   cpp_bufferoverrun \
@@ -134,6 +136,7 @@ BUILD_SYSTEMS_TESTS += \
   pulse_taint_exclude_matching_objc
 
 DIRECT_TESTS += \
+  objc_annotreach \
   objc_bufferoverrun \
   objc_frontend \
   objc_liveness \
@@ -174,12 +177,20 @@ endif # HAS_OBJC
 endif # BUILD_C_ANALYZERS
 
 ifneq ($(BUILD_SWIFT_ANALYZERS),no)
+# New variable specifically for local Swift testing
+SWIFT_DIRECT_TESTS += \
+  swift_annotreach \
+  swift_frontend \
+  swift_bitcode \
+  swift_pulse \
+  swift_multifile
+
+endif
+
+ifneq ($(BUILD_SWIFT_ANALYZERS),no)
 DIRECT_TESTS += \
   c_llvm-frontend \
   c_pulse-llvm \
-#   swift_frontend \
-#   swift_bitcode \
-#   swift_pulse \
 
 endif
 
@@ -187,6 +198,7 @@ ifeq ($(BUILD_ERLANG_ANALYZERS),yes)
 ifneq ($(ERLC),no)
 ifneq ($(ESCRIPT),no)
 DIRECT_TESTS += \
+  erlang_annotreach \
   erlang_flowquery \
   erlang_pulse \
   erlang_pulse-taint \
@@ -207,9 +219,7 @@ endif # BUILD_ERLANG_ANALYZERS
 ifneq ($(HACKC),no)
 DIRECT_TESTS += \
   hack_capture \
-  hack_impurity \
   hack_pulse \
-  hack_performance \
 
 BUILD_SYSTEMS_TESTS += \
   differential_hack \
@@ -218,11 +228,21 @@ BUILD_SYSTEMS_TESTS += \
 
 endif
 
+DIRECT_TESTS += \
+	rust_sil
+
+ifeq ($(BUILD_RUST_ANALYZERS),yes)
+DIRECT_TESTS += \
+  rust_pulse
+endif
+
 ifeq ($(BUILD_PYTHON_ANALYZERS),yes)
 ifneq ($(PYTHON),no)
 DIRECT_TESTS += \
   python_exec \
   python_pulse \
+  python_semdiff \
+  python_semdiff-demo \
 
 endif
 ifneq ($(PYTHONNEXT),no)
@@ -251,7 +271,6 @@ BUILD_SYSTEMS_TESTS += \
 
 DIRECT_TESTS += \
   java_annotreach \
-  java_annotreach-nosuperclass \
   java_bufferoverrun \
   java_dependencies \
   java_fragment-retains-view \
@@ -655,6 +674,40 @@ $(DIRECT_TESTS:%=direct_%_replace): infer
 
 .PHONY: direct_tests
 direct_tests: $(DIRECT_TESTS:%=direct_%_test)
+
+
+# Custom Swift-only targets (Not included in main 'test' or 'endtoend_test')
+.PHONY: $(SWIFT_DIRECT_TESTS:%=direct_%_test)
+$(SWIFT_DIRECT_TESTS:%=direct_%_test): infer
+	$(QUIET)$(call silent_on_success,Running Swift local test: $(subst _, ,$@),\
+	$(call silence_make,\
+	$(MAKE) -C \
+	  $(INFER_DIR)/tests/codetoanalyze/$(shell printf $@ | cut -f 2 -d _)/$(shell printf $@ | cut -f 3 -d _) \
+	  test))
+
+.PHONY: $(SWIFT_DIRECT_TESTS:%=direct_%_replace)
+$(SWIFT_DIRECT_TESTS:%=direct_%_replace): infer
+	$(QUIET)$(call silent_on_success,Recording Swift expectations: $(subst _, ,$@),\
+	$(call silence_make,\
+	$(MAKE) -C \
+	  $(INFER_DIR)/tests/codetoanalyze/$(shell printf $@ | cut -f 2 -d _)/$(shell printf $@ | cut -f 3 -d _) \
+	  replace))
+
+.PHONY: $(SWIFT_DIRECT_TESTS:%=direct_%_clean)
+$(SWIFT_DIRECT_TESTS:%=direct_%_clean):
+	$(QUIET)$(call silent_on_success,Cleaning Swift local: $(subst _, ,$@),\
+	$(call silence_make,\
+	$(MAKE) -C \
+	  $(INFER_DIR)/tests/codetoanalyze/$(shell printf $@ | cut -f 2 -d _)/$(shell printf $@ | cut -f 3 -d _) \
+	  clean))
+
+# Shortcut to run all of them at once
+.PHONY: swift_tests
+swift_tests: $(SWIFT_DIRECT_TESTS:%=direct_%_test)
+
+# Shortcut to update all Swift test expectations at once
+.PHONY: swift_replace
+swift_replace: $(SWIFT_DIRECT_TESTS:%=direct_%_replace)
 
 .PHONY: $(BUILD_SYSTEMS_TESTS:%=build_%_test)
 $(BUILD_SYSTEMS_TESTS:%=build_%_test): infer

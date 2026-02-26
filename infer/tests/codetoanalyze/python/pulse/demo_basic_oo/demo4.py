@@ -3,16 +3,15 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
-#InferPython now supports method overriding
+# InferPython now supports method overriding
+
 
 class Animal:
     def quack(self):
         return False
 
-
     def can_quack(self):
         return self.quack()
-
 
 
 class Duck(Animal):

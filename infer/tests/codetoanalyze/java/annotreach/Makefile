@@ -3,11 +3,19 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
-TESTS_DIR = ../../..
+SUBDIRS = basic loops negation nosuperclass
 
-INFER_OPTIONS = --debug-exceptions --annotation-reachability-only --scheduler restart
+test-%:
+	$(MAKE) -C $* test
 
-INFERPRINT_OPTIONS = --issues-tests
-SOURCES = $(wildcard *.java)
+test: $(SUBDIRS:%=test-%)
 
-include $(TESTS_DIR)/javac.make
+replace-%:
+	$(MAKE) -C $* replace
+
+replace: $(SUBDIRS:%=replace-%)
+
+clean-%:
+	$(MAKE) -C $* clean
+
+clean: $(SUBDIRS:%=clean-%)

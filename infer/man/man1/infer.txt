@@ -92,18 +92,40 @@ OPTIONS
            See also infer-analyze(1).
 
        --annotation-reachability-custom-models json
-           Specify a map from annotations to lists of regexps to treat
-           matching methods as if they had the annotation.
-           Example format: {"Annotation": ["com\\.Myclass\\.foo.*"]}
+           Use regular expressions to treat methods as if they were
+           annotated. The format is a map from
+                 annotations to objects with an "allow" and "block" field,
+           which are both lists of regular
+                 expressions. A method is treated as annotated if any
+           matcher in the allow list matches AND
+                 none of the matchers in the block list matches. If there
+           are only "allow" matchers, a list
+                 can be given instead of the object.
+                 Example 1: {"Annotation": ["com\\.Myclass\\.foo.*"]}
+                 Example 2: {"Annotation": {"allow": ["foo.*"], "block":
+           ["foobar"]}}
+           
            See also infer-analyze(1).
 
        --annotation-reachability-custom-pairs json
            Specify custom sources/sinks, and optionally sanitizers for the
-           annotation reachability checker
+           annotation reachability checker.
+           The optional "minimize_sinks" (default: true) and
+           "minimize_sources" (default: false) flags control path
+           minimization.
+           When "minimize_sinks" is true, paths where a prefix is also a
+           source-to-sink path are not reported. For example if there is a
+           source() -> sink1() -> sink2() path then only source() -> sink1()
+           will be reported.
+           When "minimize_sources" is true, paths where a suffix is also a
+           source-to-sink path are not reported. For example if there is a
+           source1() -> source2() -> sink() path then only source2() ->
+           sink() will be reported.
            Example format: for custom annotations
            com.my.annotation.{Source1,Source2,Sink1,Sanitizer1}
            { "sources" : ["Source1", "Source2"], "sinks" : ["Sink1"],
-           "sanitizers": ["Sanitizer1"] }
+           "sanitizers": ["Sanitizer1"], "minimize_sources": true,
+           "minimize_sinks": false }
            See also infer-analyze(1).
 
        --annotation-reachability-expensive
@@ -111,20 +133,6 @@ OPTIONS
            can call expensive methods (annotated @Expensive or modeled, with
            annotation reachability checker) (Conversely:
            --no-annotation-reachability-expensive)
-           See also infer-analyze(1).
-
-       --no-annotation-reachability-minimize-sinks
-           Deactivates: do not report paths where a prefix is also a source
-           to sink path. For example if there is a source() -> sink1() ->
-           sink2() path then only source() -> sink1() will be reported.
-           (Conversely: --annotation-reachability-minimize-sinks)
-           See also infer-analyze(1).
-
-       --annotation-reachability-minimize-sources
-           Activates: do not report paths where a suffix is also a source to
-           sink path. For example if there is a source1() -> source2() ->
-           sink() path then only source2() -> sink() will be reported.
-           (Conversely: --no-annotation-reachability-minimize-sources)
            See also infer-analyze(1).
 
        --annotation-reachability-no-allocation
@@ -1453,6 +1461,12 @@ OPTIONS
            states from being produced.
            See also infer-analyze(1).
 
+       --pulse-eternal
+           Activates: [EXPERIMENTAL] latest iteration of the non-termination
+           loop prover based on the UNTER under-approximate theory
+           (Conversely: --no-pulse-eternal)
+           See also infer-analyze(1).
+
        --pulse-inline-global-init-func-pointer
            Activates: Inline the initializer of global variables that are of
            type function pointer in Pulse. (Conversely:
@@ -2112,17 +2126,37 @@ OPTIONS
            (Conversely: --no-self-in-block-only)
            See also infer-analyze(1).
 
+       --semdiff-configuration path
+           Use configurable rewriting engine with the given pythom file.
+           See also infer-semdiff(1).
+
        --semdiff-current path
            Current python program to be analysed by semdiff
+           See also infer-semdiff(1).
+
+       --semdiff-experimental-eqsat-engine
+           Activates: Use experimental equality saturation rewriting engine.
+           (Conversely: --no-semdiff-experimental-eqsat-engine)
            See also infer-semdiff(1).
 
        --semdiff-previous path
            Previous python program to be analysed by semdiff
            See also infer-semdiff(1).
 
+       --semdiff-test-actions ,-separated sequence of { normalize | currify }
+           Specify which action must be performed in each parsed AST during
+           semdiff tests
+           See also infer-semdiff(1).
+
        --semdiff-test-files-index path
            A file containing a list of newline-separated Python files to run
            SemDiff tests.
+           See also infer-semdiff(1).
+
+       --semdiff-test-show-syntax-errors
+           Activates: List all syntax errors (location and explanation) the
+           Python source parser encountered. (Conversely:
+           --no-semdiff-test-show-syntax-errors)
            See also infer-semdiff(1).
 
        --shrink-analysis-db
@@ -2336,6 +2370,12 @@ OPTIONS
 
        --tenv-json file
            Path to TEnv json file
+           See also infer-capture(1).
+
+       --textual-sil-keep-going
+           Activates: When converting textual to SIL, keep going even if some
+           elements fail to convert. (Conversely:
+           --no-textual-sil-keep-going)
            See also infer-capture(1).
 
        --threadsafe-aliases json

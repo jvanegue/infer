@@ -11,11 +11,11 @@ import fcntl
 import subprocess
 
 TESTS_DIR = os.path.dirname(os.path.realpath(__file__))
-LOCKFILE = os.path.join(TESTS_DIR, 'testlock.mutex')
+LOCKFILE = os.path.join(TESTS_DIR, "testlock.mutex")
 
 args = sys.argv[1:]
 
-with open(LOCKFILE, 'r') as lockfile:
+with open(LOCKFILE, "r") as lockfile:
     fd = lockfile.fileno()
 
     fcntl.flock(fd, fcntl.LOCK_EX)

@@ -7,16 +7,13 @@
 
 open! IStd
 open PulseBasicInterface
-open PulseOperationResult.Import
-open PulseModelsImport
 module DSL = PulseModelsDSL
+open PulseModelsImport
 
-let alloc size : model_no_non_disj =
- fun model_data astate ->
-  let<++> astate =
-    Basic.alloc_not_null ~initialize:false ~desc:"alloc" SwiftAlloc (Some size) model_data astate
-  in
-  astate
+let make_swift_bool b : DSL.aval DSL.model_monad =
+  let open DSL.Syntax in
+  (* Translates an OCaml boolean into an Infer SMT integer (1 or 0) *)
+  int (if b then 1 else 0)
 
 
 let unknown _args () : unit DSL.model_monad =
@@ -30,7 +27,40 @@ let function_ptr_call args () : unit DSL.model_monad =
   unknown args ()
 
 
-let dynamic_call arg args () : unit DSL.model_monad =
+let closure_call orig_args () : unit DSL.model_monad =
+  let open DSL.Syntax in
+  match orig_args with
+  | proc_name_arg :: args -> (
+      let* arg_dynamic_type_data = get_dynamic_type ~ask_specialization:true proc_name_arg in
+      match arg_dynamic_type_data with
+      | Some {Formula.typ= {desc= Typ.Tstruct (SwiftClosure csig)}} -> (
+          let proc_name = Procname.Swift (SwiftProcname.mk_function csig) in
+          let args = List.mapi ~f:(fun i arg -> (Format.sprintf "arg_%d" i, arg)) args in
+          Logging.d_printfln "calling %a with args = %a" Procname.pp proc_name
+            (Pp.comma_seq (Pp.pair ~fst:String.pp ~snd:DSL.pp_aval))
+            args ;
+          let* res_opt = swift_call proc_name args |> is_unsat in
+          match res_opt with
+          | Some res ->
+              assign_ret res
+          | None -> (
+              (* if the call is unsat, it could be because of mismatched arguments, because the specialised
+                 closure doesn't capture any variables, and so the captured argument is not needed. In this
+                 case, we try the call again, by removing the last argument, which will be null. *)
+              let args = List.take args (List.length args - 1) in
+              Logging.d_printfln "calling %a again with args = %a" Procname.pp proc_name
+                (Pp.comma_seq (Pp.pair ~fst:String.pp ~snd:DSL.pp_aval))
+                args ;
+              let* res_opt = swift_call proc_name args |> is_unsat in
+              match res_opt with Some res -> assign_ret res | None -> unreachable ) )
+      | _ ->
+          Logging.d_printfln "no method name found for closure %a" DSL.pp_aval proc_name_arg ;
+          function_ptr_call args () )
+  | [] ->
+      function_ptr_call orig_args ()
+
+
+let dynamic_call arg orig_args () : unit DSL.model_monad =
   let open DSL.Syntax in
   let dynamic_call_with_type name offset self args =
     let args = List.mapi ~f:(fun i arg -> (Format.sprintf "arg_%d" i, arg)) (args @ [self]) in
@@ -43,10 +73,12 @@ let dynamic_call arg args () : unit DSL.model_monad =
         let* res = swift_call proc_name args in
         assign_ret res
     | None ->
+        Logging.d_printfln "proc_name not found for name = %a and offset = %a" Typ.Name.pp name
+          Int.pp offset ;
         unknown args ()
   in
   let* offset_opt = as_constant_int arg in
-  match (offset_opt, List.rev args) with
+  match (offset_opt, List.rev orig_args) with
   | Some offset, self :: actuals -> (
       let args = List.rev actuals in
       let* arg_dynamic_type_data = get_dynamic_type ~ask_specialization:true self in
@@ -56,16 +88,77 @@ let dynamic_call arg args () : unit DSL.model_monad =
       | _ -> (
           let* arg_static_type = get_static_type self in
           match arg_static_type with
-          | Some name ->
+          | Some (Typ.SwiftClass class_name as name)
+            when not (SwiftClassName.equal (SwiftClassName.of_string "ptr_elt") class_name) ->
               dynamic_call_with_type name offset self args
-          | None ->
+          | _ ->
               Logging.d_printfln
                 "method to call not found, no dynamic or static type found for %a, returning a \
                  fresh value"
                 DSL.pp_aval self ;
               unknown args () ) )
   | _, _ ->
-      function_ptr_call args ()
+      closure_call (arg :: orig_args) ()
+
+
+let swift_dynamic_type arg1 arg2 () : unit DSL.model_monad =
+  let open DSL.Syntax in
+  let* arg1_dynamic_type_data = get_dynamic_type ~ask_specialization:true arg1 in
+  match arg1_dynamic_type_data with
+  | None ->
+      unknown [arg1; arg2] ()
+  | Some {Formula.typ= arg1_dynamic_type} ->
+      let* res = fresh () in
+      let* () = and_dynamic_type_is res arg1_dynamic_type in
+      assign_ret res
+
+
+let derived_enum_equals arg1 arg2 () : unit DSL.model_monad =
+  let open DSL.Syntax in
+  let* res = binop Binop.Eq arg1 arg2 in
+  assign_ret res
+
+
+let metadata_equals arg1 arg2 () : unit DSL.model_monad =
+  let open DSL.Syntax in
+  let* arg1_dynamic_type_data = get_dynamic_type ~ask_specialization:true arg1 in
+  let* arg2_dynamic_type_data = get_dynamic_type ~ask_specialization:true arg2 in
+  match (arg1_dynamic_type_data, arg2_dynamic_type_data) with
+  | Some {Formula.typ= typ1}, Some {Formula.typ= typ2} ->
+      (* We know both types, so we directly compute the boolean result and assign it *)
+      let* res = make_swift_bool (Typ.equal typ1 typ2) in
+      assign_ret res
+  | _ ->
+      (* We lack dynamic type info for one or both, return an unconstrained value *)
+      let* unknown_bool = fresh () in
+      assign_ret unknown_bool
+
+
+let alloc size_exp : model =
+  let open DSL.Syntax in
+  start_model
+  @@ fun () ->
+  (* 1. Extract the exact type directly from the LLVM sizeof AST! *)
+  let typ =
+    match size_exp with
+    | Exp.Sizeof {typ} ->
+        if Typ.is_pointer typ then Typ.strip_ptr typ else typ
+    | _ ->
+        Logging.die InternalError "Expected sizeof expression in __swift_alloc"
+  in
+  (* 2. Create the main object memory space *)
+  let* allocated_obj = fresh () in
+  (* 3. Mark it as an allocated, non-null pointer *)
+  let* () = and_positive allocated_obj in
+  let* () = allocation SwiftAlloc allocated_obj in
+  let* () = and_dynamic_type_is allocated_obj typ in
+  (* 4. Create the symbolic metatype/vtable pointer (the isa pointer) *)
+  let* meta_addr = fresh ~more:"swift_isa_vtable_pointer" () in
+  let* () = and_dynamic_type_is meta_addr typ in
+  (* 5. Emulate Swift ABI: Write the metatype to the base address (offset 0) *)
+  let* () = store ~ref:allocated_obj meta_addr in
+  (* 6. Bind the fully constructed object to the return variable *)
+  assign_ret allocated_obj
 
 
 let builtins_matcher builtin args : unit -> unit DSL.model_monad =
@@ -75,15 +168,35 @@ let builtins_matcher builtin args : unit -> unit DSL.model_monad =
       unknown args
   | InitTuple ->
       unknown args
-  | DynamicCall ->
-      let arg, args = ProcnameDispatcherBuiltins.expect_at_least_1_arg args builtin_s in
-      dynamic_call arg args
+  | DynamicCall -> (
+    match args with arg :: args -> dynamic_call arg args | [] -> unknown args )
+  | DerivedEnumEquals -> (
+      let arg1, arg2, args = ProcnameDispatcherBuiltins.expect_at_least_2_args args builtin_s in
+      (* we are modelling the case for simple enums where there are two args here, in the case
+         of complex enums there can be more args, but we are not modelling that yet. *)
+      match args with
+      | [] ->
+          derived_enum_equals arg1 arg2
+      | _ ->
+          unknown args )
+  | ObjcMsgSend ->
+      (* TODO T251645387 *)
+      unknown args
+  | ObjcMsgSendSuper2 ->
+      unknown args
+  | Memcpy ->
+      unknown args
+  | MetadataEquals ->
+      let arg1, arg2, _ = ProcnameDispatcherBuiltins.expect_at_least_2_args args builtin_s in
+      metadata_equals arg1 arg2
+  | SwiftGetDynamicType ->
+      let arg1, arg2, _ = ProcnameDispatcherBuiltins.expect_at_least_2_args args builtin_s in
+      swift_dynamic_type arg1 arg2
 
 
 let matchers : matcher list =
   let open ProcnameDispatcher.Call in
-  [+BuiltinDecl.(match_builtin __swift_alloc) <>$ capt_exp $--> alloc]
+  [ (* Capture the raw AST to retain the static type during allocation *)
+    +BuiltinDecl.(match_builtin __swift_alloc) <>$ capt_exp $--> alloc ]
   |> List.map ~f:(fun matcher ->
-         matcher
-         |> ProcnameDispatcher.Call.contramap_arg_payload ~f:ValueOrigin.addr_hist
-         |> ProcnameDispatcher.Call.map_matcher ~f:lift_model )
+         matcher |> ProcnameDispatcher.Call.contramap_arg_payload ~f:ValueOrigin.addr_hist )

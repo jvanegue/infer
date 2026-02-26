@@ -508,15 +508,27 @@ and to_qualifier gen_uniq json : Ast.qualifier option =
   | `List [`String "b_generate"; _anno; pattern; expression] ->
       let* pattern = to_expression gen_uniq pattern in
       let* expression = to_expression gen_uniq expression in
-      Some (Ast.BitsGenerator {pattern; expression})
+      Some (Ast.BitsGenerator {pattern; expression; strict= false})
+  | `List [`String "b_generate_strict"; _anno; pattern; expression] ->
+      let* pattern = to_expression gen_uniq pattern in
+      let* expression = to_expression gen_uniq expression in
+      Some (Ast.BitsGenerator {pattern; expression; strict= true})
   | `List [`String "generate"; _anno; pattern; expression] ->
       let* pattern = to_expression gen_uniq pattern in
       let* expression = to_expression gen_uniq expression in
-      Some (Ast.Generator {pattern; expression})
+      Some (Ast.Generator {pattern; expression; strict= false})
+  | `List [`String "generate_strict"; _anno; pattern; expression] ->
+      let* pattern = to_expression gen_uniq pattern in
+      let* expression = to_expression gen_uniq expression in
+      Some (Ast.Generator {pattern; expression; strict= true})
   | `List [`String "m_generate"; _anno; pattern; expression] ->
       let* pattern = to_association gen_uniq pattern in
       let* expression = to_expression gen_uniq expression in
-      Some (Ast.MapGenerator {pattern; expression})
+      Some (Ast.MapGenerator {pattern; expression; strict= false})
+  | `List [`String "m_generate_strict"; _anno; pattern; expression] ->
+      let* pattern = to_association gen_uniq pattern in
+      let* expression = to_expression gen_uniq expression in
+      Some (Ast.MapGenerator {pattern; expression; strict= true})
   | filter ->
       let* filter = to_expression gen_uniq filter in
       Some (Ast.Filter filter)

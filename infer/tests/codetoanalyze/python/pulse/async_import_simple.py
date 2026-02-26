@@ -9,10 +9,11 @@ from async_utils import (
     await_it as async_await,
     dont_await_it as async_dont_await,
     sleep,
-    C
+    C,
 )
 from not_captured import unknown
 from await_sync_lib import await_sync_decorator
+
 
 async def with_import_bad():
     await utils.dont_await_it(sleep())
@@ -65,7 +66,8 @@ def unknown_call():
 
 
 @await_sync_decorator
-async def main_ok(x, y ):
+async def main_ok(x, y):
     pass
+
 
 main_ok(x, y)

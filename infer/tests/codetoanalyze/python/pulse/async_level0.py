@@ -4,7 +4,8 @@
 # LICENSE file in the root directory of this source tree.
 
 import asyncio
-from unknown import (_async_fun, async_fun)
+from unknown import _async_fun, async_fun
+
 
 async def sleep(i):
     await asyncio.sleep(i)
@@ -267,6 +268,7 @@ async def async_naming_convention_test2_bad():
 async def async_naming_convention_test2_ok():
     await async_fun()
 
+
 class C:
     async def async_instance_method(self):
         pass
@@ -274,17 +276,14 @@ class C:
     async def async_naming_convention_test3_bad(self):
         self.async_instance_method()
 
-
     async def async_naming_convention_test3_ok():
         await self.async_instance_method()
-
 
     async def _async_private_instance_method(self):
         pass
 
     async def async_naming_convention_test4_bad(self):
         self._async_private_instance_method()
-
 
     async def async_naming_convention_test4_ok():
         await self._async_private_instance_method()
@@ -340,6 +339,7 @@ async def none_test_ok():
     if opt is None:
         do()
     return opt
+
 
 async def not_none_test_ok():
     opt = await async_fun()

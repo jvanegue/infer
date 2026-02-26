@@ -5,8 +5,10 @@
 
 from cyclic_import import B
 
+
 class A:
     pass
+
 
 class B(A):
     pass

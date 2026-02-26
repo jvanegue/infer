@@ -49,15 +49,35 @@ module Node : sig
 
   val get_line_number : dict -> int option
 
-  val get_line_number_of_node : t -> int option
+  val get_end_line_number : dict -> int option
+
+  val get_node_line_number : t -> int option
+
+  val set_node_line_number : t -> int option -> t
+
+  val get_node_end_line_number : t -> int option
+
+  val set_node_end_line_number : t -> int option -> t
 
   val make_dict_node : (string * t) list -> t
 
+  val find_field : string -> dict -> t option
+
   val find_field_or_null : string -> dict -> t
 
-  val to_str : ?indent:int -> t -> string
+  val assoc_of_dict : dict -> string * (string * t) list
+
+  val dict_of_assoc : string -> (string * t) list -> dict
+
+  val to_str : ?indent:int -> ?depth:int -> t -> string
+
+  val pp : Format.formatter -> t -> unit
 end
 
-val build_parser : unit -> string -> Node.t
+type error
 
-val iter_from_index : f:(Node.t -> unit) -> index_filename:string -> unit
+val pp_error : Format.formatter -> error -> unit
+
+val build_parser : unit -> ?filename:string -> string -> (Node.t, error) result
+
+val iter_from_index : f:(Node.t -> unit) -> index_filename:string -> (unit, error list) result

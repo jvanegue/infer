@@ -20,7 +20,7 @@ class San {
     Sink::process($arg);
   }
   public static async function sanitizeTest(mixed $arg): Awaitable<bool> {
-    return true;
+    return \Unknown\UnknownClass::someBool();
   }
 }
 
@@ -55,6 +55,65 @@ class Flows {
     $b = await self::boolTest((int)$t);
     if ($b) {
       Sink::process((int)$t);
+    }
+  }
+
+  // the examples below use chains of 2 or 3 calls
+  public static async function FP_call_cast_and_call_sanitized_call3_ok(
+    Source $arg,
+  ): Awaitable<void> {
+    $t = $arg->getTainted();
+    await self::cast_and_call_sanitized_call3($t);
+  }
+
+  public static async function call_cast_and_call_not_sanitized_call3_bad(
+    Source $arg,
+  ): Awaitable<void> {
+    $t = $arg->getTainted();
+    await self::cast_and_call_not_sanitized_call3($t);
+  }
+
+  public static async function call_sanitized_call3_ok(
+    Source $arg,
+  ): Awaitable<void> {
+    $t = $arg->getTainted();
+    await self::sanitized_call3((string)$t);
+  }
+
+  public static async function call_not_sanitized_call3_bad(
+    Source $arg,
+  ): Awaitable<void> {
+    $t = $arg->getTainted();
+    await self::not_sanitized_call3((string)$t);
+  }
+
+  public static async function cast_and_call_sanitized_call3(
+    int $t,
+  ): Awaitable<void> {
+    await self::sanitized_call3((string)$t);
+  }
+
+  public static async function cast_and_call_not_sanitized_call3(
+    int $t,
+  ): Awaitable<void> {
+    await self::not_sanitized_call3((string)$t);
+  }
+
+  public static async function sanitized_call3(
+    string $str,
+  ): Awaitable<void> {
+    $b = await San::sanitizeTest($str);
+    if ($b) {
+      Sink::process((int)$str);
+    }
+  }
+
+  public static async function not_sanitized_call3(
+    string $str,
+  ): Awaitable<void> {
+    $b = await self::boolTest($str);
+    if ($b) {
+      Sink::process((int)$str);
     }
   }
 

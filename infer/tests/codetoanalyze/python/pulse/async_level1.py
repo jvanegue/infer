@@ -27,6 +27,6 @@ def instantiate_D_bad():
     d = D()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     # common pattern
     pass

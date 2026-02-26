@@ -16,7 +16,8 @@ This script normalizes the names between "@" across the file + removes empty lin
 
 bigcap = re.compile("([A-Z]*)([A-Z])")
 
-def normalize_name(name, first_letter_in_bigcap = False):
+
+def normalize_name(name, first_letter_in_bigcap=False):
     """
     Convert a name in java-like convention to the small-caps + underscores convention.
     Examples of renaming:
@@ -28,7 +29,7 @@ def normalize_name(name, first_letter_in_bigcap = False):
         return
 
     def f_sub(m):
-        res = "";
+        res = ""
         if m.start() != 0:
             res += "_"
         if m.group(1) != "":
@@ -43,7 +44,9 @@ def normalize_name(name, first_letter_in_bigcap = False):
         name = name[0].upper() + name[1:]
     return name
 
+
 at_word = re.compile("@(.*?)@")
+
 
 def start(file):
     for line in file:
@@ -52,9 +55,17 @@ def start(file):
         line = at_word.sub(lambda m: normalize_name(m.group(1)), line)
         sys.stdout.write(line)
 
+
 def main():
-    arg_parser = argparse.ArgumentParser(description='Normalize the strings "@AxxByy@" to "axx_byy" across the ATD file and remove empty lines.')
-    arg_parser.add_argument(metavar="FILE", nargs='?', dest="input_file", help="Input log file (default: stdin)")
+    arg_parser = argparse.ArgumentParser(
+        description='Normalize the strings "@AxxByy@" to "axx_byy" across the ATD file and remove empty lines.'
+    )
+    arg_parser.add_argument(
+        metavar="FILE",
+        nargs="?",
+        dest="input_file",
+        help="Input log file (default: stdin)",
+    )
     args = arg_parser.parse_args()
     if args.input_file:
         file = open(args.input_file, "r")
@@ -62,5 +73,6 @@ def main():
         file = sys.stdin
     start(file)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

@@ -12,7 +12,6 @@ open PulseBasicInterface
 open PulseDomainInterface
 open PulseOperationResult.Import
 module CallGlobalForStats = PulseCallOperations.GlobalForStats
-module Metadata = AbstractInterpreter.DisjunctiveMetadata
 
 (** raised when we detect that pulse is using too much memory to stop the analysis of the current
     procedure *)
@@ -184,29 +183,6 @@ module PulseTransferFunctions = struct
 
   type analysis_data = PulseSummary.t InterproceduralAnalysis.t
 
-  let widen_list (prev : DisjDomain.t list) (next : DisjDomain.t list) ~num_iters :
-      DisjDomain.t list =
-    let plist = List.rev_map ~f:fst prev in
-    let nlist = List.rev_map ~f:fst next in
-    match ExecutionDomain.back_edge plist nlist num_iters with
-    | None ->
-        prev
-    | Some cnt ->
-        let exec, path = List.nth_exn next cnt in
-        let exec =
-          match exec with
-          | ContinueProgram astate ->
-              let cfgnode = AnalysisState.get_node () |> Option.value_exn in
-              Metadata.record_alert_node cfgnode ;
-              InfiniteLoop astate
-          | _ ->
-              exec
-        in
-        prev @ [(exec, path)]
-
-
-  (* END OF BACK-EDGE CODE *)
-
   let get_pvar_formals pname =
     IRAttributes.load pname |> Option.map ~f:ProcAttributes.get_pvar_formals
 
@@ -283,12 +259,7 @@ module PulseTransferFunctions = struct
           (StackAddress (Var.of_pvar pvar, ValueHistory.epoch))
           call_loc gone_out_of_scope out_of_scope_base astate
         |> ExecutionDomain.continue
-    | AbortProgram _
-    | ExitProgram _
-    | LatentAbortProgram _
-    | LatentInvalidAccess _
-    | LatentSpecializedTypeIssue _
-    | InfiniteLoop _ ->
+    | Stopped _ ->
         Sat (Ok exec_state)
 
 
@@ -311,13 +282,7 @@ module PulseTransferFunctions = struct
       match exec_state with
       | ContinueProgram astate ->
           ContinueProgram (do_astate astate)
-      | AbortProgram _
-      | LatentAbortProgram _
-      | ExitProgram _
-      | ExceptionRaised _
-      | InfiniteLoop _
-      | LatentInvalidAccess _
-      | LatentSpecializedTypeIssue _ ->
+      | ExceptionRaised _ | Stopped _ ->
           exec_state
     in
     List.map ~f:(PulseResult.map ~f:do_one_exec_state) exec_state_res
@@ -999,12 +964,7 @@ module PulseTransferFunctions = struct
             L.d_printfln "clearing builder attributes on exception" ;
             let astate = AbductiveDomain.finalize_all_hack_builders astate in
             Ok (ExceptionRaised astate)
-        | ( InfiniteLoop _
-          | ExitProgram _
-          | AbortProgram _
-          | LatentAbortProgram _
-          | LatentInvalidAccess _
-          | LatentSpecializedTypeIssue _ ) as exec_state ->
+        | Stopped _ as exec_state ->
             Ok exec_state
       in
       List.map exec_states_res ~f:one_state
@@ -1113,13 +1073,7 @@ module PulseTransferFunctions = struct
         let astates, non_disj =
           NonDisjDomain.bind (astates, non_disj) ~f:(fun astate non_disj ->
               match astate with
-              | AbortProgram _
-              | ExceptionRaised _
-              | InfiniteLoop _
-              | ExitProgram _
-              | LatentAbortProgram _
-              | LatentInvalidAccess _
-              | LatentSpecializedTypeIssue _ ->
+              | ExceptionRaised _ | Stopped _ ->
                   ([astate], non_disj)
               | ContinueProgram astate as default_astate ->
                   (let open IOption.Let_syntax in
@@ -1168,13 +1122,7 @@ module PulseTransferFunctions = struct
         call_instr ;
       NonDisjDomain.bind (astate_list, non_disj) ~f:(fun (astate : ExecutionDomain.t) non_disj ->
           match astate with
-          | AbortProgram _
-          | ExceptionRaised _
-          | InfiniteLoop _
-          | ExitProgram _
-          | LatentAbortProgram _
-          | LatentInvalidAccess _
-          | LatentSpecializedTypeIssue _ ->
+          | ExceptionRaised _ | Stopped _ ->
               ([astate], non_disj)
           | ContinueProgram astate ->
               let execs, non_disj =
@@ -1200,12 +1148,7 @@ module PulseTransferFunctions = struct
   let remove_vars vars location astates =
     List.filter_map astates ~f:(fun (exec_state : ExecutionDomain.t) ->
         match exec_state with
-        | AbortProgram _
-        | ExitProgram _
-        | LatentAbortProgram _
-        | LatentInvalidAccess _
-        | LatentSpecializedTypeIssue _
-        | InfiniteLoop _ ->
+        | Stopped _ ->
             Some exec_state
         | ContinueProgram astate -> (
           match PulseOperations.remove_vars vars location astate with
@@ -1356,17 +1299,10 @@ module PulseTransferFunctions = struct
       (astate_n : NonDisjDomain.t) ({InterproceduralAnalysis.tenv; proc_desc} as analysis_data)
       cfg_node (instr : Sil.instr) : ExecutionDomain.t list * PathContext.t * NonDisjDomain.t =
     match astate with
-    | AbortProgram _
-    | LatentAbortProgram _
-    | LatentInvalidAccess _
-    | InfiniteLoop _
-    | LatentSpecializedTypeIssue _ ->
-        ([astate], path, astate_n)
+    | Stopped _
     (* an exception has been raised, we skip the other instructions until we enter in
        exception edge *)
-    | ExceptionRaised _
-    (* program already exited, simply propagate the exited state upwards  *)
-    | ExitProgram _ ->
+    | ExceptionRaised _ ->
         (* L.debug Analysis Quiet "exec_instr: ExceptionRaised/ExitProgram \n"; *)
         ([astate], path, astate_n)
     | ContinueProgram astate -> (
@@ -1586,25 +1522,63 @@ module PulseTransferFunctions = struct
       | Metadata (LoopEntry {header_id}) ->
           let id = Procdesc.Node.unsafe_int_to_id header_id in
           let astate = AbductiveDomain.init_loop_header_info id astate in
-          ([ContinueProgram astate], path, astate_n)
+          if
+            Config.pulse_eternal
+            && not (AbductiveDomain.is_some_loop_invariant_under_inference astate)
+          then (
+            L.debug Analysis Quiet
+              "[LOOP INVARIANT]     loop entry at node %a - starting abstract execution@\n"
+              Procdesc.Node.pp_id id ;
+            AnalysisState.set_active_loop id ;
+            let abstracted_astate = PulseEternal.abstract id astate in
+            ([ContinueProgram astate; ContinueProgram abstracted_astate], path, astate_n) )
+          else ([ContinueProgram astate], path, astate_n)
+      | Metadata (LoopExit {header_id}) ->
+          let id = Procdesc.Node.unsafe_int_to_id header_id in
+          let astate = AbductiveDomain.remove_loop_header_info id astate in
+          if
+            Config.pulse_eternal
+            && AbductiveDomain.is_loop_invariant_under_inference id astate |> Option.is_some
+          then (
+            L.debug Analysis Quiet
+              "[LOOP INVARIANT]     exiting loop %a at node %a - removing abstract execution@\n"
+              Procdesc.Node.pp_id id Procdesc.Node.pp_id (Procdesc.Node.get_id cfg_node) ;
+            ([], path, astate_n) )
+          else ([ContinueProgram astate], path, astate_n)
       | Metadata (LoopBackEdge {header_id}) ->
           let id = Procdesc.Node.unsafe_int_to_id header_id in
-          let timestamp = path.PathContext.timestamp in
-          let astate = AbductiveDomain.push_loop_header_info id timestamp astate in
-          let {AbductiveDomain.loop_header_info} = astate in
-          let samepath = (PulseLoopHeaderInfo.has_previous_iteration_same_path_stamp id loop_header_info) in
-          let notempty = not (PulseLoopHeaderInfo.is_current_iteration_empty_path_stamp id loop_header_info) in
-          if (samepath && notempty) then
-            let location = Procdesc.Node.get_loc cfg_node in
-            (* typically we get back only one [AbortProgram] state but it could also be zero if
+          if Config.pulse_eternal then
+            match AbductiveDomain.is_loop_invariant_under_inference id astate with
+            | Some abstract_states_at_loop_head
+              when List.exists abstract_states_at_loop_head ~f:(fun astate_at_loop_head ->
+                       PulseEternal.implies astate astate_at_loop_head ) ->
+                let location = Procdesc.Node.get_loc cfg_node in
+                (* typically we get back only one [AbortProgram] state but it could also be zero if we
+                 discover the summary is UNSAT *)
+                let exec_states =
+                  AccessResult.of_result path
+                    (Error (ReportableError {astate; diagnostic= InfiniteLoopError {location}}))
+                  |> PulseReport.report_result analysis_data path location
+                in
+                (exec_states, path, astate_n)
+            | _ ->
+                let astate = AbductiveDomain.add_loop_invariant_under_inference id astate in
+                ([ContinueProgram astate], path, astate_n)
+          else
+            let timestamp = path.PathContext.timestamp in
+            let astate = AbductiveDomain.push_loop_header_info id timestamp astate in
+            let {AbductiveDomain.loop_header_info} = astate in
+            if PulseLoopHeaderInfo.has_previous_iteration_same_path_stamp id loop_header_info then
+              let location = Procdesc.Node.get_loc cfg_node in
+              (* typically we get back only one [AbortProgram] state but it could also be zero if
                we discover the summary is UNSAT *)
-            let exec_states =
-              AccessResult.of_result path
-                (Error (ReportableError {astate; diagnostic= InfiniteLoopError {location}}))
-              |> PulseReport.report_result analysis_data path location
-            in
-            (exec_states, path, astate_n)
-          else ([ContinueProgram astate], path, astate_n)
+              let exec_states =
+                AccessResult.of_result path
+                  (Error (ReportableError {astate; diagnostic= InfiniteLoopError {location}}))
+                |> PulseReport.report_result analysis_data path location
+              in
+              (exec_states, path, astate_n)
+            else ([ContinueProgram astate], path, astate_n)
       | Metadata
           ( Abstract _
           | CatchEntry _
@@ -1794,13 +1768,7 @@ let exit_function limit analysis_data location posts non_disj_astate =
     List.fold_left posts ~init:([], non_disj_astate)
       ~f:(fun (acc_astates, astate_n) (exec_state, path) ->
         match exec_state with
-        | AbortProgram _
-        | ExitProgram _
-        | ExceptionRaised _
-        | InfiniteLoop _
-        | LatentAbortProgram _
-        | LatentInvalidAccess _
-        | LatentSpecializedTypeIssue _ ->
+        | ExceptionRaised _ | Stopped _ ->
             ((exec_state, path) :: acc_astates, astate_n)
         | ContinueProgram astate ->
             let vars =

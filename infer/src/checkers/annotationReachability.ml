@@ -11,6 +11,8 @@ module L = Logging
 module MF = MarkupFormatter
 module Domain = AnnotationReachabilityDomain
 
+type matcher = {regexp: Str.regexp; positive: bool}
+
 let annotation_of_str annot_str = {Annot.class_name= annot_str; parameters= []}
 
 let dummy_constructor_annot = annotation_of_str "__infer_is_constructor"
@@ -76,22 +78,37 @@ let is_allocator tenv pname =
       false
 
 
-type custom_model = {method_regex: string; annotation: string} [@@deriving of_yojson]
-
-type custom_models = custom_model list [@@deriving of_yojson]
-
 let parse_custom_models () =
+  let parse_matchers value =
+    match value with
+    | `List _ ->
+        (* Old format: list of strings, all positive *)
+        value |> Yojson.Safe.Util.to_list
+        |> List.map ~f:Yojson.Safe.Util.to_string
+        |> List.map ~f:(fun s -> {regexp= Str.regexp s; positive= true})
+    | `Assoc _ ->
+        (* New format: object with "allow" and "block" fields *)
+        let allow_list =
+          value |> Yojson.Safe.Util.member "allow" |> Yojson.Safe.Util.to_list
+          |> List.map ~f:Yojson.Safe.Util.to_string
+          |> List.map ~f:(fun s -> {regexp= Str.regexp s; positive= true})
+        in
+        let block_list =
+          value |> Yojson.Safe.Util.member "block" |> Yojson.Safe.Util.to_list
+          |> List.map ~f:Yojson.Safe.Util.to_string
+          |> List.map ~f:(fun s -> {regexp= Str.regexp s; positive= false})
+        in
+        allow_list @ block_list
+    | _ ->
+        []
+  in
   match Config.annotation_reachability_custom_models with
   (* The default value for JSON options is an empty list and not an empty object *)
   | `List [] ->
       IString.Map.empty
   | json ->
       json |> Yojson.Safe.Util.to_assoc
-      |> List.map ~f:(fun (key, val_arr) ->
-             ( key
-             , val_arr |> Yojson.Safe.Util.to_list
-               |> List.map ~f:Yojson.Safe.Util.to_string
-               |> List.map ~f:Str.regexp ) )
+      |> List.map ~f:(fun (key, value) -> (key, parse_matchers value))
       |> Stdlib.List.to_seq |> IString.Map.of_seq
 
 
@@ -114,8 +131,15 @@ let check_modeled_annotation models annot pname =
   let method_name =
     Procname.to_string ~verbosity:(if Procname.is_erlang pname then Verbose else FullNameOnly) pname
   in
-  Option.exists (IString.Map.find_opt annot.Annot.class_name models) ~f:(fun methods ->
-      List.exists methods ~f:(fun r -> Str.string_match r method_name 0) )
+  Option.exists (IString.Map.find_opt annot.Annot.class_name models) ~f:(fun matchers ->
+      let pos_match =
+        List.exists matchers ~f:(fun m -> m.positive && Str.string_match m.regexp method_name 0)
+      in
+      let neg_match =
+        List.exists matchers ~f:(fun m ->
+            (not m.positive) && Str.string_match m.regexp method_name 0 )
+      in
+      pos_match && not neg_match )
 
 
 let find_override_with_annot annot models tenv pname =
@@ -170,9 +194,13 @@ module AnnotationSpec = struct
     ; name: string  (** Short name to be added at the beginning of the report *)
     ; description: string  (** Extra description to be added to the issue report *)
     ; issue_type: IssueType.t
-    ; models: Str.regexp list IString.Map.t  (** model functions as if they were annotated *)
+    ; models: matcher list IString.Map.t  (** model functions as if they were annotated *)
     ; pre_check: Domain.t InterproceduralAnalysis.t -> unit
-          (** additional check before reporting *) }
+          (** additional check before reporting *)
+    ; minimize_sources: bool
+          (** do not report paths where a suffix is also a source to sink path *)
+    ; minimize_sinks: bool  (** do not report paths where a prefix is also a source to sink path *)
+    }
 end
 
 let prepend_if_not_empty str prefix = if String.equal str "" then "" else prefix ^ str
@@ -316,10 +344,8 @@ let find_paths_to_snk ({InterproceduralAnalysis.proc_desc; tenv} as analysis_dat
             "Annotation reachability skipped path %s -> %s all procedures were synthetic@."
             (str_of_pname src_pname) (str_of_pname snk_pname)
     else if
-      Config.annotation_reachability_minimize_sources
-      && method_overrides_annot src spec.models tenv callee_pname
-      || Config.annotation_reachability_minimize_sinks
-         && method_overrides_annot snk_annot spec.models tenv callee_pname
+      (spec.minimize_sources && method_overrides_annot src spec.models tenv callee_pname)
+      || (spec.minimize_sinks && method_overrides_annot snk_annot spec.models tenv callee_pname)
     then
       (* If minimization is enabled and we find a source/sink in the middle, skip this path *)
       ()
@@ -383,7 +409,8 @@ let check_srcs_and_find_snk ({InterproceduralAnalysis.proc_desc; tenv} as analys
 
 
 module StandardAnnotationSpec = struct
-  let from_annotations str_src_annots str_snk_annot str_sanitizer_annots name description models =
+  let from_annotations ?(minimize_sources = false) ?(minimize_sinks = true) str_src_annots
+      str_snk_annot str_sanitizer_annots name description models =
     let src_list = List.map str_src_annots ~f:annotation_of_str in
     let sanitizer_annots = List.map str_sanitizer_annots ~f:annotation_of_str in
     let snk = annotation_of_str str_snk_annot in
@@ -399,7 +426,9 @@ module StandardAnnotationSpec = struct
     ; description
     ; issue_type= IssueType.checkers_annotation_reachability_error
     ; models
-    ; pre_check= (fun _ -> ()) }
+    ; pre_check= (fun _ -> ())
+    ; minimize_sources
+    ; minimize_sinks }
 end
 
 module NoAllocationAnnotationSpec = struct
@@ -417,7 +446,9 @@ module NoAllocationAnnotationSpec = struct
     ; description= ""
     ; issue_type= IssueType.checkers_allocates_memory
     ; models= IString.Map.empty
-    ; pre_check= (fun _ -> ()) }
+    ; pre_check= (fun _ -> ())
+    ; minimize_sources= false
+    ; minimize_sinks= true }
 end
 
 module ExpensiveAnnotationSpec = struct
@@ -464,7 +495,9 @@ module ExpensiveAnnotationSpec = struct
           if is_expensive tenv proc_name then
             PatternMatch.override_iter
               (check_expensive_subtyping_rules analysis_data)
-              tenv proc_name ) }
+              tenv proc_name )
+    ; minimize_sources= false
+    ; minimize_sinks= true }
 end
 
 module MakeTransferFunctions (CFG : ProcCfg.S) = struct
@@ -579,17 +612,21 @@ type custom_spec =
   ; sinks: string list
   ; sanitizers: string list [@yojson.default []]
   ; name: string [@yojson.default ""]
-  ; description: string [@yojson.default ""] }
+  ; description: string [@yojson.default ""]
+  ; minimize_sources: bool [@yojson.default false]
+  ; minimize_sinks: bool [@yojson.default true] }
 [@@deriving of_yojson]
 
 type custom_specs = custom_spec list [@@deriving of_yojson]
 
 let parse_custom_specs () =
   let models = parse_custom_models () in
-  let make_standard_spec_from_custom_spec {sources; sinks; sanitizers; name; description} =
+  let make_standard_spec_from_custom_spec
+      {sources; sinks; sanitizers; name; description; minimize_sources; minimize_sinks} =
     List.map
       ~f:(fun sink ->
-        StandardAnnotationSpec.from_annotations sources sink sanitizers name description models )
+        StandardAnnotationSpec.from_annotations ~minimize_sources ~minimize_sinks sources sink
+          sanitizers name description models )
       sinks
   in
   let custom_specs =

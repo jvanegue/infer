@@ -3,9 +3,11 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+
 class A:
     class_attrA_false = False
     class_attrA_true = True
+
     def __init__(self, val):
         self.attrA = val
 
@@ -19,6 +21,7 @@ class A:
 class B(A):
     class_attrB_false = False
     class_attrB_true = True
+
     def get_attrB(self):
         return self.attrB
 

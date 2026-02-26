@@ -15,6 +15,7 @@ async def await_it(arg):
 async def dont_await_it(arg):
     pass
 
+
 @final
 class C:
 

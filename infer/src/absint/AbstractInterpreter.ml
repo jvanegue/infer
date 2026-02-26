@@ -190,19 +190,6 @@ module DisjunctiveMetadata = struct
      update it whenever a relevant action is taken (eg dropping a disjunct). *)
   let proc_metadata = AnalysisGlobalState.make_dls ~init:(fun () -> empty)
 
-  (* This is used to remember the CFG node otherwise we would need to carry the node around in widen
-     and join as well as other places that may need to access the current CFG node during analysis *)
-
-  let alert_node =
-    AnalysisGlobalState.make_dls ~init:(fun () -> Procdesc.Node.dummy Procname.empty_block)
-
-
-  (* End CFG node tracking for alerts *)
-
-  let record_alert_node new_alert_node = DLS.set alert_node new_alert_node
-
-  let get_alert_node () = DLS.get alert_node
-
   let add_dropped_disjuncts dropped_disjuncts =
     Utils.with_dls proc_metadata ~f:(fun proc_metadata ->
         {proc_metadata with dropped_disjuncts= proc_metadata.dropped_disjuncts + dropped_disjuncts} )
@@ -324,6 +311,17 @@ struct
          && T.NonDisjDomain.leq ~lhs:(snd lhs) ~rhs:(snd rhs)
 
 
+    let pp_active_in_disjs fmt disjs =
+      let pp fmt disj =
+        match T.DisjDomain.is_active_loop disj with
+        | Some id ->
+            Procdesc.Node.pp_id fmt id
+        | None ->
+            F.pp_print_char fmt '_'
+      in
+      F.fprintf fmt "[%a]" (Pp.semicolon_seq pp) disjs
+
+
     let widen ~prev ~next ~num_iters =
       let max_iter =
         match DConfig.widen_policy with UnderApproximateAfterNumIterations max_iter -> max_iter
@@ -334,17 +332,21 @@ struct
         DisjunctiveMetadata.incr_interrupted_loops () ;
         prev )
       else
-        let into =
-          if Config.pulse_experimental_infinite_loop_checker then
-            T.widen_list (fst prev) (fst next) ~num_iters
-          else fst prev
-        in
+        let into = fst prev in
         let post_disj, _, dropped =
           join_up_to_with_leq ~limit:disjunct_limit T.DisjDomain.leq ~into (fst next)
         in
         let next_non_disj = T.NonDisjDomain.widen ~prev:(snd prev) ~next:(snd next) ~num_iters in
-        if leq ~lhs:(post_disj, next_non_disj) ~rhs:prev then prev
-        else (post_disj, add_dropped_disjuncts dropped next_non_disj)
+        let res =
+          if leq ~lhs:(post_disj, next_non_disj) ~rhs:prev then prev
+          else (post_disj, add_dropped_disjuncts dropped next_non_disj)
+        in
+        if Config.pulse_eternal then
+          AnalysisState.get_node ()
+          |> Option.iter ~f:(fun node ->
+                 L.debug Analysis Quiet "[LOOP INVARIANT]     widen at %a = %a@\n" Procdesc.Node.pp
+                   node pp_active_in_disjs (fst next) ) ;
+        res
 
 
     let pp_ (pp_kind : Pp.print_kind) f (disjuncts, non_disj) =
@@ -482,6 +484,11 @@ struct
           List.partition_tf pre ~f:(fun disj ->
               not (List.mem ~equal:T.DisjDomain.equal_fast old_pre disj) ) )
     in
+    ( if Config.pulse_eternal then
+        let active_loops =
+          List.filter_map pre ~f:T.DisjDomain.is_active_loop |> Procdesc.IdSet.of_list
+        in
+        AnalysisState.set_active_loops active_loops ) ;
     let current_post =
       match old_state_opt with
       | None ->

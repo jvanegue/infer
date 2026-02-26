@@ -1,0 +1,30 @@
+======================================
+ Semdiff Configuration Demo
+======================================
+
+--- Scenario 1: ignore() — Ignoring import changes ---
+  with config (ignore imports)                       => equal
+  without rules (empty config)                       => different
+
+--- Scenario 2: rewrite() — Assign ≡ AnnAssign ---
+  with config (rewrite + accept)                     => equal
+  without rules (empty config)                       => different
+
+--- Scenario 3: accept() with key — Adding annotations ---
+  with config (accept in annotation positions)       => equal
+  without rules (empty config)                       => different
+
+--- Scenario 4: accept() with condition — Rejecting Any ---
+  with condition (reject Any annotation)             => different
+  without condition (accept all annotations)         => equal
+
+--- Scenario 5: Full config — Combined changes ---
+  with full config                                   => equal
+  without rules (empty config)                       => different
+
+--- Scenario 6: Catching real semantic changes ---
+  with full config (catches real change)             => different
+
+======================================
+ Done.
+======================================

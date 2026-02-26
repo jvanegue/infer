@@ -5,6 +5,7 @@
 
 # InferPython has a new checker: assertion error detection
 
+
 def returns_false():
     return False
 

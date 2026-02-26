@@ -31,6 +31,8 @@ module DisjDomain = struct
   let is_executable _ = true
 
   let exceptional_to_normal _ = assert false (* no exceptional state anyway *)
+
+  let is_active_loop _ = None
 end
 
 module NonDisjDomain = AbstractDomain.BottomTopLifted (AbstractDomain.Empty)
@@ -65,8 +67,6 @@ module DisjunctiveAnalyzerTransferFunctions = struct
 
 
   let remember_dropped_disjuncts _ non_disj = non_disj
-
-  let widen_list _ next ~num_iters:_ = next
 
   let exec_instr_non_disj non_disj _analysis_data _cfg_node _instr = non_disj
 

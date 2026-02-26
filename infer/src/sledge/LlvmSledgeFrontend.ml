@@ -965,50 +965,8 @@ and xlate_opcode : x -> Llvm.llvalue -> Llvm.Opcode.t -> Inst.t list * Exp.t =
         in
         ([], exp)
       else
-        let rec xlate_indices i =
-          [%Dbg.call fun {pf} -> pf "@ %i %a" i pp_llvalue (Llvm.operand llv i)]
-          ;
-          let pre_i, arg_i = xlate_rand i in
-          let idx = convert_to_siz (xlate_type x (Llvm.type_of (Llvm.operand llv i))) arg_i in
-          ( if i = 1 then
-              let pre_0, base = xlate_rand 0 in
-              let lltyp = Llvm.type_of (Llvm.operand llv 0) in
-              let llelt =
-                match Llvm.classify_type lltyp with
-                | Pointer ->
-                    (* TODO(jul): we have no type to put here since llvm has made all pointers
-                       opaque *)
-                    Llvm.array_type lltyp 1
-                | _ ->
-                    fail "xlate_opcode %a not a Pointer: %i %a" pp_lltype lltyp i pp_llvalue llv ()
-              in
-              (* translate [gep t*, iN M] as [gep [1 x t]*, iN M] *)
-              ((pre_0 @ pre_i, ptr_idx x ~ptr:base ~idx ~llelt), llelt)
-            else
-              let (pre_i1, ptr), lltyp = xlate_indices (i - 1) in
-              match Llvm.classify_type lltyp with
-              | Array | Vector ->
-                  let llelt = Llvm.element_type lltyp in
-                  ((pre_i1 @ pre_i, ptr_idx x ~ptr ~idx ~llelt), llelt)
-              | Struct ->
-                  let fld =
-                    let op = Llvm.operand llv i in
-                    match Option.bind ~f:Int64.unsigned_to_int (Llvm.int64_of_const op) with
-                    | Some n ->
-                        n
-                    | None ->
-                        fail "xlate_opcode field offset %a not an int: %i %a" pp_llvalue op i
-                          pp_llvalue llv ()
-                  in
-                  let llelt = (Llvm.struct_element_types lltyp).(fld) in
-                  ((pre_i1 @ pre_i, ptr_fld x ~ptr ~fld ~lltyp), llelt)
-              | _ ->
-                  let typ = xlate_type x lltyp in
-                  (([], Llair.Exp.nondet typ), lltyp) )
-          |>
-          [%Dbg.retn fun {pf} (pre_exp, llt) -> pf "%a %a" pp_prefix_exp pre_exp pp_lltype llt]
-        in
-        fst (xlate_indices (len - 1))
+        (* TODO *)
+        ([], Llair.Exp.nondet (xlate_type x (Llvm.type_of llv)))
   | ShuffleVector ->
       todo "vector operations: %a" pp_llvalue llv ()
   | Freeze ->
@@ -1060,7 +1018,10 @@ and xlate_global : x -> Llvm.llvalue -> GlobalDefn.t =
         match Llvm.classify_value llg with
         | GlobalVariable ->
             Option.map (Llvm.global_initializer llg) ~f:(fun llv ->
-                let pre, init = xlate_value x llv in
+                let init_type = Llvm.type_of llv in
+                let init_type_llair = xlate_type x init_type in
+                let pre, init_exp = xlate_value x llv in
+                let init = (init_exp, init_type_llair) in
                 (* Nondet insts to set up globals can be dropped to simply
                    leave the undef regs unconstrained. Other insts to set up
                    globals are currently not supported *)
@@ -1413,11 +1374,15 @@ let xlate_instr :
         emit_inst (Inst.nondet ~reg ~msg:fname ~loc)
       in
       let swift_methods_to_skip =
-        [ "swift_release"
+        [ "swift_retain"
+        ; "swift_release"
         ; "swift_unknownObjectRelease"
+        ; "swift_bridgeObjectRelease"
         ; "swift_beginAccess"
         ; "swift_endAccess"
-        ; "swift_weakInit" ]
+        ; "swift_weakInit"
+        ; "swift_deallocPartialClassInstance"
+        ; "__swift_destroy_boxed_opaque_existential_1" ]
       in
       if List.mem fname ~eq:String.equal swift_methods_to_skip then skip fname
       else
@@ -1883,13 +1848,7 @@ let backpatch_calls x =
           in
           backpatch ~callee )
     | IndirectBP {typ; backpatch} ->
-        let resolve_func = FuncName.name >> String.Tbl.find_exn func_tbl in
-        let candidates =
-          Typ.Tbl.fold rval_fns Iter.empty ~f:(fun ~key ~data acc ->
-              if Typ.compatible_fnptr key typ then Iter.(map ~f:resolve_func (of_list data) <+> acc)
-              else acc )
-          |> IArray.of_iter
-        in
+        let candidates = IArray.empty in
         backpatch ~candidates )
 
 

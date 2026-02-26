@@ -12,19 +12,35 @@ open Textual
 module TypeNameBridge = struct
   include TypeName
 
-  (** the name of the Textual string type *)
-  let sil_string = of_string "String"
-
   (** the name of the Textual type of all types (do not ask what it the type of this type itself
       please...) *)
   let sil_type_of_types = of_string "TYPE"
 end
 
 let is_any_type_llvm lang typ =
-  match typ with
-  | _ ->
-      (Textual.Lang.is_c lang || Textual.Lang.is_swift lang)
-      && Typ.equal typ Textual.Typ.any_type_llvm
+  (Textual.Lang.is_c lang && Typ.equal typ Textual.Typ.any_type_llvm)
+  || (Textual.Lang.is_swift lang && Typ.equal typ Textual.Typ.any_type_swift)
+
+
+let is_float_swift lang typ =
+  if Textual.Lang.is_swift lang then
+    let cgfloat = "CGFloat" in
+    match typ with
+    | Typ.Ptr (Struct struct_name, _) -> (
+      match TypeName.swift_plain_name_of_type_name struct_name with
+      | Some plain_name when String.equal plain_name cgfloat ->
+          true
+      | _ -> (
+        match TypeName.swift_mangled_name_of_type_name struct_name with
+        | Some mangled_name when String.is_substring mangled_name ~substring:cgfloat ->
+            true
+        | Some "TSf" ->
+            true
+        | _ ->
+            false ) )
+    | _ ->
+        false
+  else false
 
 
 (** is it safe to assign a value of type [given] to a variable of type [assigned] *)
@@ -44,7 +60,7 @@ let rec compat lang ~assigned:(t1 : Typ.t) ~given:(t2 : Typ.t) =
       true
   | Ptr _, Int when Textual.Lang.is_c lang || Textual.Lang.is_swift lang ->
       true
-  | Ptr t1, Ptr t2 ->
+  | Ptr (t1, _), Ptr (t2, _) ->
       if is_any_type_llvm lang t1 || is_any_type_llvm lang t2 then true
       else compat lang ~assigned:t1 ~given:t2
   | Ptr _, Null ->
@@ -55,15 +71,30 @@ let rec compat lang ~assigned:(t1 : Typ.t) ~given:(t2 : Typ.t) =
       compat lang ~assigned:t1 ~given:t2
   | (Fun _ as fun1), (Fun _ as fun2) ->
       Typ.equal fun1 fun2
-  | (_, Ptr Void | Ptr Void, _) when Textual.Lang.is_c lang || Textual.Lang.is_swift lang ->
+  | (_, Ptr (Void, _) | Ptr (Void, _), _) when Textual.Lang.is_c lang || Textual.Lang.is_swift lang
+    ->
       true
+  | Float, typ | typ, Float ->
+      is_float_swift lang typ
+  | Ptr (typ1, _), typ2 | typ1, Ptr (typ2, _) ->
+      is_any_type_llvm lang typ1 || is_any_type_llvm lang typ2
   | _, _ ->
       false
 
 
 let is_ptr typ = match typ with Typ.Ptr _ -> true | Typ.Void -> true | _ -> false
 
-let is_ptr_struct typ = match typ with Typ.Ptr (Struct _) | Typ.Void -> true | _ -> false
+let is_ptr_struct lang typ =
+  match typ with
+  | Typ.Ptr (Struct _, _) | Typ.Void ->
+      true
+  | Typ.Ptr (Void, _) when Textual.Lang.is_c lang || Textual.Lang.is_swift lang ->
+      true
+  | Typ.Float when Textual.Lang.is_swift lang ->
+      true
+  | _ ->
+      false
+
 
 let is_int lang typ =
   match typ with
@@ -169,8 +200,8 @@ let rec loc_of_exp exp =
       loc_of_exp closure
   | Var _ ->
       None
-  | Lvar {loc} ->
-      Some loc
+  | Lvar varname ->
+      Some (VarName.location varname)
   | Load {exp} | Field {exp} ->
       loc_of_exp exp
   | Index (exp, _) ->
@@ -338,7 +369,7 @@ let typeof_var var : Typ.t monad =
   let optional_typ = VarName.Map.find_opt var state.vars in
   option_value_map optional_typ state
     ~none:
-      (let loc = var.VarName.loc in
+      (let loc = VarName.location var in
        let* () = add_error (VarTypeNotDeclared {var; loc}) in
        abort )
     ~some:ret
@@ -413,7 +444,7 @@ let typeof_const (const : Const.t) : Typ.t =
   | Null ->
       Null
   | Str _ ->
-      Ptr (Struct TypeNameBridge.sil_string)
+      Ptr (Struct TypeName.sil_string, [])
   | Float _ ->
       Float
 
@@ -443,7 +474,7 @@ let typeof_reserved_proc procsig typed_args =
         abort
 
 
-let typeof_generics = Typ.Ptr (Typ.Struct TypeName.hack_generics)
+let typeof_generics = Typ.mk_ptr (Typ.Struct TypeName.hack_generics)
 
 let count_generics_args args : int monad =
   fold args ~init:0 ~f:(fun count exp ->
@@ -511,8 +542,8 @@ let rec typecheck_exp exp ~check ~expected ~loc : Exp.t monad =
 and get_typeof_array_content exp : (Exp.t * Typ.t) monad =
   let* exp, typ = typeof_exp exp in
   match (typ : Typ.t) with
-  | Ptr (Array content_typ) ->
-      ret (exp, Typ.Ptr content_typ)
+  | Ptr (Array content_typ, _) ->
+      ret (exp, Typ.mk_ptr content_typ)
   | _ ->
       let* loc = get_location in
       let* () = add_error (mk_type_mismatch_error PtrArray loc exp typ) in
@@ -521,7 +552,7 @@ and get_typeof_array_content exp : (Exp.t * Typ.t) monad =
 
 and get_typeof_ptr_content exp : (Exp.t * Typ.t) monad =
   let* exp, typ = typeof_exp exp in
-  match (typ : Typ.t) with Ptr typ -> ret (exp, typ) | _ -> abort
+  match (typ : Typ.t) with Ptr (typ, _) -> ret (exp, typ) | _ -> abort
 
 
 and typeof_exp (exp : Exp.t) : (Exp.t * Typ.t) monad =
@@ -536,8 +567,9 @@ and typeof_exp (exp : Exp.t) : (Exp.t * Typ.t) monad =
         ~some:(fun typ ->
           let+ exp =
             typecheck_exp exp
-              ~check:(fun given -> compat lang ~assigned:(Ptr typ) ~given)
-              ~expected:(SubTypeOf (Ptr typ)) ~loc
+              ~check:(fun given -> compat lang ~assigned:(Typ.mk_ptr typ) ~given)
+              ~expected:(SubTypeOf (Typ.mk_ptr typ))
+              ~loc
           in
           (Exp.Load {exp; typ= Some typ}, typ) )
         ~none:
@@ -545,14 +577,14 @@ and typeof_exp (exp : Exp.t) : (Exp.t * Typ.t) monad =
            (Exp.Load {exp; typ= Some typ}, typ) )
   | Lvar varname ->
       let+ typ = typeof_var varname in
-      (exp, Typ.Ptr typ)
+      (exp, Typ.mk_ptr typ)
   | Field {exp; field} ->
       let* loc = get_location in
-      let* exp = typecheck_exp exp ~check:is_ptr_struct ~expected:PtrStruct ~loc in
+      let* exp = typecheck_exp exp ~check:(is_ptr_struct lang) ~expected:PtrStruct ~loc in
       (* remark: we could check if field is declared in the type of exp, but this may be too
          strong for some weakly typed frontend langages *)
       let+ field_typ = typeof_field field in
-      (Exp.Field {exp; field}, Typ.Ptr field_typ)
+      (Exp.Field {exp; field}, Typ.mk_ptr field_typ)
   | Index (exp1, exp2) ->
       let* loc = get_location in
       let* exp2 = typecheck_exp exp2 ~check:(is_int lang) ~expected:(SubTypeOf Int) ~loc in
@@ -594,7 +626,7 @@ and typeof_exp (exp : Exp.t) : (Exp.t * Typ.t) monad =
       in
       let return_type =
         if Textual.QualifiedProcName.is_llvm_init_tuple proc then
-          Typ.(Ptr (Struct (Textual.TypeName.mk_swift_tuple_type_name [])))
+          Typ.(mk_ptr (Struct (Textual.TypeName.mk_swift_tuple_type_name [])))
         else TextualSil.default_return_type lang loc
       in
       (Exp.Call {proc; args; kind}, return_type)
@@ -654,7 +686,7 @@ and typeof_exp (exp : Exp.t) : (Exp.t * Typ.t) monad =
 and typeof_allocate_builtin (proc : QualifiedProcName.t) args =
   match args with
   | [Exp.Typ typ] ->
-      ret (Exp.Call {proc; args; kind= Exp.NonVirtual}, Typ.Ptr typ)
+      ret (Exp.Call {proc; args; kind= Exp.NonVirtual}, Typ.mk_ptr typ)
   | [exp] ->
       let* loc = get_location in
       let* _, typ = typeof_exp exp in
@@ -677,7 +709,7 @@ and typeof_allocate_array_builtin lang (proc : QualifiedProcName.t) args =
         mapM (dim :: dims) ~f:(fun exp ->
             typecheck_exp exp ~check:(is_int lang) ~expected:(SubTypeOf Int) ~loc )
       in
-      (Exp.Call {proc; args= Exp.Typ typ :: args; kind= Exp.NonVirtual}, Typ.Ptr typ)
+      (Exp.Call {proc; args= Exp.Typ typ :: args; kind= Exp.NonVirtual}, Typ.mk_ptr typ)
   | exp1 :: exp2 :: _ ->
       let* loc = get_location in
       let* _, typ = typeof_exp exp1 in
@@ -764,8 +796,9 @@ let typecheck_instr (instr : Instr.t) : Instr.t monad =
         ~some:(fun typ ->
           let* exp =
             typecheck_exp exp
-              ~check:(fun given -> compat lang ~assigned:(Ptr typ) ~given)
-              ~expected:(SubTypeOf (Ptr typ)) ~loc
+              ~check:(fun given -> compat lang ~assigned:(Typ.mk_ptr typ) ~given)
+              ~expected:(SubTypeOf (Typ.mk_ptr typ))
+              ~loc
           in
           let+ () = set_ident_type id typ in
           Instr.Load {id; exp; typ= Some typ; loc} )
@@ -784,16 +817,18 @@ let typecheck_instr (instr : Instr.t) : Instr.t monad =
           in
           let+ exp1 =
             typecheck_exp exp1
-              ~check:(fun assigned -> compat lang ~assigned ~given:(Ptr typ))
-              ~expected:(SuperTypeOf (Ptr typ)) ~loc
+              ~check:(fun assigned -> compat lang ~assigned ~given:(Typ.mk_ptr typ))
+              ~expected:(SuperTypeOf (Typ.mk_ptr typ))
+              ~loc
           in
           Instr.Store {exp1; typ= Some typ; exp2; loc} )
         ~none:
           (let* exp2, typ = typeof_exp exp2 in
            let+ exp1 =
              typecheck_exp exp1
-               ~check:(fun assigned -> compat lang ~assigned ~given:(Ptr typ))
-               ~expected:(SuperTypeOf (Ptr typ)) ~loc
+               ~check:(fun assigned -> compat lang ~assigned ~given:(Typ.mk_ptr typ))
+               ~expected:(SuperTypeOf (Typ.mk_ptr typ))
+               ~loc
            in
            Instr.Store {exp1; typ= Some typ; exp2; loc} )
   | Prune {exp; loc} ->
@@ -894,7 +929,8 @@ let restore_ssa_transform pdesc assigned_at_least_twice =
       | [] ->
           L.die InternalError "assigned_at_least_twice map should never contain empty lists"
       | (typ0, _) :: l ->
-          Textual.Typ.(if List.for_all l ~f:(fun (typ, _) -> equal typ0 typ) then typ0 else Ptr Void) )
+          Textual.Typ.(
+            if List.for_all l ~f:(fun (typ, _) -> equal typ0 typ) then typ0 else mk_ptr Void ) )
     assigned_at_least_twice
   |> TextualTransform.restore_ssa pdesc
 

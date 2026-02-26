@@ -8,6 +8,19 @@
 open! IStd
 module L = Logging
 
+type stats =
+  { mutable files_total: int
+  ; mutable files_captured: int
+  ; mutable procs_total: int
+  ; mutable procs_captured: int }
+
+let stats = {files_total= 0; files_captured= 0; procs_total= 0; procs_captured= 0}
+
+let init_module_state llair_program lang =
+  stats.procs_total <- Llair.FuncName.Map.length llair_program.Llair.functions ;
+  Llair2Textual.init_module_state llair_program lang
+
+
 module Error = struct
   type errors =
     {verification: TextualVerification.error list; transformation: Textual.transform_error list}
@@ -58,15 +71,22 @@ module Error = struct
       sourcefile
 end
 
+let textual_version = ref 0
+
 let dump_textual_file source_file module_ =
-  let suffix = if Config.frontend_tests then ".test.sil" else ".sil" in
-  let filename = source_file ^ suffix in
-  TextualSil.dump_module ~filename module_
+  let suffix = if Config.frontend_tests then "test.sil" else "sil" in
+  let filename =
+    match !textual_version with
+    | 0 ->
+        Format.asprintf "%s.%s" source_file suffix
+    | _ ->
+        Format.asprintf "%s.v%d.%s" source_file !textual_version suffix
+  in
+  TextualSil.dump_module ~filename ~show_location:true module_ ;
+  incr textual_version
 
 
 let should_dump_textual () = Config.debug_mode || Config.dump_textual || Config.frontend_tests
-
-let to_module source_file llair_program = Llair2Textual.translate ~source_file llair_program
 
 let language_of_source_file source_file =
   if String.is_suffix source_file ~suffix:".c" then Textual.Lang.C
@@ -74,13 +94,14 @@ let language_of_source_file source_file =
   else L.die UserError "Currently the llvm frontend is only enabled for C and Swift programs@."
 
 
-let capture_llair source_file llair_program =
+let capture_llair source_file module_state =
+  stats.files_total <- stats.files_total + 1 ;
   let open IResult.Let_syntax in
   let lang = language_of_source_file source_file in
   let result =
     let error_state = Error.no_errors in
-    let textual = to_module source_file llair_program lang in
-    if should_dump_textual () then dump_textual_file ~show_location:true source_file textual ;
+    let textual = Llair2Textual.translate ~source_file ~module_state in
+    if should_dump_textual () then dump_textual_file source_file textual ;
     let textual_source_file = Textual.SourceFile.create source_file in
     let* verified_textual, error_state =
       let f = Error.add_verification_errors error_state textual_source_file in
@@ -90,8 +111,15 @@ let capture_llair source_file llair_program =
       | Error errors ->
           Error (f errors)
     in
-    (* if Config.debug_mode then dump_textual_file ~version:0 file textual ; *)
-    let transformed_textual, decls = TextualTransform.run lang verified_textual in
+    if Config.debug_mode then dump_textual_file source_file textual ;
+    let* (transformed_textual, decls), error_state =
+      let f = Error.add_transformation_errors error_state textual_source_file in
+      match TextualTransform.run lang verified_textual with
+      | Ok result ->
+          Ok (result, error_state)
+      | Error errors ->
+          Error (f errors)
+    in
     let* (cfg, tenv), error_state =
       let f = Error.add_transformation_errors error_state textual_source_file in
       match TextualSil.module_to_sil lang transformed_textual decls with
@@ -100,6 +128,7 @@ let capture_llair source_file llair_program =
       | Error errors ->
           Error (f errors)
     in
+    if Config.debug_mode then dump_textual_file source_file textual ;
     let sil = {TextualParser.TextualFile.sourcefile= textual_source_file; cfg; tenv} in
     let use_global_tenv = if Textual.Lang.is_swift lang then true else false in
     TextualParser.TextualFile.capture ~use_global_tenv sil ;
@@ -112,6 +141,7 @@ let capture_llair source_file llair_program =
                  tenv )
         in
         Tenv.merge ~src:tenv ~dst:global_tenv ) ;
+    stats.files_captured <- stats.files_captured + 1 ;
     Ok error_state
   in
   match result with
@@ -122,10 +152,7 @@ let capture_llair source_file llair_program =
 
 
 let dump_llair_text llair_program source_file =
-  let output_file =
-    let suffix = ".llair.text" in
-    String.append source_file suffix
-  in
+  let output_file = source_file ^ ".llair.text" in
   Utils.with_file_out output_file ~f:(fun oc ->
       let fmt = Format.formatter_of_out_channel oc in
       Llair.Program.pp fmt llair_program ;
@@ -133,20 +160,54 @@ let dump_llair_text llair_program source_file =
 
 
 let dump_llair llair_program source_file =
-  let output_file =
-    let suffix = ".llair" in
-    String.append source_file suffix
+  let output_file = source_file ^ ".llair" in
+  Utils.with_file_out output_file ~f:(fun outc -> Marshal.to_channel outc llair_program [])
+
+
+let log_stats () =
+  let count_defined_procs =
+    let query_str = "SELECT count(*) FROM procedures WHERE cfg IS NOT NULL" in
+    let db = Database.get_database CaptureDatabase in
+    let stmt = Sqlite3.prepare db query_str in
+    let log = "Counting defined procs" in
+    fun () ->
+      SqliteUtils.result_option db ~log stmt ~finalize:true ~read_row:(fun stmt ->
+          match Sqlite3.column stmt 0 with
+          | Sqlite3.Data.INT i ->
+              Int64.to_int i |> Option.value_exn
+          | _ ->
+              L.die InternalError "Expected integer result from query %s" query_str )
   in
-  let marshal program file =
-    Utils.with_file_out file ~f:(fun outc -> Marshal.to_channel outc program [])
-  in
-  marshal llair_program output_file
+  stats.procs_captured <- count_defined_procs () |> Option.value_exn ;
+  StatsLogging.log_many
+    [ LogEntry.mk_count ~label:"capture.files_total" ~value:stats.files_total
+    ; LogEntry.mk_count ~label:"capture.files_captured" ~value:stats.files_captured
+    ; LogEntry.mk_count ~label:"capture.procs_total" ~value:stats.procs_total
+    ; LogEntry.mk_count ~label:"capture.procs_captured" ~value:stats.procs_captured ] ;
+  stats.files_captured <- 0 ;
+  stats.procs_captured <- 0 ;
+  stats.files_total <- 0 ;
+  stats.procs_total <- 0
 
 
 let capture ~sources llvm_bitcode_in =
+  let lang = language_of_source_file (List.hd_exn sources) in
   let llvm_program = In_channel.input_all llvm_bitcode_in in
   let llair_program = LlvmSledgeFrontend.translate llvm_program in
+  let module_state = init_module_state llair_program lang in
   List.iter sources ~f:(fun source_file ->
+      textual_version := 0 ;
       if Config.dump_llair then dump_llair llair_program source_file ;
       if Config.dump_llair_text then dump_llair_text llair_program source_file ;
-      capture_llair source_file llair_program )
+      capture_llair source_file module_state ) ;
+  log_stats ()
+
+
+(** shadows above definition to provide a different interface to module users *)
+let capture_llair ~source_file ~llair_file =
+  Utils.with_file_in llair_file ~f:(fun llair_in ->
+      let llair_program : Llair.program = Marshal.from_channel llair_in in
+      let lang = language_of_source_file source_file in
+      let module_state = Llair2Textual.init_module_state llair_program lang in
+      capture_llair source_file module_state ) ;
+  log_stats ()

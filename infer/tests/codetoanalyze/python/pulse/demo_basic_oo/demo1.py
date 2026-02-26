@@ -5,6 +5,7 @@
 
 # InferPython now supports objects instanciation and duck typing
 
+
 class Duck:
     def quack(self):
         return True

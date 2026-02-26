@@ -1,0 +1,711 @@
+(*
+ * Copyright (c) Facebook, Inc. and its affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ *)
+
+open! IStd
+module L = Logging
+module PlaceMap = Stdlib.Map.Make (Int)
+
+let fun_map_find_id (crate : Charon.UllbcAst.crate) fun_decl_id =
+  let decl = Charon.Types.FunDeclId.Map.find_opt fun_decl_id crate.fun_decls in
+  match decl with
+  | Some decl ->
+      decl
+  | None ->
+      L.die UserError "Unsupported fun type (fun_decl_id not found) %s"
+        (Charon.PrintTypes.fun_decl_id_to_string
+           (Charon.PrintUllbcAst.Crate.crate_to_fmt_env crate)
+           fun_decl_id )
+
+
+let type_decl_map_find_id (crate : Charon.UllbcAst.crate) type_decl_id =
+  let decl = Charon.Generated_Types.TypeDeclId.Map.find_opt type_decl_id crate.type_decls in
+  match decl with
+  | Some decl ->
+      decl
+  | None ->
+      L.die UserError "Unsupported adt_typ_to_textual type (type_decl_ref not found) %s"
+        (Charon.PrintTypes.type_decl_id_to_string
+           (Charon.PrintUllbcAst.Crate.crate_to_fmt_env crate)
+           type_decl_id )
+
+
+let location_from_span (span : Charon.Generated_Meta.span) : Textual.Location.t =
+  let line = span.span.beg_loc.line in
+  let col = span.span.beg_loc.col in
+  Textual.Location.known ~line ~col
+
+
+let location_from_span_end (span : Charon.Generated_Meta.span) : Textual.Location.t =
+  let line = span.span.end_loc.line in
+  let col = span.span.end_loc.col in
+  Textual.Location.known ~line ~col
+
+
+let name_of_path_element crate (path_element : Charon.Generated_Types.path_elem) : string =
+  Charon.PrintTypes.path_elem_to_string
+    (Charon.PrintUllbcAst.Crate.crate_to_fmt_env crate)
+    path_element
+
+
+let name_of_field (field : Charon.Generated_Types.field) (idx : int) : Textual.FieldName.t =
+  match field.field_name with
+  | Some name ->
+      Textual.FieldName.of_string name
+  | None ->
+      Textual.FieldName.of_string (Int.to_string idx)
+
+
+let mk_name crate (name : Charon.Generated_Types.name) : Textual.ProcName.t =
+  let names = List.map name ~f:(name_of_path_element crate) in
+  let name_str = Stdlib.String.concat "::" names in
+  Textual.ProcName.of_string name_str
+
+
+let mk_qualified_proc_name crate (item_meta : Charon.Generated_Types.item_meta) :
+    Textual.QualifiedProcName.t =
+  let enclosing_class = Textual.QualifiedProcName.TopLevel in
+  let name = mk_name crate item_meta.name in
+  {Textual.QualifiedProcName.enclosing_class; name}
+
+
+let item_meta_to_string crate (item_meta : Charon.Generated_Types.item_meta) : string =
+  let names = List.map item_meta.name ~f:(name_of_path_element crate) in
+  let name_str = Stdlib.String.concat "::" names in
+  name_str
+
+
+let fun_name_from_fun_operand (crate : Charon.UllbcAst.crate)
+    (operand : Charon.Generated_GAst.fn_operand) : string =
+  match operand with
+  | FnOpRegular {func= FunId (FRegular fun_decl_id)} ->
+      let decl = fun_map_find_id crate fun_decl_id in
+      item_meta_to_string crate decl.item_meta
+  | _ ->
+      L.die UserError "Unsupported fun operand: %a" Charon.Generated_GAst.pp_fn_operand operand
+
+
+let mk_fieldname (type_decl : Charon.Generated_Types.type_decl) field_id =
+  let fields =
+    match type_decl.kind with
+    | Struct fields | Union fields ->
+        fields
+    | _ ->
+        L.die UserError "Unsupported type for fieldname"
+  in
+  let field = List.nth fields (Charon.Generated_Types.FieldId.to_int field_id) in
+  let field_name =
+    field |> Option.map ~f:(fun (field : Charon.Generated_Types.field) -> field.field_name)
+  in
+  match field_name with
+  | Some (Some field_name) ->
+      Textual.FieldName.of_string field_name
+  | _ ->
+      L.die UserError "Did not find fieldname in %a field_id: %a "
+        Charon.Generated_Types.pp_type_decl type_decl Charon.Generated_Types.pp_field_id field_id
+
+
+let mk_qualified_fieldname crate (type_decl : Charon.Generated_Types.type_decl) field_id =
+  let enclosing_class_name = item_meta_to_string crate type_decl.item_meta in
+  let name = mk_fieldname type_decl field_id in
+  let enclosing_class = Textual.TypeName.of_string enclosing_class_name in
+  {Textual.enclosing_class; name}
+
+
+let mk_varname (local : Charon.Generated_GAst.local) (index : int) : Textual.VarName.t =
+  match local.name with
+  | Some name ->
+      Textual.VarName.of_string (name ^ "_" ^ string_of_int index)
+  | None ->
+      Textual.VarName.of_string ("var_" ^ string_of_int index)
+
+
+let mk_label (id : int) : Textual.NodeName.t =
+  "node_" ^ string_of_int id |> Textual.NodeName.of_string
+
+
+let params_from_fun_decl (fun_decl : Charon.UllbcAst.blocks Charon.GAst.gfun_decl) (arg_count : int)
+    : Textual.VarName.t list =
+  match fun_decl.body with
+  | Some {locals= {locals= _ :: locals_list}} ->
+      List.take locals_list arg_count
+      |> List.mapi ~f:(fun i (local : Charon.Generated_GAst.local) -> mk_varname local (i + 1))
+  | _ ->
+      []
+
+
+let proc_name_from_unop (op : Charon.Generated_Expressions.unop) : Textual.QualifiedProcName.t =
+  match op with
+  | Neg _ ->
+      Textual.ProcDecl.of_unop IR.Unop.Neg
+  | Not ->
+      Textual.ProcDecl.of_unop IR.Unop.LNot
+  | Cast _ ->
+      Textual.ProcDecl.cast_name
+  | _ ->
+      L.die UserError "Unsupported unary operator: %a" Charon.Generated_Expressions.pp_unop op
+
+
+let proc_name_from_binop (op : Charon.Generated_Expressions.binop) (typ : Textual.Typ.t) :
+    Textual.QualifiedProcName.t * Textual.Typ.t =
+  let bin_op, typ =
+    match (op, typ) with
+    | Add _, Textual.Typ.Int ->
+        (IR.Binop.PlusA (Some IInt), typ)
+    | Add _, _ ->
+        (IR.Binop.PlusA None, typ)
+    | Sub _, Textual.Typ.Int ->
+        (IR.Binop.MinusA (Some IInt), typ)
+    | Sub _, _ ->
+        (IR.Binop.MinusA None, typ)
+    | Mul _, Textual.Typ.Int ->
+        (IR.Binop.Mult (Some IInt), typ)
+    | Mul _, _ ->
+        (IR.Binop.Mult None, typ)
+    | Div _, Textual.Typ.Int ->
+        (IR.Binop.DivI, typ)
+    | Div _, Textual.Typ.Float ->
+        (IR.Binop.DivF, typ)
+    | Rem _, Textual.Typ.Int ->
+        (IR.Binop.Mod, typ)
+    | BitXor, Textual.Typ.Int ->
+        (IR.Binop.BXor, typ)
+    | BitAnd, Textual.Typ.Int ->
+        (IR.Binop.BAnd, typ)
+    | BitOr, Textual.Typ.Int ->
+        (IR.Binop.BOr, typ)
+    | Eq, Textual.Typ.Int ->
+        (IR.Binop.Eq, Textual.Typ.Int)
+    | Lt, _ ->
+        (IR.Binop.Lt, Textual.Typ.Int)
+    | Le, _ ->
+        (IR.Binop.Le, Textual.Typ.Int)
+    | Ne, _ ->
+        (IR.Binop.Ne, Textual.Typ.Int)
+    | Ge, _ ->
+        (IR.Binop.Ge, Textual.Typ.Int)
+    | Gt, _ ->
+        (IR.Binop.Gt, Textual.Typ.Int)
+    | Shl _, _ ->
+        (IR.Binop.Shiftlt, typ)
+    | Shr _, _ ->
+        (IR.Binop.Shiftrt, typ)
+    | _ ->
+        L.die UserError "Unsupported binary operator: %a" Charon.Generated_Expressions.pp_binop op
+  in
+  (Textual.ProcDecl.of_binop bin_op, typ)
+
+
+let rec mk_struct_args crate (types : Charon.Generated_Types.ty list) =
+  List.map types ~f:(fun typ ->
+      Textual.TypeName.of_string (Format.asprintf "%a" Textual.Typ.pp (ty_to_textual_typ crate typ)) )
+
+
+and mk_tuple_type_name crate generics =
+  let args = mk_struct_args crate generics in
+  Textual.TypeName.mk_rust_tuple_type_name args
+
+
+and mk_tuple_struct_typ crate type_decl_ref =
+  Textual.Typ.Struct (mk_tuple_type_name crate type_decl_ref)
+
+
+and adt_ty_to_textual_typ crate (type_decl_ref : Charon.Generated_Types.type_decl_ref) :
+    Textual.Typ.t =
+  (* TODO: Implement other adt types *)
+  match type_decl_ref.id with
+  | TTuple ->
+      if List.is_empty type_decl_ref.generics.types then Textual.Typ.Void
+      else mk_tuple_struct_typ crate type_decl_ref.generics.types
+  | TBuiltin TArray -> (
+    match type_decl_ref.generics.types with
+    | [typ] ->
+        Textual.Typ.Array (ty_to_textual_typ crate typ)
+    | _ ->
+        Textual.Typ.Array Textual.Typ.Void )
+  | TAdtId type_decl_id -> (
+      let type_decl = type_decl_map_find_id crate type_decl_id in
+      match type_decl.kind with
+      | Struct _ | Union _ ->
+          let struct_name = item_meta_to_string crate type_decl.item_meta in
+          let base_type_name = Textual.BaseTypeName.of_string struct_name in
+          let args = mk_struct_args crate type_decl_ref.generics.types in
+          let type_name = {Textual.TypeName.name= base_type_name; args} in
+          Textual.Typ.Struct type_name
+      | Enum _ ->
+          (* TODO: Implement enum type *)
+          Textual.Typ.Void
+      | _ ->
+          Textual.Typ.Void )
+  | _ ->
+      L.die UserError "Unsupported adt type: %a" Charon.Generated_Types.pp_type_decl_ref
+        type_decl_ref
+
+
+and ty_to_textual_typ crate (rust_ty : Charon.Generated_Types.ty) : Textual.Typ.t =
+  (* Bool and char are mapped to int since Textual does not have bool type *)
+  match rust_ty with
+  | TLiteral (TInt _) | TLiteral (TUInt _) | TLiteral TBool | TLiteral TChar ->
+      Textual.Typ.Int
+  | TLiteral (TFloat _) ->
+      Textual.Typ.Float
+  | TRawPtr (ty, _) | TRef (_, ty, _) ->
+      Textual.Typ.mk_ptr (ty_to_textual_typ crate ty)
+  | TAdt type_decl_ref ->
+      adt_ty_to_textual_typ crate type_decl_ref
+  | _ ->
+      L.die UserError "Unsupported type: %a" Charon.Generated_Types.pp_ty rust_ty
+
+
+let cast_kind_to_textual_typ (crate : Charon.UllbcAst.crate)
+    (cast_kind : Charon.Generated_Expressions.cast_kind) : Textual.Typ.t =
+  match cast_kind with
+  | CastScalar (_, target_typ) ->
+      ty_to_textual_typ crate (TLiteral target_typ)
+  | CastRawPtr (_, target_typ) ->
+      ty_to_textual_typ crate target_typ
+  | CastTransmute (_, target_type) ->
+      ty_to_textual_typ crate target_type
+  | _ ->
+      (* TODO: Add Support for more cast types*)
+      Textual.Typ.Void
+
+
+(* A map from place ids to (place name, type) *)
+type place_map_ty = (Textual.VarName.t * Charon.Generated_Types.ty) PlaceMap.t
+
+let mk_place_map (locals : Charon.Generated_GAst.local list) : place_map_ty =
+  List.foldi locals ~init:PlaceMap.empty ~f:(fun i acc (local : Charon.Generated_GAst.local) ->
+      let id = local.index in
+      let name = mk_varname local i in
+      let ty = local.var_ty in
+      PlaceMap.add (Charon.Generated_Expressions.LocalId.to_int id) (name, ty) acc )
+
+
+let place_map_find_id place_map (id : Charon.Expressions.LocalId.id) =
+  PlaceMap.find (Charon.Generated_Expressions.LocalId.to_int id) place_map |> fst
+
+
+let mk_place_from_id (id : int) (ty : Charon.Generated_Types.ty) :
+    Charon.Generated_Expressions.place =
+  {kind= PlaceLocal (Charon.Generated_Expressions.LocalId.of_int id); ty}
+
+
+let mk_return_place place_map =
+  let _, ty = PlaceMap.find 0 place_map in
+  mk_place_from_id 0 ty
+
+
+let mk_locals crate (locals : Charon.Generated_GAst.local list) (arg_count : int)
+    (place_map : place_map_ty) : (Textual.VarName.t * Textual.Typ.annotated) list =
+  (* Extracts the local variable names from locals list, excluding the return value and the arguments *)
+  List.take locals 1 @ List.drop locals (1 + arg_count)
+  |> List.map ~f:(fun (l : Charon.Generated_GAst.local) ->
+         let id = l.index in
+         let varname = place_map_find_id place_map id in
+         (varname, Textual.Typ.mk_without_attributes (ty_to_textual_typ crate l.var_ty)) )
+
+
+let mk_const_literal (literal_ty : Charon.Generated_Types.literal_type)
+    (value : Charon.Generated_Expressions.raw_constant_expr) : Textual.Exp.t =
+  match (literal_ty, value) with
+  | ( (TInt _ | TUInt _)
+    , (CLiteral (VScalar (UnsignedScalar (_, n))) | CLiteral (VScalar (SignedScalar (_, n)))) ) ->
+      Textual.Exp.Const (Textual.Const.Int n)
+  | (TInt _ | TUInt _), _ ->
+      L.die UserError "Unsupported int type: %a" Charon.Generated_Types.pp_literal_type literal_ty
+  | TFloat _, CLiteral (VFloat {float_value= f; float_ty= _}) ->
+      Textual.Exp.Const (Textual.Const.Float (float_of_string f))
+  | TFloat _, _ ->
+      L.die UserError "Unsupported float type: %a" Charon.Generated_Types.pp_literal_type literal_ty
+  | TBool, CLiteral (VBool b) ->
+      Textual.Exp.Const (Textual.Const.Int (if b then Z.one else Z.zero))
+  | TBool, _ ->
+      L.die UserError "Unsupported bool type: %a" Charon.Generated_Types.pp_literal_type literal_ty
+  | TChar, CLiteral (VChar c) -> (
+    match Uchar.to_char c with
+    | Some ch ->
+        Textual.Exp.Const (Textual.Const.Int (Z.of_int (int_of_char ch)))
+    | None ->
+        L.die UserError "Cannot convert Unicode character to char: %a"
+          Charon.Generated_Types.pp_literal_type literal_ty )
+  | TChar, _ ->
+      L.die UserError "Unsupported char type: %a" Charon.Generated_Types.pp_literal_type literal_ty
+
+
+let mk_const_exp (rust_ty : Charon.Generated_Types.ty)
+    (value : Charon.Generated_Expressions.raw_constant_expr) : Textual.Exp.t =
+  (* TODO: Add support for more types *)
+  match rust_ty with
+  | TLiteral literal_ty ->
+      mk_const_literal literal_ty value
+  | _ ->
+      L.die UserError "Unsupported literal type: %a" Charon.Generated_Types.pp_ty rust_ty
+
+
+let rec mk_exp_from_place ~loc (crate : Charon.UllbcAst.crate) (place_map : place_map_ty)
+    (place : Charon.Generated_Expressions.place) : Textual.Exp.t * Textual.Typ.t =
+  let typ = ty_to_textual_typ crate place.ty in
+  match place.kind with
+  | PlaceLocal var_id ->
+      let exp = Textual.Exp.Lvar (place_map_find_id place_map var_id) in
+      (exp, typ)
+  | PlaceProjection (projection_place, Deref) ->
+      let exp, proj_typ = mk_exp_from_place ~loc crate place_map projection_place in
+      (Textual.Exp.Load {exp; typ= Some proj_typ}, typ)
+  | PlaceProjection (projection_place, Field (ProjAdt (type_decl_id, _), field_id)) ->
+      let exp, _ = mk_exp_from_place ~loc crate place_map projection_place in
+      let type_decl = type_decl_map_find_id crate type_decl_id in
+      let field = mk_qualified_fieldname crate type_decl field_id in
+      let field_exp = Textual.Exp.Field {exp; field} in
+      (field_exp, typ)
+  | PlaceProjection
+      (({ty= TAdt {id= TTuple; generics}} as projection_place), Field (ProjTuple _, field_id)) ->
+      let exp, _ = mk_exp_from_place ~loc crate place_map projection_place in
+      let tuple_type_name = mk_tuple_type_name crate generics.types in
+      let name =
+        Textual.FieldName.of_string (Int.to_string (Charon.Generated_Types.FieldId.to_int field_id))
+      in
+      let field = {Textual.enclosing_class= tuple_type_name; name} in
+      let field_exp = Textual.Exp.Field {exp; field} in
+      (field_exp, typ)
+  | PlaceProjection (projection_place, ProjIndex (operand, _from_end)) ->
+      let exp_place, _ = mk_exp_from_place ~loc crate place_map projection_place in
+      let exp_op, _ = mk_exp_from_operand ~loc crate place_map operand in
+      let exp = Textual.Exp.Index (exp_place, exp_op) in
+      (exp, typ)
+  | _ ->
+      L.die UserError "Unsupported place: %a" Charon.Generated_Expressions.pp_place place
+
+
+and mk_exp_from_place_load ~loc (crate : Charon.UllbcAst.crate) (place_map : place_map_ty)
+    (place : Charon.Generated_Expressions.place) : Textual.Exp.t * Textual.Typ.t =
+  let typ = ty_to_textual_typ crate place.ty in
+  let exp, _ = mk_exp_from_place ~loc crate place_map place in
+  (Textual.Exp.Load {exp; typ= Some typ}, typ)
+
+
+and mk_exp_from_operand ~loc crate (place_map : place_map_ty)
+    (operand : Charon.Generated_Expressions.operand) : Textual.Exp.t * Textual.Typ.t =
+  match operand with
+  | Copy place | Move place ->
+      mk_exp_from_place_load ~loc crate place_map place
+  | Constant const_operand ->
+      let value = const_operand.value in
+      let rust_ty = const_operand.ty in
+      let textual_typ = ty_to_textual_typ crate rust_ty in
+      let exp = mk_const_exp rust_ty value in
+      (exp, textual_typ)
+
+
+let mk_exp_from_rvalue ~loc crate (rvalue : Charon.Generated_Expressions.rvalue)
+    (place_map : place_map_ty) : Textual.Exp.t * Textual.Typ.t =
+  match rvalue with
+  | UnaryOp (Cast cast_kind, operand) ->
+      let exp, _ = mk_exp_from_operand ~loc crate place_map operand in
+      let target_typ = cast_kind_to_textual_typ crate cast_kind in
+      let call = Textual.Exp.cast target_typ exp in
+      (call, target_typ)
+  | UnaryOp (op, operand) ->
+      let exp, typ = mk_exp_from_operand ~loc crate place_map operand in
+      let qualified_proc_name = proc_name_from_unop op in
+      let call = Textual.Exp.call_non_virtual qualified_proc_name [exp] in
+      (call, typ)
+  | BinaryOp (op, operand1, operand2) ->
+      let exp1, typ1 = mk_exp_from_operand ~loc crate place_map operand1 in
+      let exp2, _ = mk_exp_from_operand ~loc crate place_map operand2 in
+      let qualified_proc_name, typ_binop = proc_name_from_binop op typ1 in
+      let call = Textual.Exp.call_non_virtual qualified_proc_name [exp1; exp2] in
+      (call, typ_binop)
+  | RawPtr ({kind= PlaceLocal var_id; ty}, _) | RvRef ({kind= PlaceLocal var_id; ty}, _) ->
+      let typ = ty_to_textual_typ crate ty in
+      let exp = Textual.Exp.Lvar (place_map_find_id place_map var_id) in
+      (exp, Textual.Typ.mk_ptr typ)
+  | RawPtr (place, _) | RvRef (place, _) ->
+      let exp, typ = mk_exp_from_place ~loc crate place_map place in
+      (exp, Textual.Typ.mk_ptr typ)
+  | Aggregate (kind, ops) -> (
+      (* TODO: Handle non-empty aggregates as well *)
+      let exps = List.map ~f:(fun op -> mk_exp_from_operand ~loc crate place_map op |> fst) ops in
+      match (kind, exps) with
+      | AggregatedAdt (_, None, None), [] ->
+          (Textual.Exp.Const Textual.Const.Null, Textual.Typ.Void)
+      | _ ->
+          L.die UserError "Unsupported aggregate type: %a" Charon.Generated_Expressions.pp_rvalue
+            rvalue )
+  | Use op ->
+      mk_exp_from_operand ~loc crate place_map op
+  | _ ->
+      L.die UserError "Unsupported rvalue: %a" Charon.Generated_Expressions.pp_rvalue rvalue
+
+
+let mk_terminator (crate : Charon.UllbcAst.crate) (place_map : place_map_ty)
+    (terminator : Charon.Generated_UllbcAst.terminator) :
+    Textual.Instr.t list * Textual.Terminator.t =
+  let loc = location_from_span terminator.span in
+  match terminator.content with
+  | Charon.Generated_UllbcAst.Goto block_id ->
+      let label = mk_label (Charon.Generated_UllbcAst.BlockId.to_int block_id) in
+      let ssa_args = [] in
+      let node_call : Textual.Terminator.node_call = {label; ssa_args} in
+      ([], Textual.Terminator.Jump [node_call])
+  | Charon.Generated_UllbcAst.Return ->
+      let place = mk_return_place place_map in
+      let exp, _ = mk_exp_from_place_load ~loc crate place_map place in
+      ([], Textual.Terminator.Ret exp)
+  | Charon.Generated_UllbcAst.Switch (_operand, (SwitchInt (_, _, _) as switch)) ->
+      L.die UserError "Unsupported switch type: SwitchInt %a\n" Charon.Generated_UllbcAst.pp_switch
+        switch
+  | Charon.Generated_UllbcAst.Switch (operand, If (then_block_id, else_block_id)) ->
+      let exp, _ = mk_exp_from_operand ~loc crate place_map operand in
+      let then_label = mk_label (Charon.Generated_UllbcAst.BlockId.to_int then_block_id) in
+      let else_label = mk_label (Charon.Generated_UllbcAst.BlockId.to_int else_block_id) in
+      let bexp = Textual.BoolExp.Exp exp in
+      let then_node_call : Textual.Terminator.node_call = {label= then_label; ssa_args= []} in
+      let else_node_call : Textual.Terminator.node_call = {label= else_label; ssa_args= []} in
+      let then_ = Textual.Terminator.Jump [then_node_call] in
+      let else_ = Textual.Terminator.Jump [else_node_call] in
+      ([], Textual.Terminator.If {bexp; then_; else_})
+  | Charon.Generated_UllbcAst.Call (call, block_id_1, _) ->
+      let args_exps, _ =
+        List.map call.args ~f:(mk_exp_from_operand ~loc crate place_map) |> List.unzip
+      in
+      let proc_name = Textual.ProcName.of_string (fun_name_from_fun_operand crate call.func) in
+      let qualified_proc_name =
+        { Textual.QualifiedProcName.enclosing_class= Textual.QualifiedProcName.TopLevel
+        ; name= proc_name }
+      in
+      let dest_exp, dest_typ = mk_exp_from_place ~loc crate place_map call.dest in
+      let call_exp =
+        Textual.Exp.Call {proc= qualified_proc_name; args= args_exps; kind= Textual.Exp.NonVirtual}
+      in
+      let call_instr =
+        Textual.Instr.Store {exp1= dest_exp; exp2= call_exp; loc; typ= Some dest_typ}
+      in
+      let label = mk_label (Charon.Generated_UllbcAst.BlockId.to_int block_id_1) in
+      let ssa_args = [] in
+      let node_call : Textual.Terminator.node_call = {label; ssa_args} in
+      ([call_instr], Textual.Terminator.Jump [node_call])
+  | Charon.Generated_UllbcAst.UnwindResume ->
+      (* TODO: To be updated when error handling is being implemented *)
+      ([], Textual.Terminator.Unreachable)
+  | t ->
+      L.die UserError "Unsupported terminator: %a" Charon.Generated_UllbcAst.pp_raw_terminator t
+
+
+let mk_instr crate (place_map : place_map_ty) (statement : Charon.Generated_UllbcAst.statement) :
+    Textual.Instr.t list =
+  let loc = location_from_span statement.span in
+  match statement.content with
+  (* Unit type case *)
+  | Assign (lhs, Aggregate (AggregatedAdt (_, None, None), [])) ->
+      let exp1, _ = mk_exp_from_place ~loc crate place_map lhs in
+      let exp2, typ = (Textual.Exp.Const Textual.Const.Null, Textual.Typ.Void) in
+      let store_instr = Textual.Instr.Store {exp1; typ= Some typ; exp2; loc} in
+      [store_instr]
+  (* Structs *)
+  (* foo = Foo {x : 1; y: 2} -->
+    store &foo.Foo.x <- 1
+    store &foo.Foo.y <- 2
+  *)
+  | Assign (lhs, Aggregate (AggregatedAdt ({id= TAdtId type_decl_id}, _, _), ops)) -> (
+      let lexp, _ = mk_exp_from_place ~loc crate place_map lhs in
+      let rvalues = List.map ~f:(mk_exp_from_operand ~loc crate place_map) ops in
+      let type_decl = type_decl_map_find_id crate type_decl_id in
+      let enclosing_class_name =
+        Textual.TypeName.of_string (item_meta_to_string crate type_decl.item_meta)
+      in
+      match type_decl.kind with
+      | Struct fields ->
+          List.mapi rvalues ~f:(fun idx (exp, typ) ->
+              let field = List.nth fields idx in
+              let field =
+                match field with
+                | Some field ->
+                    field
+                | None ->
+                    L.die UserError "Field not found in: %s"
+                      (item_meta_to_string crate type_decl.item_meta)
+              in
+              let field_name = name_of_field field idx in
+              let field = {Textual.enclosing_class= enclosing_class_name; name= field_name} in
+              let field_exp = Textual.Exp.Field {exp= lexp; field} in
+              Textual.Instr.Store {exp1= field_exp; typ= Some typ; exp2= exp; loc} )
+      | __ ->
+          L.die UserError "Unsupported TAdtId kind: %a" Charon.Generated_Types.pp_type_decl_kind
+            type_decl.kind )
+  (* Tuples *)
+  | Assign
+      ( ({ty= TAdt {id= TTuple; generics}} as lhs)
+      , Aggregate (AggregatedAdt ({id= TTuple; _}, _, _), ops) ) ->
+      let lhexp, _ = mk_exp_from_place ~loc crate place_map lhs in
+      let rvalues = List.map ~f:(mk_exp_from_operand ~loc crate place_map) ops in
+      let tuple_type_name = mk_tuple_type_name crate generics.types in
+      List.mapi rvalues ~f:(fun idx (exp, typ) ->
+          let name = Textual.FieldName.of_string (Int.to_string idx) in
+          let field = {Textual.enclosing_class= tuple_type_name; name} in
+          let field_exp = Textual.Exp.Field {exp= lhexp; field} in
+          Textual.Instr.Store {exp1= field_exp; typ= Some typ; exp2= exp; loc} )
+  (* Arrays *)
+  | Assign (lhs, Aggregate (AggregatedArray (_, _), ops)) ->
+      let lhexp, _ = mk_exp_from_place ~loc crate place_map lhs in
+      let rvalues = List.map ~f:(mk_exp_from_operand ~loc crate place_map) ops in
+      List.mapi rvalues ~f:(fun i (exp, typ) ->
+          let index_exp =
+            Textual.Exp.Index (lhexp, Textual.Exp.Const (Textual.Const.Int (Z.of_int i)))
+          in
+          Textual.Instr.Store {exp1= index_exp; typ= Some typ; exp2= exp; loc} )
+  | Assign (lhs, rhs) ->
+      let exp1, _ = mk_exp_from_place ~loc crate place_map lhs in
+      let exp2, typ = mk_exp_from_rvalue ~loc crate rhs place_map in
+      let store_instr = Textual.Instr.Store {exp1; typ= Some typ; exp2; loc} in
+      [store_instr]
+  | StorageDead _ ->
+      []
+  | StorageLive _ ->
+      []
+  | s ->
+      L.die UserError "Unsupported statement: %a" Charon.Generated_UllbcAst.pp_raw_statement s
+
+
+let mk_procdecl crate (proc : Charon.UllbcAst.fun_decl) : Textual.ProcDecl.t =
+  let qualified_name = mk_qualified_proc_name crate proc.item_meta in
+  let result_type =
+    Textual.Typ.mk_without_attributes (ty_to_textual_typ crate proc.signature.output)
+  in
+  let param_types = List.map proc.signature.inputs ~f:(ty_to_textual_typ crate) in
+  let formals_types = Some (List.map param_types ~f:Textual.Typ.mk_without_attributes) in
+  let attributes = [] in
+  {Textual.ProcDecl.qualified_name; formals_types; result_type; attributes}
+
+
+let mk_node (crate : Charon.UllbcAst.crate) (idx : int) (block : Charon.Generated_UllbcAst.block)
+    (place_map : place_map_ty) : Textual.Node.t =
+  let label = mk_label idx in
+  let ssa_parameters = [] in
+  let exn_succs = [] in
+  let instrs = block.statements |> List.concat_map ~f:(mk_instr crate place_map) in
+  let term_instr, last = mk_terminator crate place_map block.terminator in
+  let instrs = instrs @ term_instr in
+  let last_loc = location_from_span block.terminator.span in
+  let label_loc = Textual.Location.Unknown in
+  {Textual.Node.label; ssa_parameters; exn_succs; last; instrs; last_loc; label_loc}
+
+
+let mk_typedesc (crate : Charon.UllbcAst.crate) (type_decl : Charon.Generated_Types.type_decl) :
+    Textual.Struct.t =
+  let enclosing_class_name = item_meta_to_string crate type_decl.item_meta in
+  match type_decl.kind with
+  | Struct fields | Union fields ->
+      let fields =
+        List.mapi fields ~f:(fun idx (field : Charon.Generated_Types.field) ->
+            let field_name = name_of_field field idx in
+            let field_typ = ty_to_textual_typ crate field.field_ty in
+            let qualified_fieldname : Textual.qualified_fieldname =
+              {enclosing_class= Textual.TypeName.of_string enclosing_class_name; name= field_name}
+            in
+            {Textual.FieldDecl.qualified_name= qualified_fieldname; typ= field_typ; attributes= []} )
+      in
+      let type_name = Textual.TypeName.of_string enclosing_class_name in
+      {Textual.Struct.name= type_name; supers= []; fields; attributes= []}
+  | Enum _ ->
+      (* TODO: Implement enum type *)
+      L.die UserError "Unsupported type Enum: %s\n" (item_meta_to_string crate type_decl.item_meta)
+  | _ ->
+      L.die UserError "Unsupported type kind: %a@\n%s@\n" Charon.Generated_Types.pp_type_decl_kind
+        type_decl.kind
+        (item_meta_to_string crate type_decl.item_meta)
+
+
+let mk_procdesc (crate : Charon.UllbcAst.crate)
+    (proc : Charon.GAst.fun_decl_id * Charon.UllbcAst.blocks Charon.GAst.gfun_decl) :
+    Textual.ProcDesc.t =
+  let _, fun_decl = proc in
+  let blocks, locals, arg_count =
+    match fun_decl.body with
+    | Some {span= _; locals; body} ->
+        (body, locals.locals, locals.arg_count)
+    | None ->
+        ([], [], 0)
+  in
+  let place_map = mk_place_map locals in
+  let fresh_ident = None in
+  let procdecl = mk_procdecl crate fun_decl in
+  let nodes = List.mapi blocks ~f:(fun i block -> mk_node crate i block place_map) in
+  let start = mk_label 0 in
+  let params = params_from_fun_decl fun_decl arg_count in
+  let locals = mk_locals crate locals arg_count place_map in
+  let exit_loc = location_from_span_end fun_decl.item_meta.span in
+  {Textual.ProcDesc.procdecl; fresh_ident; nodes; start; params; locals; exit_loc}
+
+
+(* If this local is a tuple type, create a tuple struct with the indices as field names. *)
+let mk_tuple_type crate (local : Charon.Generated_GAst.local) =
+  let var_ty = local.var_ty in
+  match var_ty with
+  (* Unit Type *)
+  | TAdt {id= TTuple; generics= {types= []}} ->
+      None
+  | TAdt {id= TTuple; generics} ->
+      let tuple_type_name = mk_tuple_type_name crate generics.types in
+      let fields =
+        generics.types
+        |> List.mapi ~f:(fun i typ ->
+               let attributes = [] in
+               let name = Textual.FieldName.of_string (Int.to_string i) in
+               let qualified_name = {Textual.enclosing_class= tuple_type_name; name} in
+               let typ = ty_to_textual_typ crate typ in
+               {Textual.FieldDecl.typ; qualified_name; attributes} )
+      in
+      Some {Textual.Struct.name= tuple_type_name; supers= []; fields; attributes= []}
+  | _ ->
+      None
+
+
+let mk_tuple_decl (crate : Charon.UllbcAst.crate)
+    (proc : Charon.GAst.fun_decl_id * Charon.UllbcAst.blocks Charon.GAst.gfun_decl) =
+  let _, fun_decl = proc in
+  let locals = match fun_decl.body with Some {locals} -> locals.locals | None -> [] in
+  List.filter_map locals ~f:(mk_tuple_type crate)
+
+
+(* Compare tuple declarations so that it is possible to filter out duplicates *)
+let compare (struct1 : Textual.Struct.t) (struct2 : Textual.Struct.t) =
+  let name = Textual.TypeName.compare struct1.name struct2.name in
+  if Int.( <> ) name 0 then name
+  else
+    List.compare
+      (fun (field1 : Textual.FieldDecl.t) (field2 : Textual.FieldDecl.t) ->
+        String.compare
+          (Format.asprintf "%a" Textual.Typ.pp field1.typ)
+          (Format.asprintf "%a" Textual.Typ.pp field2.typ) )
+      struct1.fields struct2.fields
+
+
+let mk_module (crate : Charon.UllbcAst.crate) ~file_name : Textual.Module.t =
+  let fun_decls = crate.fun_decls in
+  let attrs = [Textual.Attr.mk_source_language Rust] in
+  let type_decls =
+    Charon.Generated_Types.TypeDeclId.Map.bindings crate.type_decls
+    |> List.map ~f:(fun (_, type_decl) -> mk_typedesc crate type_decl)
+    |> List.map ~f:(fun s -> Textual.Module.Struct s)
+  in
+  let proc_decls =
+    Charon.Generated_Types.FunDeclId.Map.bindings fun_decls
+    |> List.map ~f:(fun proc -> Textual.Module.Proc (mk_procdesc crate proc))
+  in
+  (* The crate does not store tuple types in it declerations
+    so we need to extract the tuples from the locals of the functions.
+  *)
+  let tuple_decls =
+    Charon.Generated_Types.FunDeclId.Map.bindings crate.fun_decls
+    |> List.map ~f:(mk_tuple_decl crate)
+    |> List.concat |> List.dedup_and_sort ~compare
+    |> List.map ~f:(fun strct -> Textual.Module.Struct strct)
+  in
+  let decls = type_decls @ proc_decls @ tuple_decls in
+  let sourcefile = Textual.SourceFile.create file_name in
+  {Textual.Module.attrs; decls; sourcefile}

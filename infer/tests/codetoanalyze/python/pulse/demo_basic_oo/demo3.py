@@ -3,7 +3,8 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
-#InferPython now supports single inheritance
+# InferPython now supports single inheritance
+
 
 class Animal:
     def can_quack(self):
