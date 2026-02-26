@@ -186,8 +186,6 @@ val capture_llair : string option
 
 val capture_textual : string list
 
-val capture_rust_ullbc : string list
-
 val censor_report : ((bool * Str.regexp) * (bool * Str.regexp) * string) list
 
 val cfg_json : string option
@@ -590,11 +588,9 @@ val pulse_final_types_are_exact : bool
 
 val pulse_force_continue : bool
 
-val pulse_eternal : bool
-
 val pulse_experimental_infinite_loop_checker : bool
 
-val pulse_experimental_track_all_unknown_calls : bool
+val pulse_experimental_infinite_loop_checker_v2 : bool
 
 val pulse_havoc_arguments : bool
 
@@ -683,8 +679,6 @@ val pulse_retain_cycle_blocklist_pattern : Str.regexp option
 val pulse_sanity_checks : bool
 
 val pulse_skip_procedures : Str.regexp option
-
-val pulse_specialization_abort_if_impossible : bool
 
 val pulse_specialization_iteration_limit : int
 
@@ -810,14 +804,6 @@ val semdiff_current : string option
 
 val semdiff_previous : string option
 
-val semdiff_test_show_syntax_errors : bool
-
-val semdiff_experimental_eqsat_engine : bool
-
-val semdiff_configuration : string option
-
-val semdiff_test_actions : [`Normalize | `Currify] list
-
 val semdiff_test_files_index : string option
 
 val shrink_analysis_db : bool
@@ -903,8 +889,6 @@ val tenv_json : string option
 val tenvs_lru_max_size : int
 
 val testing_mode : bool
-
-val textual_sil_keep_going : bool
 
 val threadsafe_aliases : Yojson.Safe.t
 

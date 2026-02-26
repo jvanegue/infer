@@ -6,32 +6,28 @@
  *)
 open! IStd
 module F = Format
-module L = Logging
 
-type t = {mangled: string; plain_name: string option [@ignore]}
+type t = {classname: string; plain_name: string option [@ignore]}
 [@@deriving compare, equal, yojson_of, sexp, hash, normalize]
 
-let mangled {mangled} = mangled
-
-let pp fmt t = F.pp_print_string fmt (mangled t)
-
-let pp_full fmt {plain_name; mangled} =
+let pp fmt {plain_name; classname} =
   match plain_name with
   | Some plain_name ->
-      F.fprintf fmt "%s [%s]" plain_name mangled
+      F.fprintf fmt "%s" plain_name
   | None ->
-      F.pp_print_string fmt mangled
+      F.fprintf fmt "%s" classname
 
 
-let pp_plain_name fmt {plain_name; mangled} =
-  F.pp_print_string fmt (Option.value plain_name ~default:mangled)
+let pp_full fmt {plain_name; classname} =
+  match plain_name with
+  | Some plain_name ->
+      F.fprintf fmt "%s [%s]" plain_name classname
+  | None ->
+      F.pp_print_string fmt classname
 
+
+let classname {classname} = classname
 
 let to_string = Pp.string_of_pp pp
 
-let of_string ?plain_name mangled =
-  match plain_name with
-  | Some "" ->
-      L.die InternalError "Swift classname was given empty plain name for %s" mangled
-  | _ ->
-      {mangled; plain_name}
+let of_string ?plain_name classname = {classname; plain_name}

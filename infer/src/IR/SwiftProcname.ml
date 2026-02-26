@@ -9,14 +9,7 @@ open! IStd
 module F = Format
 include PpDetailLevel
 
-type builtin =
-  | DerivedEnumEquals
-  | DynamicCall
-  | InitTuple
-  | Memcpy
-  | NonDet
-  | ObjcMsgSend
-  | ObjcMsgSendSuper2
+type builtin = NonDet | InitTuple | DynamicCall
 [@@deriving compare, equal, yojson_of, sexp, hash, normalize, enumerate]
 
 type t =
@@ -38,14 +31,6 @@ let show_builtin = function
       "llvm_init_tuple"
   | DynamicCall ->
       "llvm_dynamic_call"
-  | DerivedEnumEquals ->
-      "__derived_enum_equals"
-  | ObjcMsgSend ->
-      "objc_msgSend"
-  | ObjcMsgSendSuper2 ->
-      "objc_msgSendSuper2"
-  | Memcpy ->
-      "memcpy"
 
 
 let get_function_name osig =
@@ -58,27 +43,18 @@ let get_function_name osig =
       Mangled.from_string (show_builtin builtin)
 
 
-let pp_plain_class_name fmt proc_name =
-  match proc_name with
-  | ClassMethod {class_name= Typ.SwiftClass name} ->
-      SwiftClassName.pp_plain_name fmt name
-  | _ ->
-      ()
-
-
-let pp verbosity fmt proc_name =
+let pp verbosity fmt osig =
   let sep = "." in
-  match proc_name with
+  match osig with
   | ClassMethod osig -> (
     match verbosity with
     | Simple ->
         F.pp_print_string fmt (Mangled.to_string osig.method_name)
     | Non_verbose | NameOnly | FullNameOnly ->
-        F.fprintf fmt "%a%s%s" pp_plain_class_name proc_name sep
+        F.fprintf fmt "%s%s%s" (Typ.Name.name osig.class_name) sep
           (Mangled.to_string osig.method_name)
     | Verbose ->
-        F.fprintf fmt "%s%s%a" (Typ.Name.name osig.class_name) sep Mangled.pp_full osig.method_name
-    )
+        F.fprintf fmt "%s%s%a" (Typ.Name.name osig.class_name) sep Mangled.pp osig.method_name )
   | Function osig -> (
     match verbosity with
     | Simple | Non_verbose | NameOnly | FullNameOnly ->
@@ -93,6 +69,3 @@ let builtin_from_string =
   let tbl = IString.Hash.create 100 in
   List.iter all_of_builtin ~f:(fun builtin -> IString.Hash.add tbl (show_builtin builtin) builtin) ;
   fun str -> IString.Hash.find_opt tbl str
-
-
-let to_string osig = Format.asprintf "%a" (pp Simple) osig

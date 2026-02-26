@@ -990,7 +990,7 @@ and translate_comprehension_loop (env : (_, _) Env.t) loop_body qualifiers : Blo
   let apply_one_qualifier (qual : Ast.qualifier) (acc : Block.t) : Block.t =
     (* Helper function for the common parts of list/map generators, namely taking elements from
        the list one-by-one in a loop (maps are also converted to lists). *)
-    let make_gen gen_var (init_block : Block.t) mk_matcher strict : Block.t =
+    let make_gen gen_var (init_block : Block.t) mk_matcher : Block.t =
       (* Check if there are still elements in the generator *)
       let is_cons_id = mk_fresh_id () in
       let check_cons_node =
@@ -1012,10 +1012,7 @@ and translate_comprehension_loop (env : (_, _) Env.t) loop_body qualifiers : Blo
       is_cons_node |~~> [unpack_node] ;
       unpack_node |~~> [head_matcher.start] ;
       head_matcher.exit_success |~~> [acc.start] ;
-      if strict then
-        let _ = add_crash_node env head_matcher BuiltinDecl.__erlang_error_badmatch in
-        ()
-      else head_matcher.exit_failure |?~> [join_node] ;
+      head_matcher.exit_failure |?~> [join_node] ;
       {start= init_block.start; exit_success= no_cons_node; exit_failure}
     in
     let make_gen_checker id types =
@@ -1036,13 +1033,13 @@ and translate_comprehension_loop (env : (_, _) Env.t) loop_body qualifiers : Blo
         filter_expr_block.exit_success |~~> [true_node; false_node] ;
         true_node |~~> [acc.start] ;
         {start= filter_expr_block.start; exit_success; exit_failure}
-    | Generator {pattern; expression; strict} ->
+    | Generator {pattern; expression} ->
         let gen_var, init_block = translate_expression_to_fresh_id env expression in
         let check_block = make_gen_checker gen_var [Nil; Cons] in
         let init_block = Block.all env [init_block; check_block] in
         let mk_matcher head_var = translate_pattern env head_var pattern in
-        make_gen gen_var init_block mk_matcher strict
-    | MapGenerator {pattern; expression; strict} ->
+        make_gen gen_var init_block mk_matcher
+    | MapGenerator {pattern; expression} ->
         let gen_var = mk_fresh_id () in
         let init_block =
           (* Turn the generator map into a list of {key, val} pairs *)
@@ -1070,7 +1067,7 @@ and translate_comprehension_loop (env : (_, _) Env.t) loop_body qualifiers : Blo
           key_val_load |~~> [matcher.start] ;
           {matcher with start= key_val_load}
         in
-        make_gen gen_var init_block mk_matcher strict
+        make_gen gen_var init_block mk_matcher
     | BitsGenerator _ ->
         let unsupported = call_unsupported "bits_generator" 0 in
         let call_instr = builtin_call env (mk_fresh_id ()) unsupported [] in

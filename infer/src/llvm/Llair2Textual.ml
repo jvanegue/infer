@@ -9,31 +9,13 @@ open! IStd
 open Llair
 module F = Format
 module Type = Llair2TextualType
-module TypeName = Llair2TextualTypeName
-module Field = Llair2TextualField
 module L = Logging
-module State = Llair2TextualState
-module ModuleState = Llair2TextualState.ModuleState
-module ProcState = Llair2TextualState.ProcState
+module ProcState = Llair2TextualProcState
 module VarMap = Textual.VarName.Map
 module IdentMap = Textual.Ident.Map
-
-type module_state = ModuleState.t
-
-let witness_protocol_suffix = "WP"
-
-let class_virtual_table_suffix = "Mf"
+module RegMap = Llair.Exp.Reg.Map
 
 let swift_weak_assign = Textual.ProcName.of_string "swift_weakAssign"
-
-let llvm_dynamic_call = Textual.ProcName.of_string "llvm_dynamic_call"
-
-let derived_enum_equals = "__derived_enum_equals"
-
-let functions_to_skip =
-  List.map ~f:Textual.ProcName.of_string
-    ["swift_unknownObjectRetain"; "swift_weakLoadStrong"; "swift_bridgeObjectRetain"]
-
 
 let get_alloc_class_name =
   let alloc_object = Textual.ProcName.of_string "swift_allocObject" in
@@ -43,24 +25,9 @@ let get_alloc_class_name =
     else None
 
 
-let builtin_qual_proc_name =
-  let enclosing_class = Textual.(QualifiedProcName.Enclosing (TypeName.of_string "$builtins")) in
-  fun name : Textual.QualifiedProcName.t -> {enclosing_class; name= Textual.ProcName.of_string name}
-
-
-let undef_proc_name = builtin_qual_proc_name "llvm_nondet"
-
-let is_closure lang s = Textual.Lang.is_swift lang && String.is_substring ~substring:"fU" s
-
-let is_protocol_witness_optional_deinit_copy lang mangled_name =
-  let suffixes = ["WOd"; "WOb"; "WOc"] in
-  Textual.Lang.is_swift lang
-  && List.exists ~f:(fun s -> String.is_suffix ~suffix:s mangled_name) suffixes
-  && String.is_substring ~substring:"_p" mangled_name
-
-
-let to_proc_name_closure_name s =
-  Textual.QualifiedProcName.{enclosing_class= TopLevel; name= Textual.ProcName.of_string s}
+let builtin_qual_proc_name name : Textual.QualifiedProcName.t =
+  { enclosing_class= Enclosing (Textual.TypeName.of_string "$builtins")
+  ; name= Textual.ProcName.of_string name }
 
 
 module Var = struct
@@ -69,55 +36,48 @@ module Var = struct
     match Int.of_string_opt name with Some i -> Format.sprintf "var%d" (i + 1) | None -> name
 
 
-  let reg_to_var_name reg =
-    let id = Reg.id reg in
-    let mangled = Mangled.mangled (string_name_of_reg reg) (Int.to_string id) in
-    Textual.VarName.of_mangled mangled
+  let reg_to_var_name reg = Textual.VarName.of_string (string_name_of_reg reg)
 
-
-  let reg_to_id ~(proc_state : ProcState.t) reg =
+  let reg_to_id ~proc_state reg =
     let id = ProcState.mk_fresh_id ~reg proc_state in
     let reg_typ =
-      Type.to_textual_typ proc_state.module_state.lang
-        ~mangled_map:proc_state.module_state.mangled_map
-        ~struct_map:proc_state.module_state.struct_map (Reg.typ reg)
+      Type.to_textual_typ proc_state.ProcState.lang ~struct_map:proc_state.ProcState.struct_map
+        (Reg.typ reg)
     in
     (id, reg_typ)
 
 
   let add_fresh_id ~proc_state () = ProcState.mk_fresh_id proc_state
 
-  let find_formal_type ~(proc_state : ProcState.t) reg_var_name =
-    Textual.VarName.Hashtbl.find_opt proc_state.local_map reg_var_name
-
-
   let reg_to_textual_var ~(proc_state : ProcState.t) reg =
     let reg_var_name = reg_to_var_name reg in
     match VarMap.find_opt reg_var_name proc_state.formals with
-    | Some {typ= annot_typ; assoc_local= Some local} ->
-        (Textual.Exp.Lvar local, Some annot_typ.Textual.Typ.typ)
-    | Some {typ= annot_typ; assoc_local= None} ->
-        ProcState.update_formals ~proc_state reg_var_name (annot_typ, None) ProcState.Read ;
-        (Textual.Exp.Lvar reg_var_name, Some annot_typ.Textual.Typ.typ)
-    | None when VarMap.mem reg_var_name proc_state.locals ->
-        (Textual.Exp.Lvar reg_var_name, find_formal_type ~proc_state reg_var_name)
+    | Some (_, Some local) ->
+        Textual.Exp.Lvar local
+    | Some (_, None) ->
+        Textual.Exp.Lvar reg_var_name
     | None ->
-        (Textual.Exp.Var (reg_to_id ~proc_state reg |> fst), None)
+        if VarMap.mem reg_var_name proc_state.locals then Textual.Exp.Lvar reg_var_name
+        else Textual.Exp.Var (reg_to_id ~proc_state reg |> fst)
 
 
   let reg_to_annot_typ lang ~struct_map reg =
-    Type.to_annotated_textual_typ_without_mangled_map lang ~struct_map (Reg.typ reg)
+    Type.to_annotated_textual_typ lang ~struct_map (Reg.typ reg)
 end
 
 let to_textual_loc ?proc_state {Loc.line; col} =
   if Int.equal line 0 && Int.equal col 0 then
     let line =
-      if Config.frontend_tests then State.get_fresh_fake_line ()
+      if Config.frontend_tests then ProcState.get_fresh_fake_line ()
       else
         match proc_state with
-        | Some ProcState.{loc= Known {line= proc_line; _}} ->
-            proc_line
-        | _ ->
+        | Some proc_state -> (
+          match proc_state.ProcState.loc with
+          | Textual.Location.Known {line= proc_line; _} ->
+              proc_line
+          | _ ->
+              line )
+        | None ->
             line
     in
     Textual.Location.Known {line; col}
@@ -146,10 +106,10 @@ let build_globals_map globals =
   List.fold ~f:add_global globals ~init:Textual.VarName.Map.empty
 
 
-let to_qualified_proc_name ?loc method_class_index func_name =
+let to_qualified_proc_name ?loc func_name =
   let proc_name = Textual.ProcName.of_string ?loc func_name in
   let enclosing_class =
-    match Textual.ProcName.Hashtbl.find_opt method_class_index proc_name with
+    match Textual.ProcName.Map.find_opt proc_name !ProcState.method_class_index with
     | Some class_name ->
         Textual.QualifiedProcName.Enclosing class_name
     | None ->
@@ -162,19 +122,12 @@ let to_name_attr func_name =
   Option.map ~f:Textual.Attr.mk_plain_name (FuncName.unmangled_name func_name)
 
 
-let to_formal_types lang signature_structs ~struct_map func =
+let to_formal_types lang ~struct_map func =
   let to_textual_formal_type formal_type = Var.reg_to_annot_typ lang ~struct_map formal_type in
   let to_textual_formal_signature_type formal formal_type =
-    let signature_type = Type.signature_type_to_textual_typ signature_structs lang formal_type in
-    let signature_type = Option.map ~f:Textual.Typ.mk_without_attributes signature_type in
-    let internal_typ = to_textual_formal_type formal in
-    (* we need this check because sometimes llvm changes the types of the parameters to be primitive
-    types instead of objects *)
-    match signature_type with
-    | Some signature_type when Type.is_compatible internal_typ.typ signature_type.typ ->
-        signature_type
-    | _ ->
-        internal_typ
+    let typ = Type.signature_type_to_textual_typ lang formal_type in
+    let typ = Option.map ~f:Textual.Typ.mk_without_attributes typ in
+    match typ with Some typ -> typ | None -> to_textual_formal_type formal
   in
   let llair_formals = StdUtils.iarray_to_list func.Llair.formals in
   let llair_formals_types = StdUtils.iarray_to_list func.Llair.formals_types in
@@ -190,20 +143,37 @@ let to_formal_types lang signature_structs ~struct_map func =
       formals_
 
 
+let update_signature_types ~struct_map formal_types return_type =
+  let update_signature_type typ =
+    let typ =
+      Type.update_type
+        ~update_struct_name:(Type.update_signature_type struct_map)
+        typ.Textual.Typ.typ
+    in
+    Textual.Typ.mk_without_attributes typ
+  in
+  let update formal_types = List.map ~f:update_signature_type formal_types in
+  let formal_types = Option.map ~f:update formal_types in
+  let return_type = update_signature_type return_type in
+  (formal_types, return_type)
+
+
 let block_to_node_name block =
   let name = block.Llair.lbl in
   Textual.NodeName.of_string name
 
 
-let undef_exp ~sourcefile ~loc ?typ ~proc exp =
+let undef_proc_name = builtin_qual_proc_name "llvm_nondet"
+
+let undef_exp ~loc ?typ ~proc exp =
   let pp_typ fmt typ = Option.iter typ ~f:(fun typ -> F.fprintf fmt ":%a" Textual.Typ.pp typ) in
-  L.internal_error "Llair2Textual: unsupported exp: %a%a in proc %a in %a at %a@\n" Llair.Exp.pp exp
-    pp_typ typ Textual.QualifiedProcName.pp proc SourceFile.pp sourcefile Textual.Location.pp loc ;
+  L.internal_error "Llair2Textual: unsupported exp %a%a [%a:%a]@\n" Llair.Exp.pp exp pp_typ typ
+    Textual.QualifiedProcName.pp proc Textual.Location.pp loc ;
   (* TODO: should include the arguments here too *)
   (Textual.Exp.Call {proc= undef_proc_name; args= []; kind= NonVirtual}, typ, [])
 
 
-let to_textual_arith_exp_builtin ~loc ~sourcefile (op : Llair.Exp.op2) (typ : Llair.Typ.t) =
+let to_textual_arith_exp_builtin ~loc (op : Llair.Exp.op2) (typ : Llair.Typ.t) =
   let sil_binop : Binop.t option =
     match (op, typ) with
     | Add, Integer _ ->
@@ -227,8 +197,8 @@ let to_textual_arith_exp_builtin ~loc ~sourcefile (op : Llair.Exp.op2) (typ : Ll
   | Some binop ->
       Textual.ProcDecl.of_binop binop
   | None ->
-      L.internal_error "Llair2Textual: unsupported op2: %a in %a at %a@\n" Llair.Exp.pp_op2 op
-        SourceFile.pp sourcefile Textual.Location.pp loc ;
+      L.internal_error "Llair2Textual: unsupported op2 %a [%a]@\n" Llair.Exp.pp_op2 op
+        Textual.Location.pp loc ;
       undef_proc_name
 
 
@@ -245,7 +215,7 @@ let to_textual_bool_exp_builtin (op : Llair.Exp.op2) =
         Binop.Ge
     | Le ->
         Binop.Le
-    | Lt | Ult ->
+    | Lt ->
         Binop.Lt
     | And ->
         Binop.LAnd
@@ -265,127 +235,43 @@ let to_textual_bool_exp_builtin (op : Llair.Exp.op2) =
   Textual.ProcDecl.of_binop sil_bin_op
 
 
-let add_deref ~proc_state ?from_call exp loc =
-  let id = Var.add_fresh_id ~proc_state () in
+let add_deref ~proc_state exp loc =
   let add_load_instr =
+    let id = Var.add_fresh_id ~proc_state () in
     let instr = Textual.Instr.Load {id; exp; typ= None; loc} in
     ([instr], Textual.Exp.Var id)
   in
   match exp with
-  | Textual.Exp.Lvar var_name ->
-      ( if Option.is_some from_call then
-          let typ_opt = Var.find_formal_type ~proc_state var_name in
-          match typ_opt with
-          | Some typ ->
-              ProcState.update_ids_types ~proc_state id (Textual.Typ.mk_without_attributes typ)
-          | None ->
-              () ) ;
-      ProcState.update_ids_move ~proc_state id None ~loaded_var:true ~deref_needed:false ;
-      add_load_instr
-  | Textual.Exp.Field _ ->
+  | Textual.Exp.Lvar _ | Textual.Exp.Field _ ->
       add_load_instr
   | Textual.Exp.Var id -> (
-      let id_data = IdentMap.find_opt id proc_state.ProcState.ids_move in
-      match id_data with
-      | Some {loaded_var= true} ->
-          ([], exp)
-      | Some {deref_needed= true} ->
-          add_load_instr
-      | Some {typ= Some {typ= Textual.Typ.Ptr _}} ->
-          add_load_instr
-      | _ ->
-          ([], exp) )
+      let typ = IdentMap.find_opt id proc_state.ProcState.ids_move in
+      match typ with Some {typ= Textual.Typ.Ptr _} -> add_load_instr | _ -> ([], exp) )
   | _ ->
       ([], exp)
 
 
-let should_add_deref ~proc_state exp =
-  match exp with
-  | Textual.Exp.Lvar _ ->
-      true
-  | Textual.Exp.Field _ ->
-      true
-  | Textual.Exp.Var id -> (
-      let id_data = IdentMap.find_opt id proc_state.ProcState.ids_move in
-      match id_data with
-      | Some {loaded_var= true} ->
-          false
-      | Some {deref_needed= true} ->
-          true
-      | Some {typ= Some {typ= Textual.Typ.Ptr _}} ->
-          true
-      | _ ->
-          false )
-  | _ ->
-      false
-
-
-let update_id_return_type ~(proc_state : ProcState.t) proc id =
-  let proc_decl_opt =
-    Textual.QualifiedProcName.Map.find_opt proc proc_state.module_state.proc_map
-  in
+let update_id_return_type ~proc_state proc id =
+  let proc_decl_opt = Textual.QualifiedProcName.Map.find_opt proc proc_state.ProcState.proc_map in
   match (id, proc_decl_opt) with
-  | Some id, Some proc_decl ->
+  | Some id, Some proc_decl -> (
       let return_typ = proc_decl.Textual.ProcDecl.result_type in
-      ProcState.update_ids_types ~proc_state id return_typ
+      match return_typ.Textual.Typ.typ with
+      | Textual.Typ.(Ptr (Struct _ as struct_name))
+        when not (Textual.Typ.equal Textual.Typ.any_type_swift struct_name) ->
+          ProcState.update_ids_types ~proc_state id (Textual.Typ.mk_without_attributes struct_name)
+      | _ ->
+          () )
   | _ ->
       ()
 
 
-(* When translating a field access, if the variable is an optional protocol, we need to
-modify the type and field number to access the protocol value. *)
-let translate_optional_protocol_witness ~proc_state exp typ_name n =
-  let ModuleState.{struct_map; mangled_map; lang; _} = proc_state.ProcState.module_state in
-  let exp_typ =
-    match exp with
-    | Textual.Exp.Var ident when Int.equal n 3 -> (
-      match IdentMap.find_opt ident proc_state.ProcState.ids_move with
-      | Some id_data ->
-          Option.map ~f:(fun typ -> typ.Textual.Typ.typ) id_data.ProcState.typ
-      | None ->
-          None )
-    | _ ->
-        None
-  in
-  match exp_typ with
-  | Some (Textual.Typ.Ptr (Struct struct_name)) ->
-      let typ_name =
-        match Textual.TypeName.swift_mangled_name_of_type_name struct_name with
-        | Some name ->
-            let name =
-              let optional_protocol_suffix = "_pSg" in
-              if String.is_suffix name ~suffix:optional_protocol_suffix then
-                String.substr_replace_all ~pattern:optional_protocol_suffix ~with_:"P" name
-              else name
-            in
-            TypeName.struct_name_of_mangled_name lang ~mangled_map:(Some mangled_map) struct_map
-              name
-        | None ->
-            struct_name
-      in
-      (typ_name, 0)
-  | _ ->
-      (typ_name, n)
-
-
-let to_textual_not_exp op exp1 exp2 =
-  match op with
-  | Llair.Exp.Xor when Textual.Exp.is_one_exp exp1 ->
-      let proc = Textual.ProcDecl.of_unop Unop.LNot in
-      Some Textual.Exp.(Call {proc; args= [exp2]; kind= Textual.Exp.NonVirtual})
-  | Llair.Exp.Xor when Textual.Exp.is_one_exp exp2 ->
-      let proc = Textual.ProcDecl.of_unop Unop.LNot in
-      Some Textual.Exp.(Call {proc; args= [exp1]; kind= Textual.Exp.NonVirtual})
-  | _ ->
-      None
-
-
 let rec to_textual_exp ~(proc_state : ProcState.t) loc ?generate_typ_exp (exp : Llair.Exp.t) :
     Textual.Exp.t * Textual.Typ.t option * Textual.Instr.t list =
-  let ModuleState.{struct_map; mangled_map; lang; _} = proc_state.module_state in
+  let struct_map = proc_state.ProcState.struct_map in
   match exp with
   | Integer {data; typ} ->
-      let textual_typ = Type.to_textual_typ lang ~mangled_map ~struct_map typ in
+      let textual_typ = Type.to_textual_typ proc_state.lang ~struct_map typ in
       let textual_exp =
         if Option.is_some generate_typ_exp then Textual.Exp.Typ textual_typ
         else if NS.Z.is_false data && not (Llair.Typ.is_int typ) then Textual.Exp.Const Null
@@ -393,111 +279,52 @@ let rec to_textual_exp ~(proc_state : ProcState.t) loc ?generate_typ_exp (exp : 
       in
       (textual_exp, Some textual_typ, [])
   | Float {data; typ} ->
-      let textual_typ = Type.to_textual_typ lang ~mangled_map ~struct_map typ in
+      let textual_typ = Type.to_textual_typ proc_state.lang ~struct_map typ in
       let textual_exp =
         if Option.is_some generate_typ_exp then
-          Textual.Exp.Typ (Type.to_textual_typ lang ~mangled_map ~struct_map typ)
+          Textual.Exp.Typ (Type.to_textual_typ proc_state.lang ~struct_map typ)
         else Textual.Exp.Const (Float (Float.of_string data))
       in
       (textual_exp, Some textual_typ, [])
   | Nondet {typ} ->
-      let textual_typ = Type.to_textual_typ lang ~mangled_map ~struct_map typ in
-      undef_exp ~sourcefile:proc_state.sourcefile ~loc ~proc:proc_state.qualified_name
-        ~typ:textual_typ exp
+      let textual_typ = Type.to_textual_typ proc_state.lang ~struct_map typ in
+      undef_exp ~loc ~proc:proc_state.qualified_name ~typ:textual_typ exp
   | FuncName {name} ->
-      let s_exp = Textual.Exp.Const (Str name) in
-      let exp =
-        if is_closure lang name then
-          let proc =
-            Textual.QualifiedProcName.Map.find_opt (to_proc_name_closure_name name)
-              proc_state.module_state.ModuleState.proc_map
-          in
-          match proc with
-          | Some proc -> (
-            match proc.formals_types with
-            | Some formals ->
-                let params =
-                  List.mapi
-                    ~f:(fun i _ -> Textual.VarName.of_string (Format.sprintf "var%d" (i + 1)))
-                    formals
-                in
-                Textual.Exp.Closure
-                  {proc= to_proc_name_closure_name name; attributes= []; captured= []; params}
-            | _ ->
-                s_exp )
-          | None ->
-              s_exp
-        else s_exp
-      in
-      (exp, None, [])
+      (Textual.Exp.Const (Str name), None, [])
   | Reg {id; name; typ} ->
-      let textual_typ = Type.to_textual_typ lang ~mangled_map ~struct_map typ in
-      let textual_exp, var_typ = Var.reg_to_textual_var ~proc_state (Reg.mk typ id name) in
-      let typ =
-        match var_typ with
-        | Some var_typ
-          when (Textual.Typ.is_pointer textual_typ && not (Textual.Typ.is_pointer var_typ))
-               || not (Textual.Typ.is_pointer textual_typ && Textual.Typ.is_pointer var_typ) ->
-            textual_typ
-        | Some var_typ ->
-            var_typ
-        | _ ->
-            textual_typ
-      in
-      (textual_exp, Some typ, [])
-  | Global {name}
-    when String.is_suffix name ~suffix:witness_protocol_suffix
-         && Option.is_some
-              (Textual.TypeName.Map.find_opt (Textual.TypeName.mk_swift_type_name name) struct_map)
-    ->
-      let class_name =
-        TypeName.struct_name_of_mangled_name lang ~mangled_map:(Some mangled_map) struct_map name
-      in
-      let args = [Textual.Exp.Typ (Textual.Typ.Struct class_name)] in
-      let exp =
-        Textual.Exp.Call
-          {proc= Textual.ProcDecl.swift_alloc_name; args; kind= Textual.Exp.NonVirtual}
-      in
-      (exp, None, [])
-  | Global {name; typ} ->
-      let textual_typ = Type.to_textual_typ lang ~mangled_map ~struct_map typ in
-      let textual_exp, typ_opt =
-        let string_opt, typ_opt =
-          match
-            VarMap.find_opt (Textual.VarName.of_string name) proc_state.module_state.globals_map
-          with
-          | Some global ->
-              let string_opt =
-                Option.bind
-                  ~f:(fun (exp, _typ) -> Llair.Exp.string_of_exp exp)
-                  global.Llair.GlobalDefn.init
-              in
-              let typ_opt =
-                Option.map
-                  ~f:(fun (_, typ) -> Type.to_textual_typ lang ~mangled_map ~struct_map typ)
-                  global.Llair.GlobalDefn.init
-              in
-              (string_opt, typ_opt)
-          | None ->
-              (None, None)
-        in
-        match string_opt with
-        | Some s ->
-            (Textual.Exp.Const (Str s), typ_opt)
-        | None ->
-            (Textual.Exp.Lvar (Textual.VarName.of_string name), typ_opt)
-      in
-      let textual_typ = Option.value typ_opt ~default:textual_typ in
+      let textual_typ = Type.to_textual_typ proc_state.lang ~struct_map typ in
+      let textual_exp = Var.reg_to_textual_var ~proc_state (Reg.mk typ id name) in
       (textual_exp, Some textual_typ, [])
-  | Ap1 (Select offset, typ, llair_exp) -> (
+  | Global {name; typ; is_constant} ->
+      let textual_typ = Type.to_textual_typ proc_state.lang ~struct_map typ in
+      let textual_exp =
+        match textual_typ with
+        | Textual.Typ.Ptr _ when is_constant -> (
+            let string_opt =
+              match
+                VarMap.find_opt (Textual.VarName.of_string name) proc_state.ProcState.globals
+              with
+              | Some global ->
+                  Option.bind ~f:Llair.Exp.string_of_exp global.Llair.GlobalDefn.init
+              | None ->
+                  None
+            in
+            match string_opt with
+            | Some s ->
+                Textual.Exp.Const (Str s)
+            | None ->
+                Textual.Exp.Lvar (Textual.VarName.of_string name) )
+        | _ ->
+            Textual.Exp.Lvar (Textual.VarName.of_string name)
+      in
+      (textual_exp, Some textual_typ, [])
+  | Ap1 (Select n, typ, llair_exp) -> (
       let typ_name =
         match typ with
         | Struct {name} ->
-            Some
-              (TypeName.struct_name_of_mangled_name lang ~mangled_map:(Some mangled_map) struct_map
-                 name )
+            Some (Type.struct_name_of_mangled_name proc_state.lang struct_map name)
         | Tuple _ -> (
-          match Type.to_textual_typ lang ~mangled_map ~struct_map typ with
+          match Type.to_textual_typ proc_state.lang ~struct_map typ with
           | Textual.Typ.(Ptr (Struct name)) ->
               Some name
           | _ ->
@@ -507,13 +334,12 @@ let rec to_textual_exp ~(proc_state : ProcState.t) loc ?generate_typ_exp (exp : 
       in
       match typ_name with
       | None ->
-          undef_exp ~sourcefile:proc_state.sourcefile ~loc ~proc:proc_state.qualified_name exp
+          undef_exp ~loc ~proc:proc_state.qualified_name exp
       | Some typ_name ->
           let exp, _, exp_instrs = to_textual_exp loc ~proc_state llair_exp in
-          let typ_name, n = translate_optional_protocol_witness ~proc_state exp typ_name offset in
           let field =
-            if Llair.Typ.is_tuple typ && Int.equal n offset then Field.tuple_field_of_pos typ_name n
-            else Field.field_of_pos_with_map proc_state.module_state.field_offset_map typ_name n
+            if Llair.Typ.is_tuple typ then Type.tuple_field_of_pos typ_name n
+            else Type.field_of_pos typ_name n
           in
           let field_instrs, exp = add_deref ~proc_state exp loc in
           let instrs = List.append field_instrs exp_instrs in
@@ -523,18 +349,23 @@ let rec to_textual_exp ~(proc_state : ProcState.t) loc ?generate_typ_exp (exp : 
   | Ap1 (GetElementPtr n, _typ, _exp) ->
       let n_arg = Llair.Exp.integer (Llair.Typ.integer ~bits:32 ~byts:4) (Z.of_int n) in
       let exp, _, instrs = to_textual_exp loc ~proc_state n_arg in
-      let var_name = ProcState.mk_fresh_tmp_var State.get_element_ptr_offset_prefix proc_state in
+      let var_name =
+        ProcState.mk_fresh_tmp_var ProcState.get_element_ptr_offset_prefix proc_state
+      in
       let new_var = Textual.Exp.Lvar var_name in
-      ProcState.update_locals ~proc_state var_name (Textual.Typ.mk_without_attributes (Ptr Void)) ;
+      let _ =
+        proc_state.locals <-
+          VarMap.add var_name (Textual.Typ.mk_without_attributes (Ptr Void)) proc_state.locals
+      in
       ProcState.update_var_offset ~proc_state var_name n ;
       let store_instr = Textual.Instr.Store {exp1= new_var; exp2= exp; typ= None; loc} in
       (new_var, None, store_instr :: instrs)
   | Ap1 ((Convert _ | Signed _ | Unsigned _), dst_typ, exp) ->
       (* Signed is the translation of llvm's trunc and SExt and Unsigned is the translation of ZExt, all different types of cast,
-       and convert translates other types of cast *)
+         and convert translates other types of cast *)
       let exp, _, instrs = to_textual_exp loc ~proc_state exp in
       let deref_instrs, exp = add_deref ~proc_state exp loc in
-      let textual_dst_typ = Type.to_textual_typ lang ~mangled_map ~struct_map dst_typ in
+      let textual_dst_typ = Type.to_textual_typ proc_state.lang ~struct_map dst_typ in
       let proc = Textual.ProcDecl.cast_name in
       let instrs = List.append instrs deref_instrs in
       ( Call {proc; args= [Textual.Exp.Typ textual_dst_typ; exp]; kind= Textual.Exp.NonVirtual}
@@ -542,11 +373,11 @@ let rec to_textual_exp ~(proc_state : ProcState.t) loc ?generate_typ_exp (exp : 
       , instrs )
   | Ap1 (Splat, _, _) ->
       (* [splat exp] initialises every element of an array with the element exp, so to be precise it
-       needs to be translated as a loop. We translate here to a non-deterministic value for the array *)
+         needs to be translated as a loop. We translate here to a non-deterministic value for the array *)
       let proc = undef_proc_name in
       (Call {proc; args= []; kind= Textual.Exp.NonVirtual}, None, [])
   | Ap2 (((Add | Sub | Mul | Div | Rem) as op), typ, e1, e2) ->
-      let proc = to_textual_arith_exp_builtin ~loc ~sourcefile:proc_state.sourcefile op typ in
+      let proc = to_textual_arith_exp_builtin ~loc op typ in
       let exp1, typ1, exp1_instrs = to_textual_exp loc ~proc_state e1 in
       let deref_instrs1, exp1 = add_deref ~proc_state exp1 loc in
       let exp2, _, exp2_instrs = to_textual_exp loc ~proc_state e2 in
@@ -554,38 +385,30 @@ let rec to_textual_exp ~(proc_state : ProcState.t) loc ?generate_typ_exp (exp : 
       ( Call {proc; args= [exp1; exp2]; kind= Textual.Exp.NonVirtual}
       , typ1
       , deref_instrs1 @ exp1_instrs @ deref_instrs2 @ exp2_instrs )
-  | Ap2 (((Eq | Dq | Gt | Ge | Le | Lt | Ult | And | Or | Xor | Shl | Lshr | Ashr) as op), _, e1, e2)
-    ->
+  | Ap2 (((Eq | Dq | Gt | Ge | Le | Lt | And | Or | Xor | Shl | Lshr | Ashr) as op), _, e1, e2) ->
+      let proc = to_textual_bool_exp_builtin op in
       let exp1, typ1, exp1_instrs = to_textual_exp loc ~proc_state e1 in
       let deref_instrs1, exp1 = add_deref ~proc_state exp1 loc in
       let exp2, _, exp2_instrs = to_textual_exp loc ~proc_state e2 in
       let deref_instrs2, exp2 = add_deref ~proc_state exp2 loc in
-      let proc = to_textual_bool_exp_builtin op in
-      let exp =
-        match to_textual_not_exp op exp1 exp2 with
-        | Some exp ->
-            exp
-        | None ->
-            Textual.Exp.Call {proc; args= [exp1; exp2]; kind= Textual.Exp.NonVirtual}
-      in
-      (exp, typ1, deref_instrs1 @ exp1_instrs @ deref_instrs2 @ exp2_instrs)
+      ( Call {proc; args= [exp1; exp2]; kind= Textual.Exp.NonVirtual}
+      , typ1
+      , deref_instrs1 @ exp1_instrs @ deref_instrs2 @ exp2_instrs )
   | Ap2 (Update idx, typ, rcd, elt) ->
       let rcd_exp, _, rcd_instrs = to_textual_exp loc ~proc_state rcd in
       let elt_exp, _, elt_instrs = to_textual_exp loc ~proc_state elt in
       let elt_deref_instrs, elt_exp_deref = add_deref ~proc_state elt_exp loc in
       let elt_instrs = List.append elt_instrs elt_deref_instrs in
-      let textual_typ = Type.to_textual_typ lang ~mangled_map ~struct_map typ in
+      let textual_typ = Type.to_textual_typ proc_state.lang ~struct_map typ in
       let type_name =
         match textual_typ with
         | Textual.Typ.(Ptr (Struct name)) ->
             name
         | _ ->
-            L.internal_error "Llair2Textual: unexpected type %a in %a at %a" Textual.Typ.pp
-              textual_typ SourceFile.pp proc_state.sourcefile Textual.Location.pp loc ;
-            Textual.TypeName.mk_swift_type_name Textual.BaseTypeName.swift_any_type_name.value
+            L.die InternalError "Llair2Textual: unexpected type %a" Textual.Typ.pp textual_typ
       in
       let index_exp =
-        Textual.Exp.Field {exp= rcd_exp; field= Field.tuple_field_of_pos type_name idx}
+        Textual.Exp.Field {exp= rcd_exp; field= Type.tuple_field_of_pos type_name idx}
       in
       let store_instr =
         Textual.Instr.Store {exp1= index_exp; exp2= elt_exp_deref; typ= None; loc}
@@ -598,7 +421,7 @@ let rec to_textual_exp ~(proc_state : ProcState.t) loc ?generate_typ_exp (exp : 
       let exp = Textual.Exp.If {cond= cond_exp; then_= then_exp; else_= else_exp} in
       (exp, None, cond_instrs @ then_instrs @ else_instrs)
   | ApN (Record, typ, _elements) -> (
-      let textual_typ = Type.to_textual_typ lang ~mangled_map ~struct_map typ in
+      let textual_typ = Type.to_textual_typ proc_state.lang ~struct_map typ in
       let type_name_opt =
         match textual_typ with
         | Textual.Typ.(Ptr (Struct name)) | Textual.Typ.Struct name ->
@@ -609,7 +432,7 @@ let rec to_textual_exp ~(proc_state : ProcState.t) loc ?generate_typ_exp (exp : 
       in
       match type_name_opt with
       | None ->
-          undef_exp ~sourcefile:proc_state.sourcefile ~loc ~proc:proc_state.qualified_name exp
+          undef_exp ~loc ~proc:proc_state.qualified_name exp
       | Some type_name ->
           let elements = StdUtils.iarray_to_list _elements in
           let id = Var.add_fresh_id ~proc_state () in
@@ -625,9 +448,8 @@ let rec to_textual_exp ~(proc_state : ProcState.t) loc ?generate_typ_exp (exp : 
             let elt_deref_instrs, elt_exp_deref = add_deref ~proc_state elt_exp loc in
             let elt_instrs = List.append elt_instrs elt_deref_instrs in
             let field =
-              if Llair.Typ.is_tuple typ then Field.tuple_field_of_pos type_name idx
-              else
-                Field.field_of_pos_with_map proc_state.module_state.field_offset_map type_name idx
+              if Llair.Typ.is_tuple typ then Type.tuple_field_of_pos type_name idx
+              else Type.field_of_pos type_name idx
             in
             let index_exp = Textual.Exp.Field {exp= rcd_exp; field} in
             let store_instr =
@@ -638,7 +460,7 @@ let rec to_textual_exp ~(proc_state : ProcState.t) loc ?generate_typ_exp (exp : 
           let instrs = rcd_store_instr :: List.foldi ~f:to_textual_exp_index ~init:[] elements in
           (rcd_exp, Some textual_typ, instrs) )
   | _ ->
-      undef_exp ~sourcefile:proc_state.sourcefile ~loc ~proc:proc_state.qualified_name exp
+      undef_exp ~loc ~proc:proc_state.qualified_name exp
 
 
 and to_textual_bool_exp ~proc_state loc exp =
@@ -646,118 +468,47 @@ and to_textual_bool_exp ~proc_state loc exp =
   (Textual.BoolExp.Exp textual_exp, textual_typ_opt, instrs)
 
 
-and resolve_method_call ~proc_state proc args =
-  match args with
-  | Textual.Exp.Var id_offset :: args -> (
-    match (proc_state.ProcState.id_offset, List.last args) with
-    | Some (proc_state_id_offset, offset), Some (Textual.Exp.Var self_id)
-      when Textual.Ident.equal proc_state_id_offset id_offset
-           && Textual.ProcName.equal (Textual.QualifiedProcName.name proc) llvm_dynamic_call -> (
-      match State.IdentMap.find_opt self_id proc_state.ProcState.ids_types with
-      | Some {typ= Textual.Typ.Ptr (Textual.Typ.Struct struct_name as inner_typ)}
-        when not (Textual.Typ.equal Textual.Typ.any_type_swift inner_typ) -> (
-        match ProcState.find_method_with_offset ~proc_state struct_name offset with
-        | Some proc_name ->
-            ProcState.reset_offsets ~proc_state ;
-            Some (Textual.Exp.Call {proc= proc_name; args; kind= Textual.Exp.Virtual})
-        | None ->
-            None )
-      | _ ->
-          None )
-    | _ ->
-        None )
-  | _ ->
-      None
-
-
-and translate_boxed_opaque_existential llair_args ~proc_state loc =
-  let arg = List.hd_exn llair_args in
-  let typ =
-    match arg with
-    | Llair.Exp.Reg {id; name; typ} -> (
-        let exp, _ = Var.reg_to_textual_var ~proc_state (Reg.mk typ id name) in
-        match exp with
-        | Textual.Exp.Var var_name -> (
-          match Textual.Ident.Map.find_opt var_name proc_state.ProcState.ids_move with
-          | Some {typ= Some annotated_typ} ->
-              Some annotated_typ.typ
-          | _ ->
-              None )
-        | _ ->
-            None )
-    | _ ->
-        None
-  in
-  match typ with
-  | Some (Textual.Typ.Ptr (Struct struct_name)) ->
-      let elts = NS.IArray.init 1 ~f:(fun _ -> lazy (1, Llair.Typ.bool)) in
-      let name = Textual.TypeName.swift_mangled_name_of_type_name struct_name |> Option.value_exn in
-      let name = String.substr_replace_all ~pattern:"_pSg" ~with_:"P" name in
-      let llair_typ = Typ.struct_ ~name elts ~bits:0 ~byts:0 in
-      let llair_exp = Llair.Exp.select llair_typ arg 0 in
-      let textual_exp, _, instrs = to_textual_exp ~proc_state loc llair_exp in
-      let deref_instrs, textual_exp = add_deref ~proc_state textual_exp loc in
-      Some (textual_exp, deref_instrs @ instrs)
-  | _ ->
-      None
-
-
-and translate_protocol_witness_optional_deinit_copy ~proc_state ptr exp loc =
-  let exp2, _, exp2_instrs = to_textual_exp loc ~proc_state exp in
-  let exp2_deref_instrs, exp2 = add_deref ~proc_state exp2 loc in
-  let exp1, _, exp1_instrs = to_textual_exp loc ~proc_state ptr in
-  let instr = Textual.Instr.Store {exp1; typ= None; exp2; loc} in
-  let instrs = exp2_deref_instrs @ exp2_instrs @ exp1_instrs in
-  instr :: instrs
-
-
-and to_textual_call_aux ~(proc_state : ProcState.t) ~kind proc return ?generate_typ_exp
-    (llair_args : Llair.Exp.t list) (loc : Textual.Location.t) =
+and to_textual_call_aux ~proc_state ~kind ?exp_opt proc return ?generate_typ_exp
+    (args : Llair.Exp.t list) (loc : Textual.Location.t) =
   let args_instrs, args =
-    List.fold_map llair_args ~init:[] ~f:(fun acc_instrs exp ->
+    List.fold_map
+      ~f:(fun acc_instrs exp ->
         let exp, _, instrs = to_textual_exp loc ~proc_state ?generate_typ_exp exp in
         let deref_instrs, deref_exp =
           (* So far it looks like for C the load operations are already there when needed. *)
           if
-            Textual.Lang.is_swift proc_state.module_state.lang
+            Textual.Lang.is_swift proc_state.ProcState.lang
             && not (Textual.ProcName.equal proc.Textual.QualifiedProcName.name swift_weak_assign)
-          then add_deref ~proc_state ~from_call:true exp loc
+          then add_deref ~proc_state exp loc
           else ([], exp)
         in
-        (deref_instrs @ acc_instrs @ instrs, deref_exp) )
+        (List.append deref_instrs (List.append acc_instrs instrs), deref_exp) )
+      args ~init:[]
   in
+  let args = List.append (Option.to_list exp_opt) args in
   let args, args_instrs =
     if Textual.QualifiedProcName.equal proc Textual.ProcDecl.assert_fail_name then
       ([Textual.Exp.Const Null], [])
     else (args, args_instrs)
   in
-  let return_id = Option.map return ~f:(fun reg -> Var.reg_to_id ~proc_state reg |> fst) in
-  let resolve_call_translation proc args =
-    match resolve_method_call ~proc_state proc args with
-    | Some call_instr ->
-        (call_instr, [])
-    | None ->
-        (Textual.Exp.Call {proc; args; kind}, [])
+  let id =
+    Option.map return ~f:(fun reg ->
+        let id = Var.reg_to_id ~proc_state reg |> fst in
+        id )
   in
-  let call_exp, call_instrs =
+  let functions_to_skip = ["swift_retain"; "swift_unknownObjectRetain"; "swift_weakLoadStrong"] in
+  let call_exp =
     if
       (* skip calls to the elements in functions_to_skip  and returns its first argument instead. *)
-      List.exists functions_to_skip ~f:(Textual.ProcName.equal proc.Textual.QualifiedProcName.name)
-    then (List.hd_exn args, [])
-    else if
-      Textual.ProcName.equal proc.Textual.QualifiedProcName.name
-        (Textual.ProcName.of_string "__swift_mutable_project_boxed_opaque_existential_1")
-    then
-      match translate_boxed_opaque_existential llair_args ~proc_state loc with
-      | Some (textual_exp, instrs) ->
-          (textual_exp, instrs)
-      | None ->
-          resolve_call_translation proc args
-    else resolve_call_translation proc args
+      List.exists
+        ~f:(fun f ->
+          Textual.ProcName.equal proc.Textual.QualifiedProcName.name (Textual.ProcName.of_string f) )
+        functions_to_skip
+    then List.hd_exn args
+    else Textual.Exp.Call {proc; args; kind}
   in
-  update_id_return_type ~proc_state proc return_id ;
-  let instrs = call_instrs @ args_instrs in
-  (return_id, call_exp, instrs)
+  update_id_return_type ~proc_state proc id ;
+  (id, call_exp, args_instrs)
 
 
 and to_textual_call_instrs ~proc_state return proc args loc =
@@ -773,68 +524,85 @@ and to_textual_builtin ~proc_state return name args loc =
   to_textual_call_instrs ~proc_state return proc args loc
 
 
-and to_textual_call ~(proc_state : ProcState.t) (call : 'a Llair.call) =
-  let llair_args = StdUtils.iarray_to_list call.actuals in
-  let proc, kind, exp_opt =
-    match call.callee with
-    | Direct {func} -> (
-      match FuncName.unmangled_name func.Llair.name with
-      | Some name when String.equal name derived_enum_equals ->
-          (builtin_qual_proc_name derived_enum_equals, Textual.Exp.NonVirtual, None)
+and resolve_method_call ~proc_state return callee args loc =
+  match (callee, proc_state.ProcState.id_offset, List.hd (List.rev args)) with
+  | Indirect {ptr= offset_arg}, Some (id_offset, offset), Some self_id -> (
+      let offset_exp, _, _ = to_textual_exp ~proc_state loc offset_arg in
+      let self_id, _, _ = to_textual_exp ~proc_state loc self_id in
+      match (offset_exp, self_id) with
+      | Textual.Exp.Var id, Var self_id when Textual.Ident.equal id id_offset -> (
+        match ProcState.IdentMap.find_opt self_id proc_state.ProcState.ids_types with
+        | Some {typ= Textual.Typ.Struct struct_name} -> (
+          match ProcState.find_method_with_offset ~proc_state struct_name offset with
+          | Some proc_name ->
+              ProcState.reset_offsets ~proc_state ;
+              Some (to_textual_call_instrs ~proc_state return proc_name args loc)
+          | None ->
+              None )
+        | _ ->
+            None )
       | _ ->
-          let proc =
-            if
-              String.equal (FuncName.name func.Llair.name)
-                (Procname.get_method BuiltinDecl.__assert_fail)
-              || String.is_substring ~substring:"assertionFailure" (FuncName.name func.Llair.name)
-            then Textual.ProcDecl.assert_fail_name
-            else
-              to_qualified_proc_name proc_state.module_state.method_class_index
-                (FuncName.name func.Llair.name)
-          in
-          (proc, Textual.Exp.NonVirtual, None) )
-    | Indirect {ptr} ->
-        let proc = builtin_qual_proc_name (Textual.ProcName.to_string llvm_dynamic_call) in
-        (proc, Textual.Exp.NonVirtual, Some ptr)
-    | Intrinsic intrinsic ->
-        let proc = builtin_qual_proc_name (Llair.Intrinsic.to_name intrinsic) in
-        (proc, Textual.Exp.NonVirtual, None)
-  in
-  let loc = to_textual_loc_instr ~proc_state call.loc in
-  let llair_args = Option.to_list exp_opt @ llair_args in
-  let id, call_exp, args_instrs =
-    to_textual_call_aux ~proc_state ~kind proc call.areturn llair_args loc
-  in
-  let call_exp =
-    match call_exp with
-    | Textual.Exp.Call {proc} -> (
-      match get_alloc_class_name ~proc_state (Textual.QualifiedProcName.name proc) with
-      | Some class_name ->
-          let args = [Textual.Exp.Typ (Textual.Typ.Struct class_name)] in
-          Textual.Exp.Call
-            {proc= Textual.ProcDecl.swift_alloc_name; args; kind= Textual.Exp.NonVirtual}
-      | None ->
-          call_exp )
-    | _ ->
-        call_exp
-  in
-  let instrs =
-    match (call_exp, llair_args) with
-    (* Replace swift_weakAssign with a store instruction. We do not add dereference to the first argument
-     because we are flattenning the structure of weak pointers to be just like normal pointers in infer,
-     whilst in llvm the structures is field_2: *swift::weak}, type swift::weak = {field_0: *ptr_elt} *)
-    | Textual.Exp.Call {proc; args= [arg1; arg2]}, _
-      when Textual.ProcName.equal proc.Textual.QualifiedProcName.name swift_weak_assign ->
-        let instrs2, arg2 = add_deref ~proc_state arg2 loc in
-        Textual.Instr.Store {exp1= arg1; typ= None; exp2= arg2; loc} :: instrs2
-    | Textual.Exp.Call {proc}, [exp; ptr]
-      when is_protocol_witness_optional_deinit_copy proc_state.ProcState.module_state.lang
-             (Textual.ProcName.to_string proc.Textual.QualifiedProcName.name) ->
-        translate_protocol_witness_optional_deinit_copy ~proc_state ptr exp loc
-    | _ ->
-        [Textual.Instr.Let {id; exp= call_exp; loc}]
-  in
-  instrs @ args_instrs
+          None )
+  | _ ->
+      None
+
+
+and to_textual_call ~proc_state (call : 'a Llair.call) =
+  let loc = to_textual_loc ~proc_state call.loc in
+  let args = StdUtils.iarray_to_list call.actuals in
+  match resolve_method_call ~proc_state call.areturn call.callee args loc with
+  | Some call_instrs ->
+      call_instrs
+  | None ->
+      let proc, kind, exp_opt =
+        match call.callee with
+        | Direct {func} ->
+            let proc =
+              if
+                String.equal (FuncName.name func.Llair.name)
+                  (Procname.get_method BuiltinDecl.__assert_fail)
+                || String.is_substring ~substring:"assertionFailure" (FuncName.name func.Llair.name)
+              then Textual.ProcDecl.assert_fail_name
+              else to_qualified_proc_name (FuncName.name func.Llair.name)
+            in
+            (proc, Textual.Exp.NonVirtual, None)
+        | Indirect {ptr} ->
+            let proc = builtin_qual_proc_name "llvm_dynamic_call" in
+            (proc, Textual.Exp.NonVirtual, Some (to_textual_exp loc ~proc_state ptr |> fst3))
+        | Intrinsic intrinsic ->
+            let proc = builtin_qual_proc_name (Llair.Intrinsic.to_name intrinsic) in
+            (proc, Textual.Exp.NonVirtual, None)
+      in
+      let loc = to_textual_loc_instr ~proc_state call.loc in
+      let id, call_exp, args_instrs =
+        to_textual_call_aux ~proc_state ~kind ?exp_opt proc call.areturn args loc
+      in
+      let call_exp =
+        match call_exp with
+        | Textual.Exp.Call {proc} -> (
+          match get_alloc_class_name ~proc_state (Textual.QualifiedProcName.name proc) with
+          | Some class_name ->
+              let args = [Textual.Exp.Typ (Textual.Typ.Struct class_name)] in
+              Textual.Exp.Call
+                {proc= Textual.ProcDecl.swift_alloc_name; args; kind= Textual.Exp.NonVirtual}
+          | None ->
+              call_exp )
+        | _ ->
+            call_exp
+      in
+      (* Replace swift_weakAssign with a store instruction. We do not add dereference to the first argument
+  because we are flattenning the structure of weak pointers to be just like normal pointers in infer,
+  whilst in llvm the structures is field_2: *swift::weak}, type swift::weak = {field_0: *ptr_elt} *)
+      let instrs =
+        match call_exp with
+        | Textual.Exp.Call {proc; args= [arg1; arg2]}
+          when Textual.ProcName.equal proc.Textual.QualifiedProcName.name swift_weak_assign ->
+            let instrs2, arg2 = add_deref ~proc_state arg2 loc in
+            Textual.Instr.Store {exp1= arg1; typ= None; exp2= arg2; loc} :: instrs2
+        | _ ->
+            [Textual.Instr.Let {id; exp= call_exp; loc}]
+      in
+      instrs @ args_instrs
 
 
 let remove_store_zero_in_class typ_exp1 exp2 =
@@ -850,7 +618,7 @@ let remove_store_zero_in_class typ_exp1 exp2 =
       false
 
 
-let translate_move ~proc_state ~move_phi loc textual_instrs reg_exps =
+let translate_move ~move_phi ~proc_state loc textual_instrs reg_exps =
   let reg_exps = StdUtils.iarray_to_list reg_exps in
   let loc = to_textual_loc_instr ~proc_state loc in
   let instrs =
@@ -858,24 +626,9 @@ let translate_move ~proc_state ~move_phi loc textual_instrs reg_exps =
       ~f:(fun instrs (reg, exp) ->
         let id = Some (Var.reg_to_id ~proc_state reg |> fst) in
         let exp, exp_typ, exp_instrs = to_textual_exp loc ~proc_state exp in
-        let loaded_var =
-          match exp with
-          | Textual.Exp.Var var ->
-              Option.value_map
-                ~f:(fun id_data -> id_data.ProcState.loaded_var)
-                (IdentMap.find_opt var proc_state.ProcState.ids_move)
-                ~default:false
-          | _ when move_phi ->
-              true
-          | _ ->
-              false
-        in
         ( match (id, exp_typ) with
         | Some id, Some exp_typ ->
-            ProcState.update_ids_move ~proc_state id
-              (Some (Textual.Typ.mk_without_attributes exp_typ))
-              ~loaded_var
-              ~deref_needed:(should_add_deref ~proc_state exp)
+            ProcState.update_ids_move ~proc_state id (Textual.Typ.mk_without_attributes exp_typ)
         | _ ->
             () ) ;
         let deref_instrs, exp = if move_phi then add_deref ~proc_state exp loc else ([], exp) in
@@ -886,7 +639,7 @@ let translate_move ~proc_state ~move_phi loc textual_instrs reg_exps =
   List.append instrs textual_instrs
 
 
-let is_store_formal_to_local ~(proc_state : ProcState.t) exp1 exp2 =
+let is_store_formal_to_local ~proc_state exp1 exp2 =
   match (exp1, exp2) with
   | Llair.Exp.Reg {name= name1; id= id1; typ= typ1}, Llair.Exp.Reg {name= name2; id= id2; typ= typ2}
     ->
@@ -898,12 +651,7 @@ let is_store_formal_to_local ~(proc_state : ProcState.t) exp1 exp2 =
         Textual.VarName.Map.mem name2 proc_state.ProcState.formals
         && Textual.VarName.Map.mem name1 proc_state.ProcState.locals
       then (
-        let typ1 =
-          Type.to_annotated_textual_typ proc_state.module_state.lang
-            ~mangled_map:proc_state.module_state.mangled_map
-            ~struct_map:proc_state.module_state.struct_map typ1
-        in
-        ProcState.subst_formal_local ~proc_state ~formal:name2 ~local:(name1, typ1) ;
+        ProcState.subst_formal_local ~proc_state ~formal:name2 ~local:name1 ;
         true )
       else false
   | _ ->
@@ -911,7 +659,7 @@ let is_store_formal_to_local ~(proc_state : ProcState.t) exp1 exp2 =
 
 
 let cmnd_to_instrs ~(proc_state : ProcState.t) block =
-  let ModuleState.{lang; struct_map; mangled_map} = proc_state.module_state in
+  let struct_map = proc_state.ProcState.struct_map in
   let to_instr textual_instrs inst =
     match inst with
     | Load {reg; ptr; loc} ->
@@ -919,56 +667,39 @@ let cmnd_to_instrs ~(proc_state : ProcState.t) block =
         let id, _ = Var.reg_to_id ~proc_state reg in
         let exp, _, ptr_instrs = to_textual_exp loc ~proc_state ptr in
         ProcState.update_id_offset ~proc_state id exp ;
-        ProcState.update_ids_move ~proc_state id None ~loaded_var:true ~deref_needed:false ;
         let textual_instr = Textual.Instr.Load {id; exp; typ= None; loc} in
         textual_instr :: List.append ptr_instrs textual_instrs
     | Store {ptr; exp}
-      when Textual.Lang.is_swift lang && is_store_formal_to_local ~proc_state ptr exp ->
-        textual_instrs
+      when Textual.Lang.is_swift proc_state.lang && is_store_formal_to_local ~proc_state ptr exp ->
+        []
     | Store {ptr; exp; loc} ->
         let loc = to_textual_loc_instr ~proc_state loc in
-        let exp2, _, exp2_instrs = to_textual_exp loc ~proc_state exp in
-        let exp2_deref_instrs, exp2 = add_deref ~proc_state exp2 loc in
-        let exp1, typ_exp1, exp1_instrs = to_textual_exp loc ~proc_state ptr in
-        let exp1, exp1_deref_instrs =
-          match (exp1, typ_exp1) with
-          | Textual.Exp.Lvar _, Some (Textual.Typ.Ptr (Textual.Typ.Struct typ_name) as typ_exp1)
-            when Type.is_ptr_struct typ_exp1 ->
-              let deref_instrs, exp1 = add_deref ~proc_state exp1 loc in
-              let exp1 =
-                (* In llvm when we store the struct without accessing any fields, it means the first field.
-                The first field of a struct is always at offset 0, so the base pointer already points to it.
-                No offset calculation is needed. *)
-                Textual.Exp.Field
-                  { exp= exp1
-                  ; field=
-                      Field.field_of_pos_with_map proc_state.module_state.field_offset_map typ_name
-                        0 }
-              in
-              (exp1, deref_instrs)
+        let exp2, _, exp2_instrs_ = to_textual_exp loc ~proc_state exp in
+        let exp2, exp2_instrs =
+          match (exp, exp2) with
+          | Llair.Exp.Reg {name; id; typ}, Textual.Exp.Lvar _ ->
+              let reg = Reg.mk typ id name in
+              let id, _ = Var.reg_to_id ~proc_state reg in
+              let new_exp2 = Textual.Exp.Var id in
+              let exp2_instr = Textual.Instr.Load {id; exp= exp2; typ= None; loc} in
+              (new_exp2, exp2_instrs_ @ [exp2_instr])
           | _ ->
-              (exp1, [])
+              (exp2, exp2_instrs_)
         in
+        let exp1, typ_exp1, exp1_instrs = to_textual_exp loc ~proc_state ptr in
         let textual_instr_opt =
           if remove_store_zero_in_class typ_exp1 exp2 then None
           else Some (Textual.Instr.Store {exp1; typ= None; exp2; loc})
         in
-        (Option.to_list textual_instr_opt @ exp2_deref_instrs @ exp2_instrs)
-        @ exp1_instrs @ exp1_deref_instrs @ textual_instrs
+        (Option.to_list textual_instr_opt @ exp2_instrs) @ exp1_instrs @ textual_instrs
     | Alloc {reg} ->
         let reg_var_name = Var.reg_to_var_name reg in
-        let ptr_typ = Type.to_textual_typ lang ~mangled_map ~struct_map (Reg.typ reg) in
-        let ptr_typ =
-          if not (Textual.Typ.is_pointer ptr_typ) then
-            if Textual.Lang.is_swift lang then Textual.Typ.Ptr Textual.Typ.any_type_swift
-            else Textual.Typ.Ptr Textual.Typ.any_type_llvm
-          else ptr_typ
-        in
-        ProcState.update_locals ~proc_state reg_var_name (Textual.Typ.mk_without_attributes ptr_typ) ;
+        let ptr_typ = Type.to_annotated_textual_typ proc_state.lang ~struct_map (Reg.typ reg) in
+        ProcState.update_locals ~proc_state reg_var_name ptr_typ ;
         textual_instrs
-    | Free _ when Textual.Lang.is_swift lang ->
+    | Free _ when Textual.Lang.is_swift proc_state.lang ->
         (* ignore [free] in Swift for now until we know if/where it's needed *)
-        textual_instrs
+        []
     | Free {ptr; loc} ->
         let proc = Textual.ProcDecl.free_name in
         let loc = to_textual_loc ~proc_state loc in
@@ -1011,7 +742,7 @@ let cmnd_to_instrs ~(proc_state : ProcState.t) block =
         | _ ->
             assert false )
     | Builtin {reg; name; args; loc}
-      when Textual.Lang.is_swift lang && Llair.Builtin.equal name `memset -> (
+      when Textual.Lang.is_swift proc_state.ProcState.lang && Llair.Builtin.equal name `memset -> (
         let args = StdUtils.iarray_to_list args in
         let loc = to_textual_loc ~proc_state loc in
         match args with
@@ -1035,7 +766,7 @@ let cmnd_to_instrs ~(proc_state : ProcState.t) block =
               | None ->
                   Some (Var.add_fresh_id ~proc_state ())
             in
-            Textual.Instr.Let {id; exp; loc} :: (exp_instrs @ textual_instrs)
+            Textual.Instr.Let {id; exp; loc} :: exp_instrs
         | _ ->
             assert false )
     | Builtin {reg; name; args; loc} ->
@@ -1045,9 +776,9 @@ let cmnd_to_instrs ~(proc_state : ProcState.t) block =
         let call_textual_instrs = to_textual_builtin ~proc_state reg name args loc in
         List.append call_textual_instrs textual_instrs
     | Move {reg_exps: (Reg.t * Exp.t) NS.iarray; loc} ->
-        translate_move ~proc_state ~move_phi:false loc textual_instrs reg_exps
+        translate_move ~move_phi:false ~proc_state loc textual_instrs reg_exps
     | MovePhi {reg_exps: (Reg.t * Exp.t) NS.iarray; loc} ->
-        translate_move ~proc_state ~move_phi:true loc textual_instrs reg_exps
+        translate_move ~move_phi:true ~proc_state loc textual_instrs reg_exps
     | AtomicRMW {reg; ptr; exp; loc} ->
         let loc = to_textual_loc ~proc_state loc in
         let call_textual_instrs =
@@ -1080,18 +811,18 @@ let cmnd_to_instrs ~(proc_state : ProcState.t) block =
 let rec to_textual_jump_and_succs ~proc_state ~seen_nodes jump =
   let block = jump.dst in
   let node_label = block_to_node_name block in
-  let node_label, typ_opt, succs =
+  let node_label, typ_opt, succs, seen_nodes =
     (* If we've seen this node, stop the recursion *)
-    if Textual.NodeName.HashSet.mem seen_nodes node_label then
-      (node_label, None, Textual.Node.Set.empty)
+    if Textual.NodeName.Set.mem node_label seen_nodes then
+      (node_label, None, Textual.Node.Set.empty, seen_nodes)
     else
-      let (node : Textual.Node.t), typ_opt, nodes =
-        block_to_node_and_succs ~proc_state ~seen_nodes block
+      let (node : Textual.Node.t), typ_opt, nodes, seen_nodes =
+        block_to_node_and_succs ~proc_state ~seen_nodes jump.dst
       in
-      (node.label, typ_opt, nodes)
+      (node.label, typ_opt, nodes, seen_nodes)
   in
   let node_call = Textual.Terminator.{label= node_label; ssa_args= []} in
-  (Textual.Terminator.Jump [node_call], typ_opt, succs)
+  (Textual.Terminator.Jump [node_call], typ_opt, succs, seen_nodes)
 
 
 and to_terminator_and_succs ~proc_state ~seen_nodes term =
@@ -1105,15 +836,16 @@ and to_terminator_and_succs ~proc_state ~seen_nodes term =
       let textual_exp, textual_typ_opt, instrs = to_textual_exp loc ~proc_state exp in
       let exp_deref_instrs, textual_exp = add_deref ~proc_state textual_exp loc in
       let instrs = List.append instrs exp_deref_instrs in
-      ((Textual.Terminator.Ret textual_exp, textual_typ_opt, no_succs), Some loc, instrs)
+      ((Textual.Terminator.Ret textual_exp, textual_typ_opt, no_succs, seen_nodes), Some loc, instrs)
   | Return {exp= None; loc} ->
       let loc = to_textual_loc_instr ~proc_state loc in
-      ( (Textual.Terminator.Ret (Textual.Exp.Const Null), Some Textual.Typ.Void, no_succs)
-      , Some loc
-      , [] )
+      ((Textual.Terminator.Ret (Textual.Exp.Const Null), None, no_succs, seen_nodes), Some loc, [])
   | Throw {exc; loc} ->
       let loc = to_textual_loc_instr ~proc_state loc in
-      ( (Textual.Terminator.Throw (to_textual_exp loc ~proc_state exc |> fst3), None, no_succs)
+      ( ( Textual.Terminator.Throw (to_textual_exp loc ~proc_state exc |> fst3)
+        , None
+        , no_succs
+        , seen_nodes )
       , Some loc
       , [] )
   | Switch {key; tbl; els; loc} -> (
@@ -1122,30 +854,34 @@ and to_terminator_and_succs ~proc_state ~seen_nodes term =
       | [(exp, zero_jump)] when Exp.equal exp Exp.false_ ->
           (* if then else *)
           let bexp, _, instrs = to_textual_bool_exp loc ~proc_state key in
-          let else_, else_typ, zero_nodes =
+          let else_, else_typ, zero_nodes, seen_nodes =
             to_textual_jump_and_succs ~proc_state ~seen_nodes zero_jump
           in
-          let then_, if_typ, els_nodes = to_textual_jump_and_succs ~proc_state ~seen_nodes els in
+          let then_, if_typ, els_nodes, seen_nodes =
+            to_textual_jump_and_succs ~proc_state ~seen_nodes els
+          in
           let term = Textual.Terminator.If {bexp; then_; else_} in
           let nodes = Textual.Node.Set.union zero_nodes els_nodes in
           let typ_opt = Type.join_typ if_typ else_typ in
-          ((term, typ_opt, nodes), Some loc, instrs)
+          ((term, typ_opt, nodes, seen_nodes), Some loc, instrs)
       | [] when Exp.equal key Exp.false_ ->
           (* goto *)
           (to_textual_jump_and_succs ~proc_state ~seen_nodes els, Some loc, [])
       | _ ->
-          ((Textual.Terminator.Unreachable, None, no_succs), None, [] (* TODO translate Switch *)) )
+          ( (Textual.Terminator.Unreachable, None, no_succs, seen_nodes)
+          , None
+          , [] (* TODO translate Switch *) ) )
   | Iswitch {loc} | Abort {loc} | Unreachable {loc} ->
       let loc = to_textual_loc_instr ~proc_state loc in
-      ((Textual.Terminator.Unreachable, None, no_succs), Some loc, [])
+      ((Textual.Terminator.Unreachable, None, no_succs, seen_nodes), Some loc, [])
 
 
 (* TODO still various parts of the node left to be translated *)
 and block_to_node_and_succs ~proc_state ~seen_nodes (block : Llair.block) =
   let node_name = block_to_node_name block in
   let instrs, first_loc, last_loc = cmnd_to_instrs ~proc_state block in
-  Textual.NodeName.HashSet.add node_name seen_nodes ;
-  let (terminator, typ_opt, succs), term_loc_opt, term_instrs =
+  let seen_nodes = Textual.NodeName.Set.add node_name seen_nodes in
+  let (terminator, typ_opt, succs, seen_nodes), term_loc_opt, term_instrs =
     to_terminator_and_succs ~proc_state ~seen_nodes block.term
   in
   let instrs = List.append instrs term_instrs in
@@ -1176,12 +912,13 @@ and block_to_node_and_succs ~proc_state ~seen_nodes (block : Llair.block) =
       ; label_loc= first_loc }
   in
   (* We add the nodes here to make sure they always get added even in the case of recursive jumps *)
-  (node, typ_opt, Textual.Node.Set.add node succs)
+  (node, typ_opt, Textual.Node.Set.add node succs, seen_nodes)
 
 
 let func_to_nodes ~proc_state func =
-  let seen_nodes = Textual.NodeName.HashSet.create 16 in
-  let _, typ_opt, nodes = block_to_node_and_succs ~proc_state ~seen_nodes func.Llair.entry in
+  let _, typ_opt, nodes, _ =
+    block_to_node_and_succs ~proc_state ~seen_nodes:Textual.NodeName.Set.empty func.Llair.entry
+  in
   (typ_opt, Textual.Node.Set.to_list nodes)
 
 
@@ -1194,54 +931,49 @@ let is_undefined func =
       false
 
 
-let should_translate plain_name mangled_name lang method_class_index source_file (loc : Llair.Loc.t)
-    =
+type textual_proc = ProcDecl of Textual.ProcDecl.t | ProcDesc of Textual.ProcDesc.t
+
+let should_translate plain_name lang source_file (loc : Llair.Loc.t) =
   let file =
     if Textual.Lang.is_c lang then loc.Llair.Loc.dir ^ "/" ^ loc.Llair.Loc.file
     else loc.Llair.Loc.file
   in
   let source_file_loc = SourceFile.create file in
-  let proc_name = Textual.ProcName.of_string mangled_name in
-  let typ_name = Textual.ProcName.Hashtbl.find_opt method_class_index proc_name in
-  let typ_name =
-    Option.bind ~f:(fun name -> Textual.TypeName.swift_mangled_name_of_type_name name) typ_name
-  in
   SourceFile.equal source_file source_file_loc
-  (* the loc in these methods is empty but these are getters
-     and setters or closure bodies and we need to translate them *)
-  || is_closure lang mangled_name
-  || Option.exists ~f:(fun name -> String.is_suffix ~suffix:witness_protocol_suffix name) typ_name
   || Option.exists plain_name ~f:(fun plain_name ->
-         String.is_substring ~substring:Field.get_suffix plain_name
-         || String.is_substring ~substring:Field.set_suffix plain_name )
+         (* the loc in these methods is empty but these are getters and setters and we need to translate them *)
+         String.is_substring ~substring:".get" plain_name
+         || String.is_substring ~substring:".set" plain_name )
 
 
-let add_method_to_class_method_index class_method_index class_name proc_name index =
-  let methods =
-    Textual.TypeName.Hashtbl.find_opt class_method_index class_name |> Option.value ~default:[]
+let add_method_to_class_method_index class_name proc_name index =
+  let methods = Textual.TypeName.Map.find_opt class_name !ProcState.class_method_index in
+  let methods = Option.value methods ~default:[] in
+  let index =
+    Textual.TypeName.Map.add class_name ((proc_name, index) :: methods)
+      !ProcState.class_method_index
   in
-  Textual.TypeName.Hashtbl.replace class_method_index class_name ((proc_name, index) :: methods)
+  ProcState.class_method_index := index
 
 
-let process_globals lang class_method_index method_class_index ~mangled_map ~struct_map globals_map
-    =
-  let class_from_global ~suffix lang struct_map global_name =
-    let name =
-      if String.equal suffix witness_protocol_suffix then global_name
-      else
-        let name = String.substr_replace_first global_name ~pattern:"$s" ~with_:"T" in
-        String.chop_suffix_exn name ~suffix
-    in
-    TypeName.struct_name_of_mangled_name lang ~mangled_map:(Some mangled_map) struct_map name
+let pp_class_method_index fmt () =
+  let pp class_name index =
+    Format.fprintf fmt "%a: %a@." Textual.TypeName.pp class_name
+      (Pp.comma_seq (Pp.pair ~fst:Textual.QualifiedProcName.pp ~snd:Int.pp))
+      index
   in
-  let process_func_name struct_map name ~suffix global offset =
-    let class_name = class_from_global ~suffix lang struct_map global in
-    let proc_name = Textual.ProcName.of_string name in
-    let proc = Textual.QualifiedProcName.{enclosing_class= Enclosing class_name; name= proc_name} in
-    add_method_to_class_method_index class_method_index class_name proc offset ;
-    Textual.ProcName.Hashtbl.replace method_class_index proc_name class_name
-  in
-  let process_exp struct_map global ~suffix (last_offset, carry) exp typ =
+  Textual.TypeName.Map.iter pp !ProcState.class_method_index
+[@@warning "-unused-value-declaration"]
+
+
+let class_from_global lang struct_map global_name =
+  let name = String.substr_replace_first global_name ~pattern:"$s" ~with_:"T" in
+  let name = String.chop_suffix_exn name ~suffix:"Mf" in
+  Type.struct_name_of_mangled_name lang struct_map name
+
+
+let collect_class_method_indices lang struct_map global exp =
+  let process_exp (last_offset, carry) exp typ =
     match typ with
     | Llair.Typ.Integer {bits} when Int.equal bits 64 ->
         (last_offset + 1, 0)
@@ -1255,76 +987,42 @@ let process_globals lang class_method_index method_class_index ~mangled_map ~str
         let offset = last_offset + 1 in
         ( match exp with
         | Llair.Exp.FuncName {name} ->
-            process_func_name struct_map name ~suffix global (offset - 3)
+            let class_name = class_from_global lang struct_map global in
+            let proc_name = Textual.ProcName.of_string name in
+            let proc =
+              Textual.QualifiedProcName.{enclosing_class= Enclosing class_name; name= proc_name}
+            in
+            add_method_to_class_method_index class_name proc (offset - 3) ;
+            ProcState.method_class_index :=
+              Textual.ProcName.Map.add proc_name class_name !ProcState.method_class_index
         | _ ->
             () ) ;
         (offset, 0)
     | _ ->
         (last_offset, carry)
   in
-  let process_exp_witness_protocol struct_map global ~suffix offset exp =
-    match exp with
-    | Llair.Exp.FuncName {name} ->
-        process_func_name struct_map name ~suffix global offset
-    | _ ->
-        ()
-  in
-  let collect_class_method_indices struct_map ~suffix global_name exp =
-    match exp with
-    | Llair.Exp.ApN (Record, Llair.Typ.Tuple {elts}, elements) ->
-        let elements = StdUtils.iarray_to_list elements in
-        let _, types = StdUtils.iarray_to_list elts |> List.unzip in
-        ignore
-          (List.fold2_exn
-             ~f:(process_exp struct_map ~suffix global_name)
-             ~init:(-1, 0) elements types )
-    | Llair.Exp.ApN (Record, Llair.Typ.Array _, elements) ->
-        let elements = StdUtils.iarray_to_list elements in
-        ignore (List.mapi ~f:(process_exp_witness_protocol struct_map global_name ~suffix) elements)
-    | _ ->
-        ()
-  in
-  let process_global _var global struct_map =
-    match global with
-    | GlobalDefn.{name; init= Some exp_typ} ->
-        let global_name = Global.name name in
-        let suffix = "C" ^ class_virtual_table_suffix in
-        if String.is_suffix global_name ~suffix then (
-          collect_class_method_indices struct_map global_name (fst exp_typ)
-            ~suffix:class_virtual_table_suffix ;
-          struct_map )
-        else
-          let suffix = witness_protocol_suffix in
-          if String.is_suffix global_name ~suffix then (
-            let struct_name = TypeName.to_textual_type_name lang global_name in
-            let struct_ =
-              Textual.Struct.{name= struct_name; supers= []; fields= []; attributes= []}
-            in
-            let struct_map = Textual.TypeName.Map.add struct_name struct_ struct_map in
-            collect_class_method_indices struct_map global_name (fst exp_typ) ~suffix ;
-            struct_map )
-          else struct_map
-    | _ ->
-        struct_map
-  in
-  Textual.VarName.Map.fold process_global globals_map struct_map
+  match exp with
+  | Llair.Exp.ApN (Record, Llair.Typ.Tuple {elts}, elements) ->
+      let elements = StdUtils.iarray_to_list elements in
+      let _, types = StdUtils.iarray_to_list elts |> List.unzip in
+      ignore (List.fold2_exn ~f:process_exp ~init:(-1, 0) elements types)
+  | _ ->
+      ()
 
 
-let to_textual_global ~module_state sourcefile global =
-  let ModuleState.{lang; struct_map; mangled_map; _} = module_state in
+let to_textual_global lang ~struct_map global =
   let global_ = global.GlobalDefn.name in
   let global_name = Global.name global_ in
   let name = Textual.VarName.of_string global_name in
-  let global_typ =
-    match global.GlobalDefn.init with Some (_, typ) -> typ | None -> Global.typ global_
-  in
-  let typ = Type.to_textual_typ lang ~mangled_map ~struct_map global_typ in
+  let typ = Type.to_textual_typ lang ~struct_map (Global.typ global_) in
+  let loc = to_textual_loc global.GlobalDefn.loc in
+  let global_proc_state = ProcState.global_proc_state lang loc global_name in
   let proc_desc_opt =
-    if Config.llvm_translate_global_init then
-      let loc = to_textual_loc global.GlobalDefn.loc in
-      let global_proc_state = ProcState.global_proc_state sourcefile loc module_state global_name in
-      match global.GlobalDefn.init with
-      | Some (exp, _) ->
+    match global.GlobalDefn.init with
+    | Some exp ->
+        if String.is_suffix global_name ~suffix:"CMf" then
+          collect_class_method_indices lang struct_map global_name exp ;
+        if Config.llvm_translate_global_init then
           let init_exp, _, instrs = to_textual_exp ~proc_state:global_proc_state loc exp in
           let procdecl =
             Textual.ProcDecl.
@@ -1353,10 +1051,10 @@ let to_textual_global ~module_state sourcefile global =
               ; locals= []
               ; exit_loc= Textual.Location.Unknown }
           in
-          Some (Textual.Module.Proc proc_desc)
-      | _ ->
-          None
-    else None
+          Some proc_desc
+        else None
+    | None ->
+        None
   in
   (* The init_exp would need to be a call to the initialiser, to add later. *)
   let global = Textual.Global.{name; typ; attributes= []; init_exp= None} in
@@ -1381,54 +1079,54 @@ let create_offset_attributes class_method_index : attr_map =
     in
     List.fold ~init:attr_map ~f:process_method method_offsets
   in
-  Textual.TypeName.Hashtbl.fold process_class class_method_index Textual.QualifiedProcName.Map.empty
+  Textual.TypeName.Map.fold process_class class_method_index Textual.QualifiedProcName.Map.empty
 
 
-let function_to_proc_decl lang signature_structs method_class_index ~struct_map (func_name, func) =
-  let formal_types = to_formal_types lang signature_structs ~struct_map func in
+let function_to_proc_decl lang ~struct_map (func_name, func) =
+  let formal_types = to_formal_types lang ~struct_map func in
   let loc = to_textual_loc func.Llair.loc in
-  let qualified_name = to_qualified_proc_name method_class_index ~loc (FuncName.name func_name) in
+  let qualified_name = to_qualified_proc_name ~loc (FuncName.name func_name) in
   let plain_name = match lang with Textual.Lang.Swift -> to_name_attr func_name | _ -> None in
   let fun_result_typ =
     Textual.Typ.mk_without_attributes
-      (Type.to_textual_typ_without_mangled_map lang ~struct_map (FuncName.typ func_name))
+      (Type.to_textual_typ lang ~struct_map (FuncName.typ func_name))
   in
   let result_type =
     match func.Llair.freturn_type with
     | Some typ ->
         let typ =
           Option.map ~f:Textual.Typ.mk_without_attributes
-            (Type.signature_type_to_textual_typ signature_structs lang typ)
+            (Type.signature_type_to_textual_typ lang typ)
         in
         Option.value typ ~default:fun_result_typ
     | None ->
         fun_result_typ
   in
-  Textual.ProcDecl.
-    { qualified_name
-    ; result_type
-    ; attributes= Option.to_list plain_name
-    ; formals_types= Some formal_types }
+  let procdecl =
+    Textual.ProcDecl.
+      { qualified_name
+      ; result_type
+      ; attributes= Option.to_list plain_name
+      ; formals_types= Some formal_types }
+  in
+  procdecl
 
 
 let update_formals_list formals_list formals_map =
   let update_formal varname =
     match Textual.VarName.Map.find_opt varname formals_map with
-    | Some ProcState.{typ; assoc_local= Some local} ->
-        (Some typ, local)
-    | Some ProcState.{assoc_local= None} | None ->
-        (None, varname)
+    | Some (_, Some local) ->
+        local
+    | Some (_, None) | None ->
+        varname
   in
   List.map ~f:update_formal formals_list
 
 
-let translate_code source_file ~module_state proc_descs (procdecl : Textual.ProcDecl.t)
-    (func_name, func) =
-  let ModuleState.{lang; method_class_index} = module_state in
+let translate_code proc_decls lang source_file struct_map globals class_name_offset_map proc_descs
+    (procdecl : Textual.ProcDecl.t) (func_name, func) =
   let should_translate =
-    should_translate
-      (FuncName.unmangled_name func_name)
-      (FuncName.name func_name) lang method_class_index source_file func.Llair.loc
+    should_translate (FuncName.unmangled_name func_name) lang source_file func.Llair.loc
   in
   let formals_list = List.map ~f:Var.reg_to_var_name (StdUtils.iarray_to_list func.Llair.formals) in
   let formals_map =
@@ -1437,16 +1135,34 @@ let translate_code source_file ~module_state proc_descs (procdecl : Textual.Proc
         Textual.VarName.Map.empty
     | Some formals_types ->
         List.fold2_exn
-          ~f:(fun formals varname typ ->
-            Textual.VarName.Map.add varname
-              ProcState.{typ; assoc_local= None; read= NotRead}
-              formals )
+          ~f:(fun formals varname typ -> Textual.VarName.Map.add varname (typ, None) formals)
           formals_list formals_types ~init:Textual.VarName.Map.empty
   in
   let loc = procdecl.qualified_name.Textual.QualifiedProcName.name.Textual.ProcName.loc in
-  let proc_state =
-    ProcState.init ~qualified_name:procdecl.qualified_name ~sourcefile:source_file ~loc
-      ~formals:formals_map ~module_state
+  let proc_map =
+    List.fold
+      ~f:(fun proc_map proc_decl ->
+        Textual.QualifiedProcName.Map.add proc_decl.Textual.ProcDecl.qualified_name proc_decl
+          proc_map )
+      ~init:Textual.QualifiedProcName.Map.empty proc_decls
+  in
+  let proc_state : ProcState.t =
+    { qualified_name= procdecl.qualified_name
+    ; loc
+    ; formals= formals_map
+    ; locals= VarMap.empty
+    ; ids_move= IdentMap.empty
+    ; ids_types= IdentMap.empty
+    ; id_offset= None
+    ; get_element_ptr_offset= None
+    ; reg_map= RegMap.empty
+    ; last_id= Textual.Ident.of_int 0
+    ; last_tmp_var= 0
+    ; struct_map
+    ; globals
+    ; lang
+    ; proc_map
+    ; class_name_offset_map }
   in
   let ret_typ, nodes = if should_translate then func_to_nodes ~proc_state func else (None, []) in
   let result_type =
@@ -1456,24 +1172,15 @@ let translate_code source_file ~module_state proc_descs (procdecl : Textual.Proc
     | None ->
         procdecl.result_type
   in
-  let params_types = update_formals_list formals_list proc_state.formals in
-  let formals_types =
-    let update_formals_types params formal_types =
-      List.map2_exn params formal_types ~f:(fun (typ_opt, _) signature_type ->
-          match typ_opt with Some formal_typ -> formal_typ | None -> signature_type )
-    in
-    Option.map procdecl.formals_types ~f:(fun formals_types ->
-        update_formals_types params_types formals_types )
-  in
-  let procdecl = {procdecl with result_type; formals_types} in
+  let procdecl = {procdecl with result_type} in
   let is_deinit () = Option.exists (FuncName.unmangled_name func_name) ~f:(String.equal "deinit") in
   if is_undefined func || (not should_translate) || (Textual.Lang.is_swift lang && is_deinit ())
-  then Textual.Module.Procdecl procdecl :: proc_descs
+  then ProcDecl procdecl :: proc_descs
   else
     let locals = ProcState.compute_locals ~proc_state in
-    Textual.Module.Proc
+    ProcDesc
       Textual.ProcDesc.
-        { params= List.map ~f:(fun (_, param) -> param) params_types
+        { params= update_formals_list formals_list proc_state.formals
         ; locals
         ; procdecl
         ; start= block_to_node_name func.Llair.entry
@@ -1483,31 +1190,23 @@ let translate_code source_file ~module_state proc_descs (procdecl : Textual.Proc
     :: proc_descs
 
 
-let translate_llair_function_signatures lang method_class_index struct_map functions =
-  let signature_structs = Hash_set.create (module String) in
-  let proc_decls =
-    List.map functions
-      ~f:(function_to_proc_decl lang signature_structs method_class_index ~struct_map)
-  in
-  let struct_map = Type.update_struct_map signature_structs struct_map in
+let translate_llair_function_signatures lang struct_map functions =
+  let proc_decls = List.map functions ~f:(function_to_proc_decl lang ~struct_map) in
+  let struct_map = Type.update_struct_map struct_map in
   (proc_decls, struct_map)
 
 
-let update_function_signatures lang class_method_index method_class_index ~mangled_map ~struct_map
-    ~plain_map functions =
+let update_function_signatures lang ~struct_map functions =
   let update_proc_decl offset_attributes (procdecl : Textual.ProcDecl.t) =
     let procname = procdecl.qualified_name.Textual.QualifiedProcName.name in
     let loc = procname.Textual.ProcName.loc in
-    let qualified_name =
-      to_qualified_proc_name ~loc method_class_index (Textual.ProcName.to_string procname)
-    in
+    let qualified_name = to_qualified_proc_name ~loc (Textual.ProcName.to_string procname) in
     let offset_attribute =
       Textual.QualifiedProcName.Map.find_opt qualified_name offset_attributes
     in
     let formals_types, result_type =
       if Textual.Lang.is_swift lang then
-        Type.update_signature_types lang ~mangled_map ~struct_map ~plain_map procdecl.formals_types
-          procdecl.result_type
+        update_signature_types ~struct_map procdecl.formals_types procdecl.result_type
       else (procdecl.formals_types, procdecl.result_type)
     in
     let procdecl =
@@ -1519,63 +1218,60 @@ let update_function_signatures lang class_method_index method_class_index ~mangl
     in
     procdecl
   in
-  let offset_attributes = create_offset_attributes class_method_index in
+  let offset_attributes = create_offset_attributes !ProcState.class_method_index in
   List.map functions ~f:(update_proc_decl offset_attributes)
 
 
-let translate_llair_functions source_file ~(module_state : ModuleState.t) =
-  let ModuleState.{proc_decls; functions; _} = module_state in
-  List.fold2_exn proc_decls functions ~init:[] ~f:(translate_code source_file ~module_state)
+let translate_llair_functions source_file lang struct_map globals proc_decls class_name_offset_map
+    values =
+  List.fold2_exn proc_decls values
+    ~f:(translate_code proc_decls lang source_file struct_map globals class_name_offset_map)
+    ~init:[]
 
 
-let init_module_state (llair_program : Llair.program) lang =
-  let functions = FuncName.Map.to_list llair_program.functions in
-  let globals_map = build_globals_map llair_program.globals in
+let reset_global_state () =
+  Hash_set.clear Type.signature_structs ;
+  ProcState.class_method_index := Textual.TypeName.Map.empty ;
+  ProcState.method_class_index := Textual.ProcName.Map.empty
+
+
+let translate ~source_file (llair_program : Llair.Program.t) lang : Textual.Module.t =
+  reset_global_state () ;
+  let functions = FuncName.Map.to_list llair_program.Llair.functions in
   let struct_map = Llair2TextualType.translate_types_env lang llair_program.typ_defns in
-  let method_class_index = Textual.ProcName.Hashtbl.create 16 in
-  let proc_decls, struct_map =
-    translate_llair_function_signatures lang method_class_index struct_map functions
-  in
-  let mangled_map = Llair2TextualTypeName.compute_mangled_map struct_map in
-  let plain_map = Llair2TextualTypeName.compute_plain_map struct_map in
-  let class_method_index = Textual.TypeName.Hashtbl.create 16 in
-  let struct_map =
-    process_globals lang class_method_index method_class_index ~mangled_map ~struct_map globals_map
-  in
-  let proc_decls =
-    update_function_signatures lang class_method_index method_class_index ~mangled_map ~struct_map
-      ~plain_map proc_decls
-  in
-  let class_name_offset_map =
-    State.ClassMethodIndex.fill_class_name_offset_map class_method_index
-  in
-  let field_offset_map =
-    Field.OffsetIndex.build_field_offset_map ~mangled_map ~plain_map lang struct_map functions
-  in
-  let struct_map = Type.update_struct_map_with_field_names field_offset_map struct_map in
-  let proc_map =
-    List.fold proc_decls ~init:Textual.QualifiedProcName.Map.empty ~f:(fun proc_map proc_decl ->
-        Textual.QualifiedProcName.Map.add proc_decl.Textual.ProcDecl.qualified_name proc_decl
-          proc_map )
-  in
-  ModuleState.init ~functions ~struct_map ~mangled_map ~plain_map ~proc_decls ~proc_map ~globals_map
-    ~lang ~method_class_index ~class_name_offset_map ~field_offset_map
-
-
-let translate ~source_file ~(module_state : ModuleState.t) : Textual.Module.t =
-  let ModuleState.{struct_map; globals_map; lang} = module_state in
+  let proc_decls, struct_map = translate_llair_function_signatures lang struct_map functions in
+  let globals_map = build_globals_map llair_program.Llair.globals in
   let source_file_ = SourceFile.create source_file in
   let globals, proc_descs =
     Textual.VarName.Map.fold
       (fun _ global (globals, proc_descs) ->
-        let global, proc_desc_opt = to_textual_global source_file_ ~module_state global in
+        let global, proc_desc_opt = to_textual_global lang ~struct_map global in
+        let proc_desc_opt =
+          Option.map ~f:(fun proc_desc -> Textual.Module.Proc proc_desc) proc_desc_opt
+        in
         (Textual.Module.Global global :: globals, Option.to_list proc_desc_opt @ proc_descs) )
       globals_map ([], [])
   in
-  let procs = translate_llair_functions source_file_ ~module_state in
+  let proc_decls = update_function_signatures lang ~struct_map proc_decls in
+  let class_name_offset_map = ProcState.fill_class_name_offset_map ProcState.class_method_index in
+  let procs =
+    translate_llair_functions source_file_ lang struct_map globals_map proc_decls
+      class_name_offset_map functions
+  in
+  let procs =
+    List.fold
+      ~f:(fun procs proc ->
+        match proc with
+        | ProcDecl proc_decl ->
+            Textual.Module.Procdecl proc_decl :: procs
+        | ProcDesc proc_desc ->
+            Textual.Module.Proc proc_desc :: procs )
+      procs ~init:[]
+  in
   let structs =
-    Textual.TypeName.Map.bindings struct_map
-    |> List.map ~f:(fun (_, struct_) -> Textual.Module.Struct struct_)
+    List.map
+      ~f:(fun (_, struct_) -> Textual.Module.Struct struct_)
+      (Textual.TypeName.Map.bindings struct_map)
   in
   let decls = procs @ proc_descs @ globals @ structs in
   let attrs = [Textual.Attr.mk_source_language lang] in

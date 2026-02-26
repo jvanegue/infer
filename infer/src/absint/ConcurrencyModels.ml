@@ -356,10 +356,9 @@ let is_android_lifecycle_method tenv pname =
            | ObjcClass _
            | ObjcProtocol _
            | PythonClass _
-           | SwiftClass _
            | ObjcBlock _
            | CFunction _
-           | SwiftClosure _ ->
+           | SwiftClass _ ->
                false
            | JavaClass java_class_name ->
                JavaClassName.package java_class_name
@@ -379,7 +378,7 @@ let is_android_lifecycle_method tenv pname =
   in
   let test_pname pname =
     match (pname : Procname.t) with
-    | C _ | Rust _ | Erlang _ | Hack _ | Block _ | ObjC_Cpp _ | CSharp _ | Python _ | Swift _ ->
+    | C _ | Erlang _ | Hack _ | Block _ | ObjC_Cpp _ | CSharp _ | Python _ | Swift _ ->
         false
     | Java _ ->
         method_starts_with_on pname

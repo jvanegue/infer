@@ -28,8 +28,6 @@ module Target : sig
     | InstanceReference
     | FieldsOfValue of (string * procedure_target) list
 
-  val pp_procedure_target : F.formatter -> procedure_target -> unit
-
   type field_target = GetField | SetField
 end
 

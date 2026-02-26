@@ -8,19 +8,16 @@
 open! IStd
 module F = Format
 
-type t [@@deriving compare, equal, yojson_of, sexp, hash, normalize]
+type t =
+  {classname: string; plain_name: string option [@compare.ignore] [@equal.ignore] [@hash.ignore]}
+[@@deriving compare, equal, yojson_of, sexp, hash, normalize]
 
 val pp : F.formatter -> t -> unit
 
 val pp_full : F.formatter -> t -> unit
 
-val pp_plain_name : F.formatter -> t -> unit
-
 val to_string : t -> string
 
-val mangled : t -> string
-(** retrieve the mangled name *)
+val classname : t -> string
 
 val of_string : ?plain_name:string -> string -> t
-(** make a class name out of its mangled name and optionally its [plain_name] NB only non-empty
-    [plain_names] can be used *)

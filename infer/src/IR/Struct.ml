@@ -409,11 +409,10 @@ let merge typename ~newer ~current =
   | ErlangType _
   | ObjcClass _
   | ObjcProtocol _
-  | SwiftClass _
   | CppClass _
   | ObjcBlock _
   | CFunction _
-  | SwiftClosure _ ->
+  | SwiftClass _ ->
       if not (is_dummy newer) then newer else current
   | JavaClass _ when is_dummy newer ->
       current

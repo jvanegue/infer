@@ -44,21 +44,20 @@ let run_cmd cmd frontend =
 
 
 let llvm_capture ~compiler command args =
-  let cmd, source_extension =
+  let cmd =
     match compiler with
     | Swiftc ->
-        (command :: (args @ ["-emit-bc"; "-o"; "-"]), ".swift")
+        (command :: args) @ ["-emit-bc"; "-o"; "-"]
     | Clang ->
-        (command :: (args @ ["-emit-llvm"; "-o"; "-"]), ".c")
+        (command :: args) @ ["-emit-llvm"; "-o"; "-"]
   in
-  let sources =
-    List.filter args ~f:(fun arg ->
-        (not (String.is_prefix ~prefix:"-" arg)) && String.is_suffix ~suffix:source_extension arg )
+  let source_path =
+    let cmd = List.filter cmd ~f:(fun arg -> not (String.is_prefix ~prefix:"-" arg)) in
+    List.last_exn cmd
   in
-  L.debug Capture Quiet "@\n*** Beginning capture of files@\n%s@\n***@\n"
-    (String.concat ~sep:"\n" sources) ;
+  L.debug Capture Quiet "@\n*** Beginning capture of file %s ***@\n" source_path ;
   let cmd = String.concat ~sep:" " cmd in
-  run_cmd cmd (fun chan_in -> run_llvm_frontend ~sources chan_in)
+  run_cmd cmd (fun chan_in -> run_llvm_frontend ~sources:[source_path] chan_in)
 
 
 let capture compiler ~command ~args =
@@ -66,6 +65,12 @@ let capture compiler ~command ~args =
     (Pp.comma_seq F.pp_print_string) args ;
   llvm_capture ~compiler command args ;
   Tenv.Global.load () |> Option.iter ~f:(Tenv.Global.store ~normalize:true)
+
+
+let capture_llair ~source_file ~llair_file =
+  Utils.with_file_in llair_file ~f:(fun llair_in ->
+      let llair_program : Llair.program = Marshal.from_channel llair_in in
+      LlvmFrontend.capture_llair source_file llair_program )
 
 
 let direct_bitcode_capture ~sources ~bitcode =

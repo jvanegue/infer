@@ -58,27 +58,7 @@ module ProcName : NAME (* procedure names, without their attachement type *)
 
 module VarName : sig
   (* variables names *)
-  type t [@@deriving compare, equal, hash]
-
-  val location : t -> Location.t
-
-  val of_string : ?loc:Location.t -> string -> t
-
-  val of_mangled : ?loc:Location.t -> Mangled.t -> t
-
-  val to_string : t -> string
-
-  val to_mangled : t -> Mangled.t
-
-  val pp : F.formatter -> t -> unit
-
-  module Hashtbl : Hashtbl.S with type key = t
-
-  module HashSet : HashSet.S with type elt = t
-
-  module Map : Stdlib.Map.S with type key = t
-
-  module Set : Stdlib.Set.S with type elt = t
+  include NAME
 
   val is_hack_reified_generics_param : t -> bool
 end
@@ -93,8 +73,6 @@ module BaseTypeName : sig
   val swift_tuple_class_name : t
 
   val swift_type_name : t
-
-  val swift_any_type_name : t
 end
 
 module TypeName : sig
@@ -110,10 +88,6 @@ module TypeName : sig
 
   val mk_swift_type_name : ?plain_name:string -> string -> t
 
-  val sil_string : t
-
-  (** the name of the Textual string type *)
-
   val pp : F.formatter -> t -> unit
 
   module Hashtbl : Hashtbl.S with type key = t
@@ -127,10 +101,6 @@ module TypeName : sig
   val hack_generics : t
 
   val wildcard : t
-
-  val swift_mangled_name_of_type_name : t -> string option
-
-  val swift_plain_name_of_type_name : t -> string option
 end
 
 module QualifiedProcName : sig
@@ -256,8 +226,6 @@ module Typ : sig
   val any_type_llvm : t
 
   val any_type_swift : t
-
-  val is_pointer : t -> bool
 end
 
 module Ident : sig
@@ -436,8 +404,6 @@ module rec Exp : sig
 
   val is_zero_exp : t -> bool
 
-  val is_one_exp : t -> bool
-
   val pp : F.formatter -> t -> unit
 end
 
@@ -563,13 +529,6 @@ end
 type transform_error = {loc: Location.t; msg: string Lazy.t}
 
 val pp_transform_error : SourceFile.t -> F.formatter -> transform_error -> unit
-
-val seq_fallible_fold :
-     ?errors:transform_error list
-  -> init:'a
-  -> f:('a -> 'b -> 'a)
-  -> 'b Seq.t
-  -> 'a * transform_error list
 
 exception TextualTransformError of transform_error list
 

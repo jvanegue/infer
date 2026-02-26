@@ -189,11 +189,11 @@ opt_tname:
 
 vname:
   | id=ident
-    { let loc=location_of_pos $startpos(id) in VarName.of_string ~loc id }
+    { { VarName.value=id; loc=location_of_pos $startpos(id) } }
 
 vname_except_load_keyword:
   | id=ident_except_load
-    { let loc=location_of_pos $startpos(id) in VarName.of_string ~loc id }
+    { { VarName.value=id; loc=location_of_pos $startpos(id) } }
 
 opt_qualified_pname_and_lparen:
   | proc_ident=PROC_AND_LPAREN

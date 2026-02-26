@@ -354,26 +354,12 @@ let sem_diff () =
       L.die UserError
         "Expected '--semdiff-current' and '--semdiff-previous' to be specified, or \
          '--semdiff-test-files-index' for tests."
-  | Some (previous_file, current_file), None ->
-      let config_file = Config.semdiff_configuration in
-      Semdiff.semdiff ~config_file ~previous_file ~current_file ;
-      Option.iter Config.issues_tests ~f:(fun out_path ->
-          let json_path = ResultsDir.get_path SemDiff in
-          Diff.write_from_json ~json_path ~out_path )
-  | None, Some index_filename -> (
-      let f node =
-        List.iter Config.semdiff_test_actions ~f:(function
-          | `Normalize ->
-              PythonCompareWithoutTypeAnnot.normalize node |> ignore
-          | `Currify ->
-              PythonSourceAstDiff.TestOnly.store_ast node |> ignore )
-      in
-      match PythonSourceAst.iter_from_index ~f ~index_filename with
-      | Ok () ->
-          ()
-      | Error errors ->
-          if Config.semdiff_test_show_syntax_errors then
-            List.iter errors ~f:(L.user_error "%a" PythonSourceAst.pp_error) )
+  | Some (previous, current), None ->
+      PythonCompareWithoutTypeAnnot.semdiff previous current
+  | None, Some index_filename ->
+      let count = ref 0 in
+      PythonSourceAst.iter_from_index ~f:(fun _node -> incr count) ~index_filename ;
+      F.printf "%d ast(s) have been parsed\n" !count
   | Some _, Some _ ->
       L.die UserError
         "option '--semdiff-test-files-index' can not be used at the same time than \

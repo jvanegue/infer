@@ -29,10 +29,7 @@ val to_string_full : t -> string
 (** Convert a full mangled name to a string *)
 
 val pp : Format.formatter -> t -> unit
-(** Pretty print the plain name *)
-
-val pp_full : Format.formatter -> t -> unit
-(** Pretty print plain and mangled name combined. *)
+(** Pretty print a mangled name *)
 
 val this : t
 

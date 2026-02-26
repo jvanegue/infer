@@ -11,6 +11,7 @@ module L = Logging
 open PulseBasicInterface
 open PulseDomainInterface
 open PulseOperationResult.Import
+module Metadata = AbstractInterpreter.DisjunctiveMetadata
 
 type pre_post_list = ExecutionDomain.summary list [@@deriving yojson_of]
 
@@ -84,7 +85,7 @@ let join summary1 summary2 =
 
 
 let exec_summary_of_post_common ({InterproceduralAnalysis.proc_desc} as analysis_data)
-    ~continue_program ~exception_raised specialization path location
+    ~continue_program ~exception_raised ~infinite_raised specialization path location
     (exec_astate : ExecutionDomain.t) : _ ExecutionDomain.base_t SatUnsat.t =
   let summarize (astate : AbductiveDomain.t)
       ~(exec_domain_of_summary : AbductiveDomain.Summary.summary -> 'a ExecutionDomain.base_t)
@@ -94,8 +95,16 @@ let exec_summary_of_post_common ({InterproceduralAnalysis.proc_desc} as analysis
       AbductiveDomain.Summary.of_post (Procdesc.get_attributes proc_desc) location astate
     in
     match (summary_result : _ result) with
-    | Ok summary ->
-        exec_domain_of_summary summary
+    | Ok summary -> (
+      match exec_domain_of_summary summary with
+      | InfiniteLoop _ as exec_state ->
+          let curnode = Metadata.get_alert_node in
+          let curloc = Procdesc.Node.get_loc (curnode ()) in
+          let error = ReportableError {astate; diagnostic= InfiniteLoopError {location= curloc}} in
+          PulseReport.report_summary_error analysis_data path (error, summary)
+          |> Option.value ~default:exec_state
+      | exec_state ->
+          exec_state )
     | Error (`MemoryLeak (summary, astate, allocator, allocation_trace, location)) ->
         PulseReport.report_summary_error analysis_data path
           ( ReportableError
@@ -152,9 +161,8 @@ let exec_summary_of_post_common ({InterproceduralAnalysis.proc_desc} as analysis
         Attributes.get_invalid attrs
       with
       | None ->
-          ExecutionDomain.(
-            Stopped
-              (LatentInvalidAccess {astate= summary; address; must_be_valid; calling_context= []}) )
+          ExecutionDomain.LatentInvalidAccess
+            {astate= summary; address; must_be_valid; calling_context= []}
       | Some (invalidation, invalidation_trace) ->
           (* NOTE: this probably leads to the error being dropped as the access trace is unlikely to
              contain the reason for invalidation and thus we will filter out the report. TODO:
@@ -179,40 +187,41 @@ let exec_summary_of_post_common ({InterproceduralAnalysis.proc_desc} as analysis
       summarize astate ~exec_domain_of_summary:exception_raised ~is_exceptional_state:true
   | ContinueProgram astate ->
       summarize astate ~exec_domain_of_summary:continue_program ~is_exceptional_state:false
+  | InfiniteLoop astate ->
+      summarize astate ~exec_domain_of_summary:infinite_raised ~is_exceptional_state:false
   (* already a summary but need to reconstruct the variants to make the type system happy :( *)
-  | Stopped (AbortProgram {astate; diagnostic; trace_to_issue}) ->
+  | AbortProgram {astate; diagnostic; trace_to_issue} ->
       PulseReport.report_if_entry_point analysis_data trace_to_issue diagnostic ;
-      Sat (Stopped (AbortProgram {astate; diagnostic; trace_to_issue}))
-  | Stopped (ExitProgram astate) ->
-      Sat (Stopped (ExitProgram astate))
-  | Stopped (LatentAbortProgram {astate; latent_issue}) ->
-      Sat (Stopped (LatentAbortProgram {astate; latent_issue}))
-  | Stopped (LatentInvalidAccess {astate; address; must_be_valid; calling_context}) ->
-      Sat (Stopped (LatentInvalidAccess {astate; address; must_be_valid; calling_context}))
-  | Stopped (LatentSpecializedTypeIssue {astate; specialized_type; trace}) -> (
+      Sat (AbortProgram {astate; diagnostic; trace_to_issue})
+  | ExitProgram astate ->
+      Sat (ExitProgram astate)
+  | LatentAbortProgram {astate; latent_issue} ->
+      Sat (LatentAbortProgram {astate; latent_issue})
+  | LatentInvalidAccess {astate; address; must_be_valid; calling_context} ->
+      Sat (LatentInvalidAccess {astate; address; must_be_valid; calling_context})
+  | LatentSpecializedTypeIssue {astate; specialized_type; trace} -> (
     match specialization with
     | Some specialization
       when Specialization.Pulse.has_type_in_specialization specialization specialized_type ->
-        Sat (Stopped (LatentSpecializedTypeIssue {astate; specialized_type; trace}))
+        Sat (LatentSpecializedTypeIssue {astate; specialized_type; trace})
     | _ ->
         let diagnostic =
           Diagnostic.HackCannotInstantiateAbstractClass {type_name= specialized_type; trace}
         in
         PulseReport.report analysis_data ~is_suppressed:false ~latent:false diagnostic ;
         Sat
-          (Stopped
-             (AbortProgram
-                { astate
-                ; diagnostic
-                ; trace_to_issue=
-                    Immediate {location= Procdesc.get_loc proc_desc; history= ValueHistory.epoch} }
-             ) ) )
+          (AbortProgram
+             { astate
+             ; diagnostic
+             ; trace_to_issue=
+                 Immediate {location= Procdesc.get_loc proc_desc; history= ValueHistory.epoch} } ) )
 
 
 let force_exit_program analysis_data path post =
   exec_summary_of_post_common analysis_data None path post
-    ~continue_program:(fun astate -> Stopped (ExitProgram astate))
-    ~exception_raised:(fun astate -> Stopped (ExitProgram astate))
+    ~continue_program:(fun astate -> ExitProgram astate)
+    ~exception_raised:(fun astate -> ExitProgram astate)
+    ~infinite_raised:(fun astate -> ExitProgram astate)
 
 
 let of_posts ({InterproceduralAnalysis.proc_desc} as analysis_data) specialization location posts
@@ -225,6 +234,7 @@ let of_posts ({InterproceduralAnalysis.proc_desc} as analysis_data) specializati
         exec_summary_of_post_common analysis_data specialization path location exec_state
           ~continue_program:(fun astate -> ContinueProgram astate)
           ~exception_raised:(fun astate -> ExceptionRaised astate)
+          ~infinite_raised:(fun astate -> InfiniteLoop astate)
         |> SatUnsat.sat )
   in
   { pre_post_list
@@ -301,14 +311,12 @@ let mk_latent_non_POD_nil_messaging tenv proc_name (proc_attrs : ProcAttributes.
     >>| AccessResult.ignore_leaks >>| AccessResult.of_abductive_summary_result
     >>| AccessResult.with_summary
   in
-  ExecutionDomain.(
-    Stopped
-      (LatentInvalidAccess
-         { astate= summary
-         ; address= Decompiler.find self_value astate
-         ; must_be_valid=
-             (trace, Some (SelfOfNonPODReturnMethod (ProcAttributes.to_return_type proc_attrs)))
-         ; calling_context= [] } ) )
+  ExecutionDomain.LatentInvalidAccess
+    { astate= summary
+    ; address= Decompiler.find self_value astate
+    ; must_be_valid=
+        (trace, Some (SelfOfNonPODReturnMethod (ProcAttributes.to_return_type proc_attrs)))
+    ; calling_context= [] }
 
 
 let mk_objc_nil_messaging_summary tenv (proc_attrs : ProcAttributes.t) =

@@ -11,17 +11,15 @@ module F = Format
 let () = if not (Py.is_initialized ()) then Py.initialize ~interpreter:Version.python_exe ()
 
 let ast_diff_equal prog1 prog2 =
-  let diffs =
-    PythonCompareWithoutTypeAnnot.test_ast_diff ~debug:false ~test_eqsat:true prog1 prog2
-  in
-  List.iter diffs ~f:(F.printf "%a\n" Diff.pp_explicit)
+  let diffs = PythonCompareWithoutTypeAnnot.ast_diff prog1 prog2 in
+  List.iter diffs ~f:(F.printf "%s\n")
 
 
 let%expect_test "test_basic_fun_good" =
   let prog1 = "def f():\n  return 1" in
   let prog2 = "def f():\n  return 1" in
   ast_diff_equal prog1 prog2 ;
-  [%expect {| |}]
+  [%expect {||}]
 
 
 let%expect_test "test_basic_fun_bad" =
@@ -45,7 +43,7 @@ CATEGORIES_TO_REMOVE: dict[str, int | None] = {'a': 1, 'b': 2, 'c': 3}
 |}
   in
   ast_diff_equal prog1 prog2 ;
-  [%expect {| |}]
+  [%expect {||}]
 
 
 let%expect_test "test_const_type_annot_bad" =
@@ -90,7 +88,7 @@ def write_html(json_file_path:str) -> None: pass
 |}
   in
   ast_diff_equal prog1 prog2 ;
-  [%expect {| |}]
+  [%expect {||}]
 
 
 let%expect_test "test_fun_type_annot_bad" =
@@ -157,7 +155,7 @@ def greet(name: Any) -> str:
 |}
   in
   ast_diff_equal prog1 prog2 ;
-  [%expect {| |}]
+  [%expect {||}]
 
 
 let%expect_test "test_with_import_dir_good" =
@@ -171,7 +169,7 @@ def main():
     print("Hello World!")
 |} in
   ast_diff_equal prog1 prog2 ;
-  [%expect {| |}]
+  [%expect {||}]
 
 
 let%expect_test "test_import_dir_alias_good" =
@@ -185,7 +183,7 @@ def main():
     print("Hello World!")
 |} in
   ast_diff_equal prog1 prog2 ;
-  [%expect {| |}]
+  [%expect {||}]
 
 
 let%expect_test "test_import_from_dir_good" =
@@ -199,7 +197,7 @@ def main():
     print("Hello World!")
 |} in
   ast_diff_equal prog1 prog2 ;
-  [%expect {| |}]
+  [%expect {||}]
 
 
 let%expect_test "test_import_from_dir_alias_good" =
@@ -213,7 +211,7 @@ def main():
     print("Hello World!")
 |} in
   ast_diff_equal prog1 prog2 ;
-  [%expect {| |}]
+  [%expect {||}]
 
 
 let%expect_test "test_import_from_dir_alias_bad" =
@@ -252,7 +250,7 @@ print(greet.__annotations__)
 |}
   in
   ast_diff_equal prog1 prog2 ;
-  [%expect {| |}]
+  [%expect {||}]
 
 
 let%expect_test "test_change_async_fun_param_type_good" =
@@ -275,7 +273,7 @@ async def foo(
 |}
   in
   ast_diff_equal prog1 prog2 ;
-  [%expect {| |}]
+  [%expect {||}]
 
 
 let%expect_test "test_change_lambda_param_type_good" =
@@ -292,7 +290,7 @@ print(square(5))
 |}
   in
   ast_diff_equal prog1 prog2 ;
-  [%expect {| |}]
+  [%expect {||}]
 
 
 let%expect_test "test_change_async_fun_body_bad" =
@@ -320,7 +318,7 @@ def foo(self, x) -> None:
             print(1)
 |} in
   ast_diff_equal prog1 prog2 ;
-  [%expect {| |}]
+  [%expect {||}]
 
 
 let%expect_test "test_change_class_to_is_instance_bad" =
@@ -365,7 +363,7 @@ async def foo(self, **kwargs): pass
 async def foo(self, **kwargs: int): pass
 |} in
   ast_diff_equal prog1 prog2 ;
-  [%expect {| |}]
+  [%expect {||}]
 
 
 let%expect_test "test_change_fun_type_bad" =
@@ -420,7 +418,7 @@ def foo(x) -> None: pass
 def foo(x:float) -> None: pass
 |} in
   ast_diff_equal prog1 prog2 ;
-  [%expect {| |}]
+  [%expect {||}]
 
 
 let%expect_test "test_change_fun_type_ellipsis_good" =
@@ -433,7 +431,7 @@ from typing import Callable
 def foo(f: Callable[..., int]) -> None: pass
 |} in
   ast_diff_equal prog1 prog2 ;
-  [%expect {| |}]
+  [%expect {||}]
 
 
 let%expect_test "test_change_type_case_sensitive_ret_good" =
@@ -445,7 +443,7 @@ def foo() -> Dict[str, str]: pass
 def foo() -> dict[str, str]: pass
 |} in
   ast_diff_equal prog1 prog2 ;
-  [%expect {| |}]
+  [%expect {||}]
 
 
 let%expect_test "test_change_type_case_sensitive_param_good" =
@@ -457,7 +455,7 @@ def foo(x: Dict[str, str]) -> None: pass
 def foo(x: dict[str, str]) -> None: pass
 |} in
   ast_diff_equal prog1 prog2 ;
-  [%expect {| |}]
+  [%expect {||}]
 
 
 let%expect_test "test_change_type_case_sensitive_bad" =
@@ -577,7 +575,7 @@ def foo(x: Any) -> None: pass
 def foo(x: object) -> None: pass
 |} in
   ast_diff_equal prog1 prog2 ;
-  [%expect {| |}]
+  [%expect {||}]
 
 
 let%expect_test "test_change_any_type_bad" =
@@ -602,7 +600,7 @@ def foo() -> Dict[str, Dict[str, Set[str]]]: pass
 def foo() -> dict[str, dict[str, set[str]]]: pass
 |} in
   ast_diff_equal prog1 prog2 ;
-  [%expect {| |}]
+  [%expect {||}]
 
 
 let%expect_test "test_change_type_case_sensitive_rec_bad" =
@@ -620,47 +618,4 @@ def foo() -> dict[str, dict[str, str]]: pass
     {|
     (Line 2) + def foo() -> dict[str, dict[str, str]]: pass
     (Line 3) - def foo() -> Dict[str, Dict[str, Set[str]]]: pass
-    |}]
-
-
-let%expect_test "test_field_assign_type" =
-  let prog1 = {|
-def __init__(self):
-    self.msg = "hello"
-|} in
-  let prog2 = {|
-def __init__(self) -> None:
-    self.msg : str = "hello"
-|} in
-  ast_diff_equal prog1 prog2 ;
-  [%expect {| (DIFF 1 0) |}]
-
-
-let%expect_test "for loop bad" =
-  let prog1 =
-    {|
-def main():
-    for i in range(7, 13):
-        o.mapping[i] -= 7
-    action1()
-    action2()
-|}
-  in
-  let prog2 =
-    {|
-def main():
-    temp_dict = dict(o.mapping)
-    for i in range(7, 13):
-        temp_dict[i] -= 7
-    o.mapping = temp_dict
-    action1()
-    action2()
-|}
-  in
-  (*  Diff.debug := true ; *)
-  ast_diff_equal prog1 prog2 ;
-  [%expect
-    {|
-    (Line 3) +     temp_dict = dict(o.mapping)
-    (Line 6) +     o.mapping = temp_dict
     |}]

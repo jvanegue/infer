@@ -193,12 +193,6 @@ module Node = struct
     let pp = pp_id
   end)
 
-  module IdSet = PrettyPrintable.MakePPSet (struct
-    type t = id [@@deriving compare]
-
-    let pp = pp_id
-  end)
-
   let get_exn node = node.exn
 
   (** Get the name of the procedure the node belongs to *)
@@ -497,9 +491,6 @@ module NodeSet = Node.NodeSet
 (** Map with node id keys. *)
 module IdMap = Node.IdMap
 
-(** Set of node ids. *)
-module IdSet = Node.IdSet
-
 (** procedure description *)
 type t =
   { mutable attributes: ProcAttributes.t  (** attributes of the procedure *)
@@ -743,11 +734,14 @@ module PreProcCfg = struct
     let id = Node.get_id
 
     module IdMap = IdMap
-    module IdSet = IdSet
   end
 end
 
-module WtoIterator = WeakTopologicalOrder.Iterator (PreProcCfg)
+module IdSet = PrettyPrintable.MakePPSet (struct
+  type t = Node.id [@@deriving compare]
+
+  let pp = Node.pp_id
+end)
 
 let add_loop_metadata pdesc wto =
   let heads =
@@ -760,25 +754,17 @@ let add_loop_metadata pdesc wto =
     L.debug Analysis Quiet "[WTO][%a] {%s=%a; header=%a}\n" Procname.pp_fullname_only pname kind
       pp_node node pp_node succ
   in
-  let debug_exit node succ header_id =
-    let pp_node fmt node = Node.pp_id fmt node.Node.id in
-    let pname = get_proc_name pdesc in
-    L.debug Analysis Quiet "[WTO][%a] {node=%a; succ=%a; exited_loop_header=%d}\n"
-      Procname.pp_fullname_only pname pp_node node pp_node succ header_id
-  in
-  WtoIterator.iter_nodes wto ~get_succs:Node.get_succs ~f:(fun ~node ~succ ~exited_loops ->
-      if IdSet.mem succ.Node.id heads then
-        if node.Node.wto_index < succ.Node.wto_index then (
-          if Config.trace_wto then debug "entry" node succ ;
-          let header_id = succ.Node.id in
-          Node.append_instrs node [Sil.Metadata (LoopEntry {header_id})] )
-        else (
-          if Config.trace_wto then debug "loop_body_end" node succ ;
-          let header_id = succ.Node.id in
-          Node.append_instrs node [Sil.Metadata (LoopBackEdge {header_id})] ) ;
-      List.iter exited_loops ~f:(fun header_id ->
-          if Config.trace_wto then debug_exit node succ header_id ;
-          Node.prepend_instrs succ [Sil.Metadata (LoopExit {header_id})] ) )
+  List.iter pdesc.nodes ~f:(fun node ->
+      List.iter (Node.get_succs node) ~f:(fun succ ->
+          if IdSet.mem succ.Node.id heads then
+            if node.Node.wto_index < succ.Node.wto_index then (
+              if Config.trace_wto then debug "entry" node succ ;
+              let header_id = succ.Node.id in
+              Node.append_instrs node [Sil.Metadata (LoopEntry {header_id})] )
+            else (
+              if Config.trace_wto then debug "loop_body_end" node succ ;
+              let header_id = succ.Node.id in
+              Node.append_instrs node [Sil.Metadata (LoopBackEdge {header_id})] ) ) )
 
 
 module WTO = WeakTopologicalOrder.Bourdoncle_SCC (PreProcCfg)
@@ -789,7 +775,7 @@ let init_wto pdesc =
   let pp_node fmt node = Node.pp_id fmt node.Node.id in
   let pname = get_proc_name pdesc in
   if Config.trace_wto then
-    L.debug Analysis Quiet "[WTO][%a] order=%a@\n" Procname.pp_fullname_only pname
+    L.debug Analysis Quiet "[WTO][%a] %a@\n" Procname.pp_fullname_only pname
       (WeakTopologicalOrder.Partition.pp ~pp_node)
       wto ;
   let (_ : int) =
@@ -797,7 +783,7 @@ let init_wto pdesc =
         node.Node.wto_index <- idx ;
         idx + 1 )
   in
-  if Config.pulse_experimental_infinite_loop_checker then add_loop_metadata pdesc wto ;
+  if Config.pulse_experimental_infinite_loop_checker_v2 then add_loop_metadata pdesc wto ;
   pdesc.wto <- Some wto
 
 

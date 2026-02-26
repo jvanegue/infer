@@ -11,8 +11,6 @@ module L = Logging
 module MF = MarkupFormatter
 module Domain = AnnotationReachabilityDomain
 
-type matcher = {regexp: Str.regexp; positive: bool}
-
 let annotation_of_str annot_str = {Annot.class_name= annot_str; parameters= []}
 
 let dummy_constructor_annot = annotation_of_str "__infer_is_constructor"
@@ -78,37 +76,22 @@ let is_allocator tenv pname =
       false
 
 
+type custom_model = {method_regex: string; annotation: string} [@@deriving of_yojson]
+
+type custom_models = custom_model list [@@deriving of_yojson]
+
 let parse_custom_models () =
-  let parse_matchers value =
-    match value with
-    | `List _ ->
-        (* Old format: list of strings, all positive *)
-        value |> Yojson.Safe.Util.to_list
-        |> List.map ~f:Yojson.Safe.Util.to_string
-        |> List.map ~f:(fun s -> {regexp= Str.regexp s; positive= true})
-    | `Assoc _ ->
-        (* New format: object with "allow" and "block" fields *)
-        let allow_list =
-          value |> Yojson.Safe.Util.member "allow" |> Yojson.Safe.Util.to_list
-          |> List.map ~f:Yojson.Safe.Util.to_string
-          |> List.map ~f:(fun s -> {regexp= Str.regexp s; positive= true})
-        in
-        let block_list =
-          value |> Yojson.Safe.Util.member "block" |> Yojson.Safe.Util.to_list
-          |> List.map ~f:Yojson.Safe.Util.to_string
-          |> List.map ~f:(fun s -> {regexp= Str.regexp s; positive= false})
-        in
-        allow_list @ block_list
-    | _ ->
-        []
-  in
   match Config.annotation_reachability_custom_models with
   (* The default value for JSON options is an empty list and not an empty object *)
   | `List [] ->
       IString.Map.empty
   | json ->
       json |> Yojson.Safe.Util.to_assoc
-      |> List.map ~f:(fun (key, value) -> (key, parse_matchers value))
+      |> List.map ~f:(fun (key, val_arr) ->
+             ( key
+             , val_arr |> Yojson.Safe.Util.to_list
+               |> List.map ~f:Yojson.Safe.Util.to_string
+               |> List.map ~f:Str.regexp ) )
       |> Stdlib.List.to_seq |> IString.Map.of_seq
 
 
@@ -131,15 +114,8 @@ let check_modeled_annotation models annot pname =
   let method_name =
     Procname.to_string ~verbosity:(if Procname.is_erlang pname then Verbose else FullNameOnly) pname
   in
-  Option.exists (IString.Map.find_opt annot.Annot.class_name models) ~f:(fun matchers ->
-      let pos_match =
-        List.exists matchers ~f:(fun m -> m.positive && Str.string_match m.regexp method_name 0)
-      in
-      let neg_match =
-        List.exists matchers ~f:(fun m ->
-            (not m.positive) && Str.string_match m.regexp method_name 0 )
-      in
-      pos_match && not neg_match )
+  Option.exists (IString.Map.find_opt annot.Annot.class_name models) ~f:(fun methods ->
+      List.exists methods ~f:(fun r -> Str.string_match r method_name 0) )
 
 
 let find_override_with_annot annot models tenv pname =
@@ -194,7 +170,7 @@ module AnnotationSpec = struct
     ; name: string  (** Short name to be added at the beginning of the report *)
     ; description: string  (** Extra description to be added to the issue report *)
     ; issue_type: IssueType.t
-    ; models: matcher list IString.Map.t  (** model functions as if they were annotated *)
+    ; models: Str.regexp list IString.Map.t  (** model functions as if they were annotated *)
     ; pre_check: Domain.t InterproceduralAnalysis.t -> unit
           (** additional check before reporting *) }
 end

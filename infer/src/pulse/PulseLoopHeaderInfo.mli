@@ -27,8 +27,6 @@ val push_loop_info : id -> Timestamp.t -> t -> t
 
 val init_loop_info : id -> t -> t
 
-val remove_loop_info : id -> t -> t
-
 val get_iteration_index : id -> t -> int
 
 val pp : F.formatter -> t -> unit

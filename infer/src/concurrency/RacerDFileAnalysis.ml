@@ -635,14 +635,8 @@ let should_report_on_class (classname : Typ.Name.t) class_summaries =
       true
   | CppClass _ | ObjcClass _ | ObjcProtocol _ | CStruct _ ->
       class_has_concurrent_method class_summaries
-  | CUnion _
-  | ErlangType _
-  | HackClass _
-  | PythonClass _
-  | SwiftClass _
-  | ObjcBlock _
-  | CFunction _
-  | SwiftClosure _ ->
+  | CUnion _ | ErlangType _ | HackClass _ | PythonClass _ | ObjcBlock _ | CFunction _ | SwiftClass _
+    ->
       false
 
 

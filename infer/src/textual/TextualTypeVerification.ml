@@ -12,35 +12,19 @@ open Textual
 module TypeNameBridge = struct
   include TypeName
 
+  (** the name of the Textual string type *)
+  let sil_string = of_string "String"
+
   (** the name of the Textual type of all types (do not ask what it the type of this type itself
       please...) *)
   let sil_type_of_types = of_string "TYPE"
 end
 
 let is_any_type_llvm lang typ =
-  (Textual.Lang.is_c lang && Typ.equal typ Textual.Typ.any_type_llvm)
-  || (Textual.Lang.is_swift lang && Typ.equal typ Textual.Typ.any_type_swift)
-
-
-let is_float_swift lang typ =
-  if Textual.Lang.is_swift lang then
-    let cgfloat = "CGFloat" in
-    match typ with
-    | Typ.Ptr (Struct struct_name) -> (
-      match TypeName.swift_plain_name_of_type_name struct_name with
-      | Some plain_name when String.equal plain_name cgfloat ->
-          true
-      | _ -> (
-        match TypeName.swift_mangled_name_of_type_name struct_name with
-        | Some mangled_name when String.is_substring mangled_name ~substring:cgfloat ->
-            true
-        | Some "TSf" ->
-            true
-        | _ ->
-            false ) )
-    | _ ->
-        false
-  else false
+  match typ with
+  | _ ->
+      (Textual.Lang.is_c lang || Textual.Lang.is_swift lang)
+      && Typ.equal typ Textual.Typ.any_type_llvm
 
 
 (** is it safe to assign a value of type [given] to a variable of type [assigned] *)
@@ -73,27 +57,13 @@ let rec compat lang ~assigned:(t1 : Typ.t) ~given:(t2 : Typ.t) =
       Typ.equal fun1 fun2
   | (_, Ptr Void | Ptr Void, _) when Textual.Lang.is_c lang || Textual.Lang.is_swift lang ->
       true
-  | Float, typ | typ, Float ->
-      is_float_swift lang typ
-  | Ptr typ1, typ2 | typ1, Ptr typ2 ->
-      is_any_type_llvm lang typ1 || is_any_type_llvm lang typ2
   | _, _ ->
       false
 
 
 let is_ptr typ = match typ with Typ.Ptr _ -> true | Typ.Void -> true | _ -> false
 
-let is_ptr_struct lang typ =
-  match typ with
-  | Typ.Ptr (Struct _) | Typ.Void ->
-      true
-  | Typ.Ptr Void when Textual.Lang.is_c lang || Textual.Lang.is_swift lang ->
-      true
-  | Typ.Float when Textual.Lang.is_swift lang ->
-      true
-  | _ ->
-      false
-
+let is_ptr_struct typ = match typ with Typ.Ptr (Struct _) | Typ.Void -> true | _ -> false
 
 let is_int lang typ =
   match typ with
@@ -199,8 +169,8 @@ let rec loc_of_exp exp =
       loc_of_exp closure
   | Var _ ->
       None
-  | Lvar varname ->
-      Some (VarName.location varname)
+  | Lvar {loc} ->
+      Some loc
   | Load {exp} | Field {exp} ->
       loc_of_exp exp
   | Index (exp, _) ->
@@ -368,7 +338,7 @@ let typeof_var var : Typ.t monad =
   let optional_typ = VarName.Map.find_opt var state.vars in
   option_value_map optional_typ state
     ~none:
-      (let loc = VarName.location var in
+      (let loc = var.VarName.loc in
        let* () = add_error (VarTypeNotDeclared {var; loc}) in
        abort )
     ~some:ret
@@ -443,7 +413,7 @@ let typeof_const (const : Const.t) : Typ.t =
   | Null ->
       Null
   | Str _ ->
-      Ptr (Struct TypeName.sil_string)
+      Ptr (Struct TypeNameBridge.sil_string)
   | Float _ ->
       Float
 
@@ -578,7 +548,7 @@ and typeof_exp (exp : Exp.t) : (Exp.t * Typ.t) monad =
       (exp, Typ.Ptr typ)
   | Field {exp; field} ->
       let* loc = get_location in
-      let* exp = typecheck_exp exp ~check:(is_ptr_struct lang) ~expected:PtrStruct ~loc in
+      let* exp = typecheck_exp exp ~check:is_ptr_struct ~expected:PtrStruct ~loc in
       (* remark: we could check if field is declared in the type of exp, but this may be too
          strong for some weakly typed frontend langages *)
       let+ field_typ = typeof_field field in

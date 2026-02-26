@@ -169,12 +169,15 @@ let is_modeled_pure tenv pname =
 let extract_impurity tenv pname formals (exec_state : ExecutionDomain.summary) : ImpurityDomain.t =
   let astate, exited =
     match exec_state with
-    | Stopped (ExitProgram astate) ->
+    | ExitProgram astate ->
         (astate, true)
-    | ContinueProgram astate | ExceptionRaised astate ->
+    | ContinueProgram astate | ExceptionRaised astate | InfiniteLoop astate ->
         (astate, false)
-    | Stopped exec ->
-        (ExecutionDomain.summary_of_stopped_execution exec, false)
+    | AbortProgram {astate}
+    | LatentAbortProgram {astate}
+    | LatentInvalidAccess {astate}
+    | LatentSpecializedTypeIssue {astate} ->
+        (astate, false)
   in
   let pre_heap = (AbductiveDomain.Summary.get_pre astate).BaseDomain.heap in
   let post = AbductiveDomain.Summary.get_post astate in

@@ -9,11 +9,6 @@ open! IStd
 module L = Logging
 open Textual
 
-let seq_fallible_map ?(errors = []) ~f seq =
-  let rev_result, errors = seq_fallible_fold ~errors ~init:[] ~f:(fun acc x -> f x :: acc) seq in
-  (List.rev rev_result, errors)
-
-
 let get_fresh_ident ({nodes; fresh_ident} : ProcDesc.t) =
   match fresh_ident with
   | None ->
@@ -49,20 +44,13 @@ let create_fresh_label_generator ~prefix ({nodes} : ProcDesc.t) =
   fresh_label
 
 
-let fallible_module_map_procs ?(errors = []) ~f (module_ : Module.t) =
+let module_map_procs ~f (module_ : Module.t) =
   let open Module in
-  let decls, errors =
-    seq_fallible_map ~errors
-      ~f:(fun decl ->
+  let decls =
+    List.map module_.decls ~f:(fun decl ->
         match decl with Proc pdesc -> Proc (f pdesc) | Global _ | Struct _ | Procdecl _ -> decl )
-      (Stdlib.List.to_seq module_.decls)
   in
-  ({module_ with decls}, errors)
-
-
-let module_map_procs ~f module_ =
-  let module_, errors = fallible_module_map_procs ~f module_ in
-  if List.is_empty errors then module_ else raise (TextualTransformError errors)
+  {module_ with decls}
 
 
 let module_map_procdecl ~f (module_ : Module.t) =
@@ -103,12 +91,13 @@ module FixClosureAppExpr = struct
     if Option.is_some pdesc.fresh_ident then
       L.die InternalError "we assume fresh ident has not been computed yet" ;
     let globals_and_locals =
-      List.fold pdesc.locals ~init:globals ~f:(fun set (varname, _) -> VarName.Set.add varname set)
+      List.fold pdesc.locals ~init:globals ~f:(fun set (varname, _) ->
+          IString.Set.add varname.VarName.value set )
     in
     let is_varname ({enclosing_class; name} : QualifiedProcName.t) =
       match enclosing_class with
-      | TopLevel when VarName.Set.mem (VarName.of_string name.value) globals_and_locals ->
-          let varname : VarName.t = VarName.of_string ~loc:name.loc name.value in
+      | TopLevel when IString.Set.mem name.value globals_and_locals ->
+          let varname : VarName.t = {value= name.value; loc= name.loc} in
           Some (Exp.Load {exp= Lvar varname; typ= None})
       | TopLevel when is_ident name.value ->
           let ident =
@@ -190,10 +179,10 @@ module FixClosureAppExpr = struct
   let transform (module_ : Module.t) =
     let open Module in
     let globals =
-      List.fold module_.decls ~init:VarName.Set.empty ~f:(fun set decl ->
+      List.fold module_.decls ~init:IString.Set.empty ~f:(fun set decl ->
           match decl with
           | Global {name} ->
-              VarName.Set.add name set
+              IString.Set.add name.VarName.value set
           | Proc _ | Struct _ | Procdecl _ ->
               set )
     in
@@ -594,8 +583,7 @@ module TransformClosures = struct
   let mk_fielddecl (varname : VarName.t) (typ : Typ.t) : FieldDecl.t =
     (* each captured variable will be associated to an instance field *)
     let qualified_name : qualified_fieldname =
-      { enclosing_class= TypeName.wildcard
-      ; name= {value= VarName.to_string varname; loc= VarName.location varname} }
+      {enclosing_class= TypeName.wildcard; name= {value= varname.value; loc= varname.loc}}
     in
     {qualified_name; typ; attributes= []}
 
@@ -665,7 +653,7 @@ module TransformClosures = struct
     let state = {state with State.fresh_ident= Ident.of_int 0} in
     let procdecl = closure_call_procdecl loc typename closure nb_captured in
     let start : NodeName.t = {value= "entry"; loc} in
-    let this_var : VarName.t = VarName.of_string ~loc "__this" in
+    let this_var : VarName.t = {value= "__this"; loc} in
     let state, args, instrs =
       List.fold fields ~init:(state, [], [])
         ~f:(fun (state, args, instrs) ({qualified_name= field; typ} : FieldDecl.t) ->
@@ -1007,8 +995,6 @@ let remove_effects_in_subexprs lang decls_env module_ =
           let fresh = state.State.fresh_ident in
           let new_instr : Instr.t = Let {id= Some fresh; exp= Call {proc; args; kind}; loc} in
           (Var fresh, State.push_instr new_instr state |> State.incr_fresh)
-    | Closure {proc; captured; params; attributes} when Lang.is_swift lang ->
-        (Closure {proc; captured; params; attributes}, state)
     | Closure {proc; captured; params; attributes} ->
         let captured, state = flatten_exp_list loc captured state in
         let signature = TransformClosures.signature_body lang proc captured params in
@@ -1152,12 +1138,11 @@ let remove_effects_in_subexprs lang decls_env module_ =
 
 
 (* TODO (T131910123): replace with STORE+LOAD transform *)
-let let_propagation ?(errors = []) (module_ : Module.t) =
+let let_propagation module_ =
   let get id ident_map =
     try Ident.Map.find id ident_map
     with Stdlib.Not_found ->
-      let msg = lazy (F.asprintf "let_propagation.get failed: unknown identifier %a" Ident.pp id) in
-      raise (TextualTransformError [{msg; loc= Location.Unknown}])
+      L.die InternalError "Textual.let_propagation.get failed: unknown identifier %a" Ident.pp id
   in
   let build_equations pdesc : Exp.t Ident.Map.t =
     (* we collect all rule of the form [id = exp] where [exp] is not a regular call nor an
@@ -1188,14 +1173,9 @@ let let_propagation ?(errors = []) (module_ : Module.t) =
     let rec visit id ((status, sorted_idents) as state) =
       match Ident.Map.find_opt id status with
       | Some `VisitInProgress ->
-          let msg =
-            lazy
-              (F.asprintf
-                 "sort_equation was given a set of equations with cyclic dependencies: id %a is \
-                  already in the process of being visited"
-                 Ident.pp id )
-          in
-          raise (TextualTransformError [{msg; loc= Location.Unknown}])
+          L.die InternalError
+            "Textual transformation error: sort_equation was given a set of equations with cyclic \
+             dependencies"
       | Some `VisitCompleted ->
           state
       | None ->
@@ -1234,18 +1214,10 @@ let let_propagation ?(errors = []) (module_ : Module.t) =
     in
     Subst.of_procdesc ~varify:false pdesc saturated_equations
   in
-  fallible_module_map_procs ~errors ~f:transform module_
+  module_map_procs ~f:transform module_
 
 
-let let_propagation_exn (module_ : Module.t) =
-  match let_propagation module_ with
-  | result, [] ->
-      result
-  | _, errors ->
-      raise (TextualTransformError errors)
-
-
-let out_of_ssa ?(errors = []) (module_ : Module.t) =
+let out_of_ssa module_ =
   let transform (pdesc : ProcDesc.t) : ProcDesc.t =
     let get_node : NodeName.t -> Node.t =
       let map =
@@ -1273,14 +1245,9 @@ let out_of_ssa ?(errors = []) (module_ : Module.t) =
       | Ok equations ->
           equations
       | Unequal_lengths ->
-          let msg =
-            lazy
-              (F.asprintf
-                 "out_of_ssa: Jmp arguments at %a and block parameters at %a should have the same \
-                  size"
-                 Location.pp call_location Location.pp end_node.label_loc )
-          in
-          raise (TextualTransformError [{msg; loc= Location.Unknown}])
+          L.die InternalError
+            "Jmp arguments at %a and block parameters at %a should have the same size" Location.pp
+            call_location Location.pp end_node.label_loc
     in
     let build_assignements (start_node : Node.t) : Instr.t list =
       match (start_node.last : Terminator.t) with
@@ -1333,15 +1300,7 @@ let out_of_ssa ?(errors = []) (module_ : Module.t) =
     (* no need to update fresh_ident *)
     {pdesc with nodes}
   in
-  fallible_module_map_procs ~errors ~f:transform module_
-
-
-let out_of_ssa_exn module_ =
-  match out_of_ssa module_ with
-  | result, [] ->
-      result
-  | _, errors ->
-      raise (TextualTransformError errors)
+  module_map_procs ~f:transform module_
 
 
 let run lang module_ =
@@ -1354,24 +1313,8 @@ let run lang module_ =
   let decls_env =
     if new_decls_were_added then TextualDecls.make_decls module_ |> snd else decls_env
   in
-  let module_, errors = let_propagation ~errors:[] module_ in
-  let module_, errors = out_of_ssa ~errors module_ in
-  match errors with
-  | [] ->
-      Ok (module_, decls_env)
-  | errors when Config.textual_sil_keep_going ->
-      List.iter errors ~f:(L.internal_error "%a@\n" (Textual.pp_transform_error module_.sourcefile)) ;
-      Ok (module_, decls_env)
-  | errors ->
-      Error errors
-
-
-let run_exn lang module_ =
-  match run lang module_ with
-  | Ok result ->
-      result
-  | Error errors ->
-      raise (TextualTransformError errors)
+  let module_ = module_ |> let_propagation |> out_of_ssa in
+  (module_, decls_env)
 
 
 let fix_hackc_mistranslations module_ =

@@ -195,7 +195,6 @@ type t =
   | Java of Java.t
   | ObjC_Cpp of ObjC_Cpp.t
   | Python of PythonProcname.t
-  | Rust of C.t
   | Swift of SwiftProcname.t
 [@@deriving compare, yojson_of, sexp, hash, normalize]
 
@@ -324,8 +323,6 @@ val get_method : t -> string
 
 val is_objc_block : t -> bool
 (** Return whether the procname is a block procname. *)
-
-val is_swift : t -> bool
 
 val is_cpp_lambda : t -> bool
 (** Return whether the procname is a cpp lambda procname. *)

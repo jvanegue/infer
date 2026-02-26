@@ -92,19 +92,19 @@ extra-source "1_add-debug-info.patch" {
   src:
     "dependencies/llvm/patches/1_add-debug-info.patch"
   checksum:
-    "sha256=562e09a08afc3b4b639ae1b1721ba20d2fe7d2410af11b350602f385b6e1deba"
+    "sha256=25b13e4e61f52c404338909866291b8fb045b4c5aa4e81eafa1901f65cd2bd97"
 }
 extra-source "2_add-LLVMGetAtomicRMWBinOp.patch" {
   src:
     "dependencies/llvm/patches/2_add-LLVMGetAtomicRMWBinOp.patch"
   checksum:
-    "sha256=3022e4efccae3b40f67c786e841ab9b0dd918b45b64ff85a7a82e1ad6fe1a321"
+    "sha256=072b1a1e2d004887126da762e8cc04eca86a89d11eda5ffeec88c0f8e431a1df"
 }
 extra-source "3_fix-null-global_initializer.patch" {
   src:
     "dependencies/llvm/patches/3_fix-null-global_initializer.patch"
   checksum:
-    "sha256=e2d0faca83e2542454606c544478a2847f27c6dbd9ccf9aa352059e7b1407481"
+    "sha256=18c65e1036a4466e2db4082f1da4b5a08c725d0670a3e0518f14dba5c88d3192"
 }
 extra-source "4_LLVMGetGEPSourceElementType.patch" {
   src:
@@ -122,7 +122,7 @@ extra-source "6_LLVMExtractDISubprogramType.patch" {
   src:
     "dependencies/llvm/patches/6_LLVMExtractDISubprogramType.patch"
   checksum:
-    "sha256=090e1b70a75c32b378162e82f4e8028a32f5e49cbc004a7dffc27a8d33f8a129"
+    "sha256=87e7376b7907435d69e8192c1cdccacb058e7ea0cf7c597acb1165dad700c937"
 }
 extra-files: [
   "install.sh"
@@ -131,6 +131,8 @@ extra-files: [
 extra-source "0_AddOCaml.cmake.patch" {
   src:
     "https://raw.githubusercontent.com/ocaml/opam-source-archives/main/patches/llvm/AddOCaml.cmake.patch.18"
-  checksum:
+  checksum: [
     "sha256=a532adaa6938818fbd7f5a49d4de21c0a2d240ecb91636a76b2f745b4b8cb58f"
+    "md5=432ec376b6ffbac44e640c8fb659a7df"
+  ]
 }

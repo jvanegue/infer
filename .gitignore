@@ -23,9 +23,7 @@ _build_infer
 *.exp.test*
 *.dot.test
 *.test.dot
-*.test.print_ullbc
 *.test.sil
-*.test.ullbc
 *.test.txt
 duplicates.txt
 *.ast.sh
@@ -197,7 +195,6 @@ rebar3.crashdump
 /infer/src/llvm/dune
 /infer/src/opensource/dune
 /infer/src/python/unit/dune
-/infer/src/rust/unit/dune
 /infer/src/sledge/dune
 /infer/src/unit/dune
 .merlin

@@ -368,7 +368,6 @@ module Liveness = struct
             | ExitScope _
             | LoopBackEdge _
             | LoopEntry _
-            | LoopExit _
             | Skip
             | TryEntry _
             | TryExit _ ) ->

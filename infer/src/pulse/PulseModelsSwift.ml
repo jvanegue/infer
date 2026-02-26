@@ -30,40 +30,7 @@ let function_ptr_call args () : unit DSL.model_monad =
   unknown args ()
 
 
-let closure_call orig_args () : unit DSL.model_monad =
-  let open DSL.Syntax in
-  match orig_args with
-  | proc_name_arg :: args -> (
-      let* arg_dynamic_type_data = get_dynamic_type ~ask_specialization:true proc_name_arg in
-      match arg_dynamic_type_data with
-      | Some {Formula.typ= {desc= Typ.Tstruct (SwiftClosure csig)}} -> (
-          let proc_name = Procname.Swift (SwiftProcname.mk_function csig) in
-          let args = List.mapi ~f:(fun i arg -> (Format.sprintf "arg_%d" i, arg)) args in
-          Logging.d_printfln "calling %a with args = %a" Procname.pp proc_name
-            (Pp.comma_seq (Pp.pair ~fst:String.pp ~snd:DSL.pp_aval))
-            args ;
-          let* res_opt = swift_call proc_name args |> is_unsat in
-          match res_opt with
-          | Some res ->
-              assign_ret res
-          | None -> (
-              (* if the call is unsat, it could be because of mismatched arguments, because the specialised
-                 closure doesn't capture any variables, and so the captured argument is not needed. In this
-                 case, we try the call again, by removing the last argument, which will be null. *)
-              let args = List.take args (List.length args - 1) in
-              Logging.d_printfln "calling %a again with args = %a" Procname.pp proc_name
-                (Pp.comma_seq (Pp.pair ~fst:String.pp ~snd:DSL.pp_aval))
-                args ;
-              let* res_opt = swift_call proc_name args |> is_unsat in
-              match res_opt with Some res -> assign_ret res | None -> unreachable ) )
-      | _ ->
-          Logging.d_printfln "no method name found for closure %a" DSL.pp_aval proc_name_arg ;
-          function_ptr_call args () )
-  | [] ->
-      function_ptr_call orig_args ()
-
-
-let dynamic_call arg orig_args () : unit DSL.model_monad =
+let dynamic_call arg args () : unit DSL.model_monad =
   let open DSL.Syntax in
   let dynamic_call_with_type name offset self args =
     let args = List.mapi ~f:(fun i arg -> (Format.sprintf "arg_%d" i, arg)) (args @ [self]) in
@@ -79,7 +46,7 @@ let dynamic_call arg orig_args () : unit DSL.model_monad =
         unknown args ()
   in
   let* offset_opt = as_constant_int arg in
-  match (offset_opt, List.rev orig_args) with
+  match (offset_opt, List.rev args) with
   | Some offset, self :: actuals -> (
       let args = List.rev actuals in
       let* arg_dynamic_type_data = get_dynamic_type ~ask_specialization:true self in
@@ -98,13 +65,7 @@ let dynamic_call arg orig_args () : unit DSL.model_monad =
                 DSL.pp_aval self ;
               unknown args () ) )
   | _, _ ->
-      closure_call (arg :: orig_args) ()
-
-
-let derived_enum_equals arg1 arg2 () : unit DSL.model_monad =
-  let open DSL.Syntax in
-  let* res = binop Binop.Eq arg1 arg2 in
-  assign_ret res
+      function_ptr_call args ()
 
 
 let builtins_matcher builtin args : unit -> unit DSL.model_monad =
@@ -114,24 +75,9 @@ let builtins_matcher builtin args : unit -> unit DSL.model_monad =
       unknown args
   | InitTuple ->
       unknown args
-  | DynamicCall -> (
-    match args with arg :: args -> dynamic_call arg args | [] -> unknown args )
-  | DerivedEnumEquals -> (
-      let arg1, arg2, args = ProcnameDispatcherBuiltins.expect_at_least_2_args args builtin_s in
-      (* we are modelling the case for simple enums where there are two args here, in the case
-         of complex enums there can be more args, but we are not modelling that yet. *)
-      match args with
-      | [] ->
-          derived_enum_equals arg1 arg2
-      | _ ->
-          unknown args )
-  | ObjcMsgSend ->
-      (* TODO T251645387 *)
-      unknown args
-  | ObjcMsgSendSuper2 ->
-      unknown args
-  | Memcpy ->
-      unknown args
+  | DynamicCall ->
+      let arg, args = ProcnameDispatcherBuiltins.expect_at_least_1_arg args builtin_s in
+      dynamic_call arg args
 
 
 let matchers : matcher list =
