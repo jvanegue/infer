@@ -112,14 +112,21 @@ end
 type transform_error = {loc: Location.t; msg: string Lazy.t}
 
 let pp_transform_error sourcefile fmt {loc; msg} =
-  F.fprintf fmt "Textual Transformation Error: %s: %a, %a" (Lazy.force msg) SourceFile.pp sourcefile
-    Location.pp loc
+  F.fprintf fmt "Textual: Transformation Error: %s in %a at %a" (Lazy.force msg) SourceFile.pp
+    sourcefile Location.pp loc
 
 
 exception TextualTransformError of transform_error list
 
+let seq_fallible_fold ?(errors = []) ~init ~f seq =
+  Seq.fold_left
+    (fun (acc, errors) x ->
+      try (f acc x, errors) with TextualTransformError errors' -> (acc, errors @ errors') )
+    (init, errors) seq
+
+
 module type NAME = sig
-  type t = {value: string; loc: Location.t [@compare.ignore]} [@@deriving compare, equal, hash]
+  type t = {value: string; loc: Location.t [@ignore]} [@@deriving compare, equal, hash]
 
   val of_string : ?loc:Location.t -> string -> t
 
@@ -138,18 +145,17 @@ module type NAME = sig
   module Set : Stdlib.Set.S with type elt = t
 end
 
+let replace_dot_with_2colons =
+  let pattern = String.Search_pattern.create ~case_sensitive:true "." in
+  fun str -> String.Search_pattern.replace_all pattern ~in_:str ~with_:"::"
+
+
 module Name : NAME = struct
   module T = struct
-    type t = {value: string; loc: Location.t [@compare.ignore] [@equal.ignore] [@hash.ignore]}
-    [@@deriving compare, equal, hash]
+    type t = {value: string; loc: Location.t [@ignore]} [@@deriving compare, equal, hash]
   end
 
   include T
-
-  let replace_dot_with_2colons =
-    let pattern = String.Search_pattern.create ~case_sensitive:true "." in
-    fun str -> String.Search_pattern.replace_all pattern ~in_:str ~with_:"::"
-
 
   let of_string ?loc str =
     let loc = Option.value loc ~default:Location.Unknown in
@@ -211,6 +217,8 @@ module BaseTypeName : sig
 
   val swift_type_name : t
 
+  val swift_any_type_name : t
+
   val is_hack_closure_generated_type : t -> bool
 end = struct
   include Name
@@ -230,6 +238,8 @@ end = struct
   let swift_type_name = {value= "__infer_swift_type"; loc= Location.Unknown}
 
   let is_hack_closure_generated_type {value} = String.is_prefix ~prefix:"Closure$" value
+
+  let swift_any_type_name = {value= "ptr_elt"; loc= Location.Unknown}
 end
 
 module TypeName : sig
@@ -238,6 +248,8 @@ module TypeName : sig
   val of_string : ?loc:Location.t -> string -> t
 
   val of_string_no_dot_escape : string -> t
+
+  val sil_string : t
 
   val pp : F.formatter -> t -> unit
 
@@ -262,6 +274,10 @@ module TypeName : sig
   val mk_swift_tuple_type_name : t list -> t
 
   val mk_swift_type_name : ?plain_name:string -> string -> t
+
+  val swift_mangled_name_of_type_name : t -> string option
+
+  val swift_plain_name_of_type_name : t -> string option
 
   val is_hack_closure_generated_type : t -> bool
 end = struct
@@ -291,6 +307,8 @@ end = struct
     {name= BaseTypeName.swift_type_name; args= fst_arg :: snd_arg}
 
 
+  let sil_string = of_string "String"
+
   let rec pp fmt {name; args} =
     if List.is_empty args then BaseTypeName.pp fmt name
     else F.fprintf fmt "%a<%a>" BaseTypeName.pp name (Pp.comma_seq pp) args
@@ -312,6 +330,25 @@ end = struct
   let hack_generics = from_basename BaseTypeName.hack_generics
 
   let is_hack_closure_generated_type {name} = BaseTypeName.is_hack_closure_generated_type name
+
+  let swift_mangled_name_of_type_name (type_name : t) =
+    if BaseTypeName.equal type_name.name BaseTypeName.swift_type_name then
+      match type_name.args with
+      | {name; args= []} :: _ ->
+          Some (BaseTypeName.to_string name)
+      | _ ->
+          None
+    else None
+
+
+  let swift_plain_name_of_type_name (type_name : t) =
+    if BaseTypeName.equal type_name.name BaseTypeName.swift_type_name then
+      match type_name.args with
+      | _ :: [{name; args= []}] ->
+          Some (BaseTypeName.to_string name)
+      | _ ->
+          None
+    else None
 end
 
 module QualifiedProcName = struct
@@ -394,13 +431,62 @@ let pp_qualified_fieldname fmt ({enclosing_class; name} : qualified_fieldname) =
 
 
 module VarName : sig
-  include NAME
+  type t [@@deriving compare, equal, hash]
+
+  val location : t -> Location.t
+
+  val of_string : ?loc:Location.t -> string -> t
+
+  val of_mangled : ?loc:Location.t -> Mangled.t -> t
+
+  val to_string : t -> string
+
+  val to_mangled : t -> Mangled.t
+
+  val pp : F.formatter -> t -> unit
+
+  module Hashtbl : Hashtbl.S with type key = t
+
+  module HashSet : HashSet.S with type elt = t
+
+  module Map : Stdlib.Map.S with type key = t
+
+  module Set : Stdlib.Set.S with type elt = t
 
   val is_hack_reified_generics_param : t -> bool
 end = struct
-  include Name
+  module T = struct
+    type t = {value: Mangled.t; loc: Location.t [@ignore]} [@@deriving compare, equal, hash]
+  end
 
-  let is_hack_reified_generics_param {value} = String.equal value "$0ReifiedGenerics"
+  include T
+
+  let location {loc} = loc
+
+  let of_string ?loc str =
+    let loc = Option.value loc ~default:Location.Unknown in
+    let value = replace_dot_with_2colons str |> Mangled.from_string in
+    {value; loc}
+
+
+  let of_mangled ?loc mangled =
+    let loc = Option.value loc ~default:Location.Unknown in
+    {value= mangled; loc}
+
+
+  let to_string {value} = Mangled.to_string value
+
+  let to_mangled {value} = value
+
+  let pp fmt name = Mangled.pp fmt name.value
+
+  module Hashtbl = Hashtbl.Make (T)
+  module HashSet = HashSet.Make (T)
+  module Map = Stdlib.Map.Make (T)
+  module Set = Stdlib.Set.Make (T)
+
+  let is_hack_reified_generics_param {value} =
+    Mangled.to_string value |> String.equal "$0ReifiedGenerics"
 end
 
 module NodeName : NAME = Name
@@ -536,6 +622,8 @@ module Typ = struct
 
   let is_annotated ~f {attributes} = List.exists ~f attributes
 
+  let is_pointer typ = match typ with Ptr _ -> true | _ -> false
+
   let pp_annotated fmt {typ; attributes} =
     List.iter attributes ~f:(fun attr -> F.fprintf fmt "%a " Attr.pp attr) ;
     pp fmt typ
@@ -543,9 +631,9 @@ module Typ = struct
 
   let mk_without_attributes typ = {typ; attributes= []}
 
-  let any_type_llvm = Struct (TypeName.of_string "ptr_elt")
+  let any_type_llvm = Struct TypeName.{name= BaseTypeName.swift_any_type_name; args= []}
 
-  let any_type_swift = Struct (TypeName.mk_swift_type_name "ptr_elt")
+  let any_type_swift = Struct (TypeName.mk_swift_type_name BaseTypeName.swift_any_type_name.value)
 end
 
 module Ident : sig
@@ -886,6 +974,10 @@ module ProcDecl = struct
       ~f:(List.exists ~f:(Typ.is_annotated ~f:Attr.is_variadic))
 
 
+  let unop_builtins = List.unzip unop_table |> snd
+
+  let binop_builtins = Map.Poly.keys binop_inverse_map
+
   let builtins =
     let builtins =
       [ builtin_allocate
@@ -899,12 +991,10 @@ module ProcDecl = struct
       ; builtin_get_lazy_class
       ; builtin_instanceof ]
     in
-    let unop_builtins = List.unzip unop_table |> snd in
-    let binop_builtins = Map.Poly.keys binop_inverse_map in
     builtins @ unop_builtins @ binop_builtins
 
 
-  let builtins_swift = [builtin_assert_fail; builtin_swift_alloc]
+  let builtins_swift = [builtin_assert_fail; builtin_swift_alloc] @ unop_builtins @ binop_builtins
 
   let is_builtin (proc : QualifiedProcName.t) lang =
     match lang with
@@ -981,6 +1071,8 @@ module rec Exp : sig
 
   val is_zero_exp : t -> bool
 
+  val is_one_exp : t -> bool
+
   val pp : F.formatter -> t -> unit
 end = struct
   (* TODO(T133190934) *)
@@ -1015,11 +1107,22 @@ end = struct
         ProcSig.Other {qualified_name}
 
 
-  let not exp = call_non_virtual (ProcDecl.of_unop Unop.LNot) [exp]
+  let lnot_proc = ProcDecl.of_unop Unop.LNot
+
+  let is_not = function
+    | Call {proc; args= [arg]; kind= NonVirtual} when QualifiedProcName.equal lnot_proc proc ->
+        Some arg
+    | _ ->
+        None
+
+
+  let not exp = match is_not exp with Some arg -> arg | _ -> call_non_virtual lnot_proc [exp]
 
   let cast typ exp = call_non_virtual ProcDecl.cast_name [Typ typ; exp]
 
   let is_zero_exp exp = match exp with Const (Int i) -> Z.equal i Z.zero | _ -> false
+
+  let is_one_exp exp = match exp with Const (Int i) -> Z.equal i Z.one | _ -> false
 
   let allocate_object typename =
     Call {proc= ProcDecl.allocate_object_name; args= [Typ (Typ.Struct typename)]; kind= NonVirtual}

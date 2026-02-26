@@ -8,7 +8,14 @@
 open! IStd
 module F = Format
 
-type builtin = NonDet | InitTuple | DynamicCall
+type builtin =
+  | DerivedEnumEquals
+  | DynamicCall
+  | InitTuple
+  | Memcpy
+  | NonDet
+  | ObjcMsgSend
+  | ObjcMsgSendSuper2
 [@@deriving compare, equal, yojson_of, sexp, hash, normalize, enumerate]
 
 type t =
@@ -30,3 +37,5 @@ val pp : PpDetailLevel.t -> F.formatter -> t -> unit
 val builtin_from_string : string -> builtin option
 
 val show_builtin : builtin -> string
+
+val to_string : t -> string

@@ -111,10 +111,10 @@ and simple_expression =
 and expression = {location: location; simple_expression: simple_expression}
 
 and qualifier =
-  | BitsGenerator of {pattern: expression; expression: expression}
+  | BitsGenerator of {pattern: expression; expression: expression; strict: bool}
   | Filter of expression
-  | Generator of {pattern: expression; expression: expression}
-  | MapGenerator of {pattern: association; expression: expression}
+  | Generator of {pattern: expression; expression: expression; strict: bool}
+  | MapGenerator of {pattern: association; expression: expression; strict: bool}
 
 and timeout = {time: expression; handler: body}
 

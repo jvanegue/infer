@@ -221,6 +221,12 @@ let%test_module "remove_if_terminator transformation" =
               if ((n1 && n2)) || n1 then ret 1 else jmp lab5
           #lab5:
               if ((n1 || n2)) && (n1) then ret 1 else ret 2
+        }
+
+        define if_lnot_test(b: int) : int {
+          #entry:
+              n1 : int = load &b
+              if  __sil_lnot(n1) then ret 1 else ret 2
         }|}
 
 
@@ -511,7 +517,23 @@ let%test_module "remove_if_terminator transformation" =
               prune __sil_lnot(n1) @[60:14]
               ret 2 @[60:14]
 
-        } @[61:9] |}]
+        } @[61:9]
+
+        define if_lnot_test(b: int) : int {
+          #entry: @[64:10]
+              n1:int = load &b @[65:14]
+              jmp if1, if0 @[66:14]
+
+          #if1: @[66:14]
+              prune __sil_lnot(n1) @[66:14]
+              ret 1 @[66:14]
+
+          #if0: @[66:14]
+              prune n1 @[66:14]
+              ret 2 @[66:14]
+
+        } @[67:9]
+        |}]
 
 
     let%expect_test _ =
@@ -603,13 +625,13 @@ let%test_module "remove_if_terminator transformation" =
           let module_, _ = module_ |> TextualTransform.remove_effects_in_subexprs C decls_env in
           print_endline "BEFORE let_propagation" ;
           show module_ ;
-          let module_ = TextualTransform.let_propagation module_ in
+          let module_ = TextualTransform.let_propagation_exn module_ in
           print_endline "AFTER let_propagation" ;
           show module_
       | Error _ ->
           () ;
           [%expect
-            {| Textual: Type Error: dummy.sil, line 9, column 14: ident n7 is assigned (with type int), but it has already been assigned at line 21 (with type int) |}]
+            {| Textual: Type Error: ident n7 is assigned (with type int), but it has already been assigned at line 21 (with type int) in dummy.sil at line 9, column 14 |}]
   end )
 
 
@@ -634,7 +656,7 @@ let%test_module "let_propagation transformation" =
 
 
     let%expect_test _ =
-      let module_ = parse_module_ok input_text |> TextualTransform.let_propagation in
+      let module_ = parse_module_ok input_text |> TextualTransform.let_propagation_exn in
       show module_ ;
       [%expect
         {|
@@ -677,7 +699,7 @@ let%test_module "out-of-ssa transformation" =
 
 
     let%expect_test _ =
-      let module_ = parse_module_ok input_text |> TextualTransform.out_of_ssa in
+      let module_ = parse_module_ok input_text |> TextualTransform.out_of_ssa_exn in
       show module_ ;
       [%expect
         {|
@@ -718,7 +740,7 @@ let%test_module "out-of-ssa transformation" =
     let%expect_test _ =
       let module_ =
         parse_module_ok python_inspired_text
-        |> TextualTransform.remove_if_exp_and_terminator |> TextualTransform.out_of_ssa
+        |> TextualTransform.remove_if_exp_and_terminator |> TextualTransform.out_of_ssa_exn
       in
       show module_ ;
       [%expect

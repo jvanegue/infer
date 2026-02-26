@@ -207,9 +207,7 @@ endif # BUILD_ERLANG_ANALYZERS
 ifneq ($(HACKC),no)
 DIRECT_TESTS += \
   hack_capture \
-  hack_impurity \
   hack_pulse \
-  hack_performance \
 
 BUILD_SYSTEMS_TESTS += \
   differential_hack \
@@ -218,11 +216,15 @@ BUILD_SYSTEMS_TESTS += \
 
 endif
 
+DIRECT_TESTS += \
+	rust_sil
+
 ifeq ($(BUILD_PYTHON_ANALYZERS),yes)
 ifneq ($(PYTHON),no)
 DIRECT_TESTS += \
   python_exec \
   python_pulse \
+  python_semdiff \
 
 endif
 ifneq ($(PYTHONNEXT),no)

@@ -7,15 +7,9 @@
 
 open! IStd
 module F = Format
+module Atom = PulseFormulaAtom
 module SatUnsat = PulseSatUnsat
-
-(* NOTE: using [Var] for [AbstractValue] here since this is how "abstract values" are interpreted,
-   in particular as far as arithmetic is concerned *)
-module Var :
-  module type of PulseAbstractValue
-    with type t = PulseAbstractValue.t
-     and module Set = PulseAbstractValue.Set
-     and module Map = PulseAbstractValue.Map
+module Var = PulseFormulaVar
 
 (* Pulse-infinite added *)
 
@@ -57,22 +51,7 @@ module Term : sig
     | IsInt of t
   [@@deriving compare, equal, yojson_of]
 
-  module Set : Stdlib.Set.S [@@deriving compare]
-end
-
-module Atom : sig
-  type t =
-    | LessEqual of Term.t * Term.t
-    | LessThan of Term.t * Term.t
-    | Equal of Term.t * Term.t
-    | NotEqual of Term.t * Term.t
-  [@@deriving compare, equal, yojson_of]
-
-  val equal : Term.t -> Term.t -> t
-
-  module Set : Stdlib.Set.S [@@deriving compare]
-
-  module Map : Stdlib.Map.S [@@deriving compare]
+  module Set : Stdlib.Set.S
 end
 
 module Formula : sig
@@ -244,6 +223,12 @@ val and_callee_formula :
   -> t
   -> callee:t
   -> ((Var.t * 'metadata) Var.Map.t * t * new_eqs) SatUnsat.t
+
+val implies_conditions_up_to :
+     subst:Var.t Var.Map.t
+  -> t
+  -> implies:t
+  -> (unit, [> `Contradiction of SatUnsat.unsat_info | `NotImplied of Atom.t]) result
 
 val fold_variables : (t, Var.t, 'acc) Container.fold
 (** note: each variable mentioned in the formula is visited at least once, possibly more *)

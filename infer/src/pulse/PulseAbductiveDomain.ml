@@ -7,6 +7,7 @@
 
 open! IStd
 module F = Format
+module Hashtbl = Stdlib.Hashtbl
 module L = Logging
 open PulseBasicInterface
 module BaseDomain = PulseBaseDomain
@@ -70,17 +71,21 @@ end
 (** represents the inferred pre-condition at each program point, biabduction style *)
 module PreDomain : BaseDomainSig_ = PostDomain
 
+type 'astate loop_invariant_under_inference = {header: Procdesc.Node.id; entry_astate: 'astate}
+[@@deriving compare, equal]
+
 (* see documentation in this file's .mli *)
 type t =
   { post: PostDomain.t
   ; pre: PreDomain.t
   ; path_condition: Formula.t
-  ; decompiler: (Decompiler.t[@yojson.opaque] [@equal.ignore] [@compare.ignore])
+  ; decompiler: (Decompiler.t[@yojson.opaque] [@ignore])
   ; topl: (PulseTopl.state[@yojson.opaque])
   ; need_dynamic_type_specialization: (AbstractValue.Set.t[@yojson.opaque])
   ; transitive_info: (TransitiveInfo.t[@yojson.opaque])
   ; recursive_calls: (PulseMutualRecursion.Set.t[@yojson.opaque])
   ; loop_header_info: (PulseLoopHeaderInfo.t[@yojson.opaque])
+  ; loop_invariant_under_inference: (t loop_invariant_under_inference option[@yojson.opaque])
   ; unknown_values: bool
   ; skipped_calls: SkippedCalls.t }
 [@@deriving compare, equal, yojson_of]
@@ -95,6 +100,7 @@ let pp_ ~is_summary f
      ; topl
      ; recursive_calls
      ; loop_header_info
+     ; loop_invariant_under_inference
      ; unknown_values
      ; skipped_calls }
      [@warning "+missing-record-field-pattern"] ) =
@@ -107,6 +113,11 @@ let pp_ ~is_summary f
     if is_summary then F.fprintf f "PRE=@[%a@]@;POST=@[%a@]" PreDomain.pp pre PostDomain.pp post
     else F.fprintf f "%a@;PRE=[%a]" PostDomain.pp post PreDomain.pp pre
   in
+  let pp_loop_invariant_under_inference fmt =
+    Option.iter loop_invariant_under_inference ~f:(fun {header} ->
+        F.fprintf fmt "     loop_invariant_under_inference= header node %a@;" Procdesc.Node.pp_id
+          header )
+  in
   F.fprintf f
       "@[<v>%a@;\
      %t@;\
@@ -114,13 +125,13 @@ let pp_ ~is_summary f
      transitive_info=%a@;\
      recursive_calls=%a@;\
      loop_header_info=%a@;\
-     unknown_values=%b@;\
+     %tunknown_values=%b@;\
      skipped_calls=%a@;\
      Topl=%a@]"
     Formula.pp path_condition pp_pre_post pp_decompiler AbstractValue.Set.pp
     need_dynamic_type_specialization TransitiveInfo.pp transitive_info PulseMutualRecursion.Set.pp
-    recursive_calls PulseLoopHeaderInfo.pp loop_header_info unknown_values SkippedCalls.pp
-    skipped_calls PulseTopl.pp_state topl
+    recursive_calls PulseLoopHeaderInfo.pp loop_header_info pp_loop_invariant_under_inference
+    unknown_values SkippedCalls.pp skipped_calls PulseTopl.pp_state topl
 
 let pp = pp_ ~is_summary:false
 
@@ -131,6 +142,11 @@ let set_path_condition path_condition astate = {astate with path_condition}
 let init_loop_header_info id ({path_condition; loop_header_info} as astate) =
   let loop_header_info = PulseLoopHeaderInfo.init_loop_info id loop_header_info in
   {astate with path_condition; loop_header_info}
+
+
+let remove_loop_header_info id ({loop_header_info} as astate) =
+  let loop_header_info = PulseLoopHeaderInfo.remove_loop_info id loop_header_info in
+  {astate with loop_header_info}
 
 
 let map_loop_header_formulas ({loop_header_info} as astate) ~f =
@@ -155,6 +171,18 @@ let record_call_resolution ~caller callsite_loc call_kind resolution astate =
   let callees = TransitiveInfo.Callees.record ~caller callsite_loc call_kind resolution callees in
   let transitive_info = {astate.transitive_info with callees} in
   {astate with transitive_info}
+
+
+let set_loop_invariant_under_inference header astate =
+  {astate with loop_invariant_under_inference= Some {entry_astate= astate; header}}
+
+
+let is_loop_invariant_under_inference id {loop_invariant_under_inference= opt} =
+  Option.exists opt ~f:(fun {header} -> Procdesc.Node.equal_id id header)
+
+
+let is_some_loop_invariant_under_inference {loop_invariant_under_inference= opt} =
+  Option.is_some opt
 
 
 let map_decompiler astate ~f = {astate with decompiler= f astate.decompiler}
@@ -220,6 +248,10 @@ module Internal = struct
             f access (CanonValue.canon_fst astate addr_hist) )
 
 
+      let map astate edges ~f =
+        BaseMemory.Edges.map edges ~f:(fun addr_hist -> f (CanonValue.canon_fst astate addr_hist))
+
+
       let fold_merge astate1 astate2 edges1_opt edges2_opt ~init ~f =
         let edges1 = Option.value edges1_opt ~default:BaseMemory.Edges.empty in
         let edges2 = Option.value edges2_opt ~default:BaseMemory.Edges.empty in
@@ -237,6 +269,8 @@ module Internal = struct
         in
         (!acc_ref, edges)
     end
+
+    let map_edges astate heap ~f = BaseMemory.mapi (fun _v edges -> Edges.map astate edges ~f) heap
 
     let fold_edges astate v heap ~init ~f =
       match BaseMemory.find_opt v heap with
@@ -1501,6 +1535,7 @@ let empty =
   ; transitive_info= TransitiveInfo.bottom
   ; recursive_calls= PulseMutualRecursion.Set.empty
   ; loop_header_info= PulseLoopHeaderInfo.empty
+  ; loop_invariant_under_inference= None
   ; unknown_values= false
   ; skipped_calls= SkippedCalls.empty }
 
@@ -1517,6 +1552,7 @@ let mk_join_state ~pre:(stack_pre, heap_pre, attrs_pre) ~post:(stack_post, heap_
   ; transitive_info
   ; recursive_calls
   ; loop_header_info
+  ; loop_invariant_under_inference= None
   ; unknown_values
   ; skipped_calls }
 
@@ -2531,6 +2567,24 @@ module Memory = struct
       ~init
       ~f:(fun acc access v_hist1_opt v_hist2_opt ->
         f acc (downcast_access access) (downcast_opt_fst v_hist1_opt) (downcast_opt_fst v_hist2_opt) )
+
+
+  let dealias_post astate =
+    SafeMemory.map_post_heap astate ~f:(fun heap ->
+        (* using [Hashtbl] to create a hash set *)
+        let range = Hashtbl.create (BaseMemory.cardinal heap) in
+        SafeBaseMemory.map_edges astate heap ~f:(fun (v, hist) ->
+            let v = downcast v in
+            let v =
+              if Hashtbl.mem range v then
+                (* no need to add the new value to [range] since it cannot appear elsewhere in the
+                   heap because it is fresh (hence cannot be another aliased value) *)
+                AbstractValue.mk_fresh_same_kind v
+              else (
+                Hashtbl.add range v () ;
+                v )
+            in
+            (CanonValue.downcast_needs_canon v, hist) ) )
 end
 
 let add_block_source v block astate =

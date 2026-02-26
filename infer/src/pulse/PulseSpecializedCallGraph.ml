@@ -17,13 +17,13 @@ let get_missed_captures ~get_summary entry_nodes =
   let from_execution (exec_state : ExecutionDomain.summary) =
     match exec_state with
     | ContinueProgram summary
-    | InfiniteLoop summary
     | ExceptionRaised summary
-    | ExitProgram summary
-    | AbortProgram {astate= summary}
-    | LatentAbortProgram {astate= summary}
-    | LatentInvalidAccess {astate= summary}
-    | LatentSpecializedTypeIssue {astate= summary} ->
+    | Stopped
+        ( ExitProgram summary
+        | AbortProgram {astate= summary}
+        | LatentAbortProgram {astate= summary}
+        | LatentInvalidAccess {astate= summary}
+        | LatentSpecializedTypeIssue {astate= summary} ) ->
         AbductiveDomain.Summary.get_transitive_info summary
   in
   let from_pre_post_list pre_post_list =

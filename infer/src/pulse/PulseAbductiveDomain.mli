@@ -55,6 +55,8 @@ module PostDomain : BaseDomainSig
     collapse into one. * *)
 module PreDomain : BaseDomainSig
 
+type 'astate loop_invariant_under_inference = {header: Procdesc.Node.id; entry_astate: 'astate}
+
 (** pre/post on a single program path *)
 type t = private
   { post: PostDomain.t  (** state at the current program point*)
@@ -71,6 +73,7 @@ type t = private
   ; transitive_info: TransitiveInfo.t  (** record transitive information inter-procedurally *)
   ; recursive_calls: PulseMutualRecursion.Set.t
   ; loop_header_info: PulseLoopHeaderInfo.t
+  ; loop_invariant_under_inference: t loop_invariant_under_inference option
   ; unknown_values: bool  (** did we generate at least one unknown abstract value on this path? *)
   ; skipped_calls: SkippedCalls.t  (** metadata: procedure calls for which no summary was found *)
   }
@@ -181,6 +184,11 @@ module Memory : sig
     -> 'acc * PulseBaseMemory.value
   (** merge the stacks of the given astates into one and set the stack of the first abstract state
       to be the merged stack*)
+
+  val dealias_post : t -> t
+  (** Replace aliased locations (equal destinations of any two pointers) with fresh values. Which
+      value gets replaced is arbitrary. For example, schematically, this turns [x|->z * y |->z] into
+      [x|->z * y |->z'], with [z'] a fresh abstract value. This is used for abstraction. *)
 end
 
 (** Safe version of {!PulseBaseAddressAttributes} *)
@@ -392,9 +400,17 @@ val set_path_condition : Formula.t -> t -> t
 
 val init_loop_header_info : Procdesc.Node.id -> t -> t
 
+val remove_loop_header_info : Procdesc.Node.id -> t -> t
+
 val map_loop_header_formulas : t -> f:(Formula.t -> Formula.t) -> t
 
 val push_loop_header_info : Procdesc.Node.id -> Timestamp.t -> t -> t
+
+val is_loop_invariant_under_inference : Procdesc.Node.id -> t -> bool
+
+val set_loop_invariant_under_inference : Procdesc.Node.id -> t -> t
+
+val is_some_loop_invariant_under_inference : t -> bool
 
 val record_transitive_access : Location.t -> t -> t
 

@@ -9,4 +9,4 @@ open! IStd
 
 val capture : sources:string list -> In_channel.t -> unit
 
-val capture_llair : string -> Llair.program -> unit
+val capture_llair : source_file:string -> llair_file:string -> unit
