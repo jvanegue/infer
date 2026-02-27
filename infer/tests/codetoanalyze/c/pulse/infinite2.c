@@ -328,6 +328,54 @@ void nonterm_inductive_array_bad() {
   }
 }
 
+/* Found in Libxml: no bug */
+unsigned FP_xmlXPathSFComputeHash_ok(const char *name) {
+  unsigned hashValue = 5381;
+  const char *ptr;
+
+  for (ptr = name; *ptr; ptr++)
+    hashValue = hashValue * 33 + *ptr;
+
+  return(hashValue);
+}
+
+
+/* FP case present in LibXML */
+struct _xmlLink
+{
+  struct _xmlLink *next;
+  struct _xmlLink *prev;
+  void *data;
+};
+
+typedef struct _xmlLink *xmlLinkPtr;
+
+struct _xmlList
+{
+  xmlLinkPtr sentinel;
+  void (*linkDeallocator)(xmlLinkPtr );
+  int (*linkCompare)(const void *, const void*);
+};
+
+typedef struct _xmlList xmlList;
+
+/* Found in Libxml : no bug */
+int xmlListSize(xmlList *l)
+{
+  xmlLinkPtr lk;
+  int count=0;
+
+  if (l == 0)
+    return(-1);
+  /* TODO: keep a counter in xmlList instead */
+  for(lk = l->sentinel->next; lk != l->sentinel; lk = lk->next, count++);
+  return count;
+}
+
+
+
+
+
 
 
 
